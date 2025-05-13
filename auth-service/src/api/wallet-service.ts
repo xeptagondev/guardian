@@ -8,7 +8,11 @@ import { IVault } from '../vaults/index.js';
  */
 @Singleton
 export class WalletService extends NatsService {
+    constructor() {
+        super();
 
+        this.configureAvailableEvents(Object.values(WalletEvents))
+    }
     /**
      * Message queue name
      */

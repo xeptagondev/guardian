@@ -39,6 +39,8 @@ export class MeecoAuthService extends NatsService {
         super();
         this.migrateMeecoIssuerWhitelist().then();
         this.meecoService = new MeecoService(MeecoConfig, MeecoPassphrase);
+
+        this.configureAvailableEvents(Object.values(AuthEvents))
     }
 
     async migrateMeecoIssuerWhitelist(): Promise<void> {

@@ -4,7 +4,7 @@ import { PolicyEngine } from './helpers/policy-engine.js';
 import { WebSocketsService } from './api/service/websockets.js';
 import { Users } from './helpers/users.js';
 import { Wallet } from './helpers/wallet.js';
-import { GenerateTLSOptionsNats, LargePayloadContainer, MessageBrokerChannel, PinoLogger } from '@guardian/common';
+import { GenerateTLSOptionsNats, LargePayloadContainer, MessageBrokerChannel, OldSecretManager, PinoLogger, SecretManager } from '@guardian/common';
 import { TaskManager } from './helpers/task-manager.js';
 import { AppModule } from './app.module.js';
 import { NestFactory } from '@nestjs/core';
@@ -69,6 +69,29 @@ Promise.all([
 
         await new MeecoAuth().setConnection(cn).init();
         await new MeecoAuth().registerListeners();
+        await new OldSecretManager().setConnection(cn).init();
+
+        const secretManager = SecretManager.New();
+        new Users().configureSecretManager(secretManager);
+
+        let { SERVICE_JWT_PUBLIC_KEY } = await secretManager.getSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+        if (!SERVICE_JWT_PUBLIC_KEY) {
+            SERVICE_JWT_PUBLIC_KEY = process.env.SERVICE_JWT_PUBLIC_KEY;
+            if (SERVICE_JWT_PUBLIC_KEY.length < 8) {
+                throw new Error(`${process.env.SERVICE_CHANNEL} service jwt keys not configured`);
+            }
+            await secretManager.setSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_PUBLIC_KEY});
+        }
+
+        let { SERVICE_JWT_SECRET_KEY } = await secretManager.getSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+
+        if (!SERVICE_JWT_SECRET_KEY) {
+            SERVICE_JWT_SECRET_KEY = process.env.SERVICE_JWT_SECRET_KEY;
+            if (SERVICE_JWT_SECRET_KEY.length < 8) {
+                throw new Error(`${process.env.SERVICE_CHANNEL} service jwt keys not configured`);
+            }
+            await secretManager.setSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_SECRET_KEY});
+        }
 
         const server = app.getHttpServer();
         const wsService = new WebSocketsService(logger);

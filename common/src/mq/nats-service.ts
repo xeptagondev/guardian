@@ -2,6 +2,9 @@ import { NatsConnection, headers, Subscription } from 'nats';
 import { GenerateUUIDv4 } from '@guardian/interfaces';
 import { ZipCodec } from './zip-codec.js';
 import { IMessageResponse } from '../models/index.js';
+import { ForbiddenException } from '@nestjs/common';
+import { JwtValidator } from '../security/jwt-validator.js';
+import { SecretManagerBase } from '../secret-manager';
 
 type CallbackFunction = (body: any, error?: string, code?: number) => void;
 
@@ -43,9 +46,33 @@ export abstract class NatsService {
      */
     protected responseCallbacksMap: Map<string, CallbackFunction> = new Map();
 
+    /**
+     * availableEvents
+    */
+    private availableEvents: string[] | null = null;
+
+    /**
+     * secretManager
+    */
+    public secretManager: SecretManagerBase | null = null;
+
     constructor() {
         this.codec = ZipCodec();
         // this.codec = JSONCodec();
+    }
+
+    /**
+     * configure available events
+    */
+    public configureAvailableEvents(availableEvents: string[]): void {
+        this.availableEvents = availableEvents;
+    }
+
+    /**
+     * set secret manager
+    */
+    public configureSecretManager(secretManager: any): void {
+        this.secretManager = secretManager;
     }
 
     /**
@@ -59,13 +86,20 @@ export abstract class NatsService {
             callback: async (error, msg) => {
                 if (!error) {
                     const messageId = msg.headers.get('messageId');
+                    const serviceToken = msg.headers.get('serviceToken');
                     const fn = this.responseCallbacksMap.get(messageId);
                     if (fn) {
                         const message = (await this.codec.decode(msg.data)) as IMessageResponse<any>;
                         if (!message) {
                             fn(null)
                         } else {
+                            try {
+                            await JwtValidator.verify(serviceToken, this.secretManager);
                             fn(message.body, message.error, message.code);
+                            } catch (e: any) {
+                                console.error('Reply validation failed:', e.message);
+                                fn(null, e.message, 401);
+                            }
                         }
                         this.responseCallbacksMap.delete(messageId)
                     }
@@ -92,7 +126,10 @@ export abstract class NatsService {
      * @param replySubject
      */
     public async publish(subject: string, data?: unknown, replySubject?: string): Promise<void> {
-        const opts: any = {};
+        const token = await JwtValidator.sign(this.secretManager);
+        const opts: any = {
+            serviceToken: token
+        };
 
         if (replySubject) {
             opts.reply = replySubject;
@@ -107,12 +144,18 @@ export abstract class NatsService {
      * @param cb
      */
     public subscribe(subject: string, cb: Function): Subscription {
+        if (this.availableEvents && !this.availableEvents.includes(subject)) {
+            throw new Error(`NATS ACL: subscription to "${subject}" not allowed`);
+        }
         const sub = this.connection.subscribe(subject);
 
         const fn = async (_sub: Subscription) => {
             for await (const m of _sub) {
                 try {
-                    cb(await this.codec.decode(m.data));
+                    const serviceToken = m.headers.get('serviceToken');
+                    await JwtValidator.verify(serviceToken, this.secretManager);
+                    const data = await this.codec.decode(m.data);
+                    cb(data);
                 } catch (e) {
                     console.error(e.message);
                 }
@@ -146,6 +189,8 @@ export abstract class NatsService {
             } else {
                 resolve(null);
             }
+            const token = await JwtValidator.sign(this.secretManager);
+            head.append('serviceToken', token);
 
             this.connection.publish(subject, await this.codec.encode(data), {
                 reply: this.replySubject,
@@ -195,6 +240,9 @@ export abstract class NatsService {
                 }
             })
 
+            const token = await JwtValidator.sign(this.secretManager);
+            head.append('serviceToken', token);
+
             this.connection.publish(subject, await this.codec.encode(data), {
                 reply: this.replySubject,
                 headers: head
@@ -214,12 +262,29 @@ export abstract class NatsService {
             callback: async (error, msg) => {
                 try {
                     const messageId = msg.headers?.get('messageId');
+                    const serviceToken = msg.headers?.get('serviceToken');
                     // const isRaw = msg.headers.get('rawMessage');
                     const head = headers();
                     if (messageId) {
                         head.append('messageId', messageId);
                     }
                     // head.append('rawMessage', isRaw);
+                    if (this.availableEvents && !this.availableEvents.includes(subject)) {
+                        if (!noRespond) {
+                            return msg.respond(await this.codec.encode({
+                                body: null,
+                                error: 'Forbidden',
+                                code: 403,
+                                name: 'Forbidden',
+                                message: 'Forbidden'
+                              }), { headers: head });
+                        } else {
+                            throw new ForbiddenException();
+                        }
+                    }
+
+                    await JwtValidator.verify(serviceToken, this.secretManager);
+
                     if (!noRespond) {
                         msg.respond(await this.codec.encode(await cb(await this.codec.decode(msg.data), msg.headers)), { headers: head });
                     } else {

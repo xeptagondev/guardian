@@ -1,6 +1,6 @@
 import { AccountService } from './api/account-service.js';
 import { WalletService } from './api/wallet-service.js';
-import { ApplicationState, COMMON_CONNECTION_CONFIG, DatabaseServer, GenerateTLSOptionsNats, LargePayloadContainer, MessageBrokerChannel, Migration, mongoForLoggingInitialization, OldSecretManager, PinoLogger, pinoLoggerInitialization, SecretManager, ValidateConfiguration, } from '@guardian/common';
+import { ApplicationState, COMMON_CONNECTION_CONFIG, DatabaseServer, GenerateTLSOptionsNats, LargePayloadContainer, MessageBrokerChannel, Migration, mongoForLoggingInitialization, OldSecretManager, PinoLogger, pinoLoggerInitialization, SecretManager, ValidateConfiguration, JwtValidator } from '@guardian/common';
 import { ApplicationStates } from '@guardian/interfaces';
 import { MikroORM } from '@mikro-orm/core';
 import { MongoDriver } from '@mikro-orm/mongodb';
@@ -80,6 +80,8 @@ Promise.all([
         }
 
         await new OldSecretManager().setConnection(cn).init();
+        const secretManager = SecretManager.New();
+        new AccountService().configureSecretManager(secretManager);
 
         validator.setValidator(async () => {
             if (!ApplicationEnvironment.demoMode) {
@@ -92,7 +94,8 @@ Promise.all([
                     return false;
                 }
             }
-            const secretManager = SecretManager.New();
+
+
             let {JWT_PRIVATE_KEY, JWT_PUBLIC_KEY} = await secretManager.getSecrets('secretkey/auth');
             if (!JWT_PRIVATE_KEY || !JWT_PUBLIC_KEY) {
                 JWT_PRIVATE_KEY = process.env.JWT_PRIVATE_KEY;
@@ -102,6 +105,28 @@ Promise.all([
                 }
                 await secretManager.setSecrets('secretkey/auth', {JWT_PRIVATE_KEY, JWT_PUBLIC_KEY});
             }
+
+
+            let { SERVICE_JWT_PUBLIC_KEY } = await secretManager.getSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+
+            if (!SERVICE_JWT_PUBLIC_KEY) {
+                SERVICE_JWT_PUBLIC_KEY = process.env.SERVICE_JWT_PUBLIC_KEY;
+                if (SERVICE_JWT_PUBLIC_KEY.length < 8) {
+                    return false;
+                }
+                await secretManager.setSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_PUBLIC_KEY});
+            }
+
+            let { SERVICE_JWT_SECRET_KEY } = await secretManager.getSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+
+            if (!SERVICE_JWT_SECRET_KEY) {
+                SERVICE_JWT_SECRET_KEY = process.env.SERVICE_JWT_SECRET_KEY;
+                if (SERVICE_JWT_SECRET_KEY.length < 8) {
+                    return false;
+                }
+                await secretManager.setSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_SECRET_KEY});
+            }
+
             return true;
         })
 
