@@ -21,6 +21,7 @@ import {
     RecordImportExport,
     RunFunctionAsync,
     Schema as SchemaCollection,
+    SecretManagerBase,
     Singleton,
     TopicConfig,
     Users,
@@ -95,6 +96,7 @@ export class PolicyEngineService {
     constructor(cn: NatsConnection, logger: PinoLogger) {
         this.channel = new PolicyEngineChannel();
         this.channel.setConnection(cn)
+        this.channel.configureAvailableEvents(Object.values(PolicyEvents));
         this.policyEngine = new PolicyEngine(logger)
     }
 
@@ -180,6 +182,13 @@ export class PolicyEngineService {
      */
     public async init(): Promise<void> {
         await this.channel.init();
+    }
+
+    /**
+     * ConfigureSecretManager
+     */
+    public async configureSecretManager(secretManager: SecretManagerBase): Promise<void> {
+        await this.channel.configureSecretManager(secretManager);
     }
 
     /**

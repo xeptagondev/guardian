@@ -69,6 +69,13 @@ export abstract class NatsService {
     }
 
     /**
+     * add additional available events
+    */
+    public addAdditionalAvailableEvents(availableEvents: string[]): void {
+        this.availableEvents = [...this.availableEvents, ...availableEvents];
+    }
+
+    /**
      * set secret manager
     */
     public configureSecretManager(secretManager: any): void {

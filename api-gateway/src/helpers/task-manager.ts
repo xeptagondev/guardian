@@ -1,5 +1,5 @@
 import { WebSocketsService } from '../api/service/websockets.js';
-import { MessageResponse, NatsService } from '@guardian/common';
+import { MessageResponse, NatsService, SecretManagerBase } from '@guardian/common';
 import {
     GenerateUUIDv4,
     IStatus,
@@ -94,6 +94,10 @@ export class TaskManager {
         this.wsService = wsService;
         this.channel = new TaskManagerChannel();
         this.channel.setConnection(cn);
+        this.channel.configureAvailableEvents([
+            MessageAPI.UPDATE_TASK_STATUS,
+            MessageAPI.PUBLISH_TASK,
+        ]);
         this.channel.subscribe(MessageAPI.UPDATE_TASK_STATUS, async (msg) => {
             const { taskId, statuses, result, error } = msg;
             if (taskId) {
@@ -120,6 +124,14 @@ export class TaskManager {
                 );
             }
         });
+    }
+
+    /**
+     * Configure secret manager
+     * @param secretManager
+     */
+    public configureSecretManager(secretManager: SecretManagerBase) {
+        this.channel.configureSecretManager(secretManager);
     }
 
     /**

@@ -138,6 +138,8 @@ export class Worker extends NatsService {
         this.minPriority = parseInt(process.env.MIN_PRIORITY, 10);
         this.maxPriority = parseInt(process.env.MAX_PRIORITY, 10);
         this.taskTimeout = parseInt(process.env.TASK_TIMEOUT, 10) * 1000; // env in seconds
+
+        this.configureAvailableEvents(Object.values(WorkerEvents))
     }
 
     /**

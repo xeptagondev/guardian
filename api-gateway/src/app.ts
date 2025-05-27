@@ -72,7 +72,13 @@ Promise.all([
         await new OldSecretManager().setConnection(cn).init();
 
         const secretManager = SecretManager.New();
-        new Users().configureSecretManager(secretManager);
+        new Guardians().configureSecretManager(secretManager);
+        new IPFS().configureSecretManager(secretManager);
+        new PolicyEngine().configureSecretManager(secretManager);
+        new Wallet().configureSecretManager(secretManager);
+        new AISuggestions().configureSecretManager(secretManager);
+        new ProjectService().configureSecretManager(secretManager);
+        new MeecoAuth().configureSecretManager(secretManager);
 
         let { SERVICE_JWT_PUBLIC_KEY } = await secretManager.getSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`);
         if (!SERVICE_JWT_PUBLIC_KEY) {
@@ -97,7 +103,10 @@ Promise.all([
         const wsService = new WebSocketsService(logger);
         wsService.setConnection(server, cn).init();
 
+        wsService.configureSecretManager(secretManager);
+
         new TaskManager().setDependencies(wsService, cn);
+        new TaskManager().configureSecretManager(secretManager);
 
         const document = SwaggerModule.createDocument(app, SwaggerConfig, {
             extraModels: Object.values(extraModels).filter((constructor: new (...args: any[]) => any) => {

@@ -7,6 +7,7 @@ import {
 } from '@guardian/common';
 import { NotifyAPI, OrderDirection } from '@guardian/interfaces';
 import { Controller, Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import {
     Client,
     ClientProxy,
@@ -15,6 +16,7 @@ import {
     Transport,
 } from '@nestjs/microservices';
 import process from 'process';
+import { NatsAuthGuard } from '../guards/nats-auth.guard';
 
 @Controller()
 export class NotificationService {
@@ -507,5 +509,11 @@ export class NotificationService {
  */
 @Module({
     controllers: [NotificationService],
+    providers: [
+        {
+          provide: APP_GUARD,
+          useFactory: () => new NatsAuthGuard(Object.values(NotifyAPI)),
+        },
+      ],
 })
 export class NotificationModule {}

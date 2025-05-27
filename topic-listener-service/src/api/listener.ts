@@ -40,6 +40,8 @@ export class Listener {
     }
 
     public init() {
+        this.channel.addAdditionalAvailableEvents([`${ListenerEvents.CONFIRM_LISTENER_MESSAGE}.${this.name}`]);
+
         this._subscription = this.channel
             .subscribe(`${ListenerEvents.CONFIRM_LISTENER_MESSAGE}.${this.name}`, async (index: number) => {
                 await this.confirmData(index);

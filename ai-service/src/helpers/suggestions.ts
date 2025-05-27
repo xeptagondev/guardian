@@ -1,12 +1,16 @@
 import { NatsService, Singleton } from '@guardian/common';
-import { GenerateUUIDv4 } from '@guardian/interfaces';
+import { GenerateUUIDv4, MessageAPI } from '@guardian/interfaces';
 
 /**
  * AISuggestionService service
  */
 @Singleton
 export class AISuggestionService extends NatsService {
+    constructor() {
+        super();
 
+        this.configureAvailableEvents([MessageAPI.SUGGESTIONS_GET_ANSWER, MessageAPI.VECTOR_REBUILD])
+    }
     /**
      * Message queue name
      */

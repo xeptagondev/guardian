@@ -1,4 +1,4 @@
-import { ApplicationState, COMMON_CONNECTION_CONFIG, DatabaseServer, GenerateTLSOptionsNats, LargePayloadContainer, Log, MessageBrokerChannel, Migration, mongoForLoggingInitialization } from '@guardian/common';
+import { ApplicationState, COMMON_CONNECTION_CONFIG, DatabaseServer, GenerateTLSOptionsNats, LargePayloadContainer, Log, MessageBrokerChannel, Migration, mongoForLoggingInitialization, OldSecretManager, SecretManager } from '@guardian/common';
 import { ApplicationStates } from '@guardian/interfaces';
 import { NestFactory } from '@nestjs/core';
 import { Deserializer, IncomingRequest, MicroserviceOptions, Serializer, Transport } from '@nestjs/microservices';
@@ -48,6 +48,29 @@ Promise.all([
     DatabaseServer.connectBD(db);
 
     app.listen();
+
+    await new OldSecretManager().setConnection(mqConnection).init();
+
+    const secretManager = SecretManager.New();
+
+    let { SERVICE_JWT_PUBLIC_KEY } = await secretManager.getSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+    if (!SERVICE_JWT_PUBLIC_KEY) {
+        SERVICE_JWT_PUBLIC_KEY = process.env.SERVICE_JWT_PUBLIC_KEY;
+        if (SERVICE_JWT_PUBLIC_KEY.length < 8) {
+            throw new Error(`${process.env.SERVICE_CHANNEL} service jwt keys not configured`);
+        }
+        await secretManager.setSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_PUBLIC_KEY});
+    }
+
+    let { SERVICE_JWT_SECRET_KEY } = await secretManager.getSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+
+    if (!SERVICE_JWT_SECRET_KEY) {
+        SERVICE_JWT_SECRET_KEY = process.env.SERVICE_JWT_SECRET_KEY;
+        if (SERVICE_JWT_SECRET_KEY.length < 8) {
+            throw new Error(`${process.env.SERVICE_CHANNEL} service jwt keys not configured`);
+        }
+        await secretManager.setSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_SECRET_KEY});
+    }
 
     const state = new ApplicationState();
     await state.setServiceName('LOGGER_SERVICE').setConnection(mqConnection).init();

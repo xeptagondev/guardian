@@ -11,6 +11,8 @@ import { Controller, Module } from '@nestjs/common';
 import { ClientsModule, Ctx, MessagePattern, NatsContext, Payload, Transport } from '@nestjs/microservices';
 import process from 'process';
 import { FilterObject } from '@mikro-orm/core';
+import { APP_GUARD } from '@nestjs/core';
+import { NatsAuthGuard } from '../guards/nats-auth.guard';
 
 @Controller()
 export class LoggerService {
@@ -134,6 +136,12 @@ export class LoggerService {
     ],
     controllers: [
         LoggerService
-    ]
+    ],
+    providers: [
+        {
+          provide: APP_GUARD,
+          useFactory: () => new NatsAuthGuard(Object.values(MessageAPI)),
+        },
+      ],
 })
 export class LoggerModule {}

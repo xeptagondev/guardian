@@ -1,7 +1,7 @@
 import WebSocket, { WebSocketServer } from 'ws'
 import { IncomingMessage, Server } from 'http';
 import { ExternalProviders, GenerateUUIDv4, MessageAPI, NotifyAPI, UserRole } from '@guardian/interfaces';
-import { generateNumberFromString, IAuthUser, MeecoApprovedSubmission, MessageResponse, NatsService, NotificationHelper, PinoLogger, Singleton } from '@guardian/common';
+import { generateNumberFromString, IAuthUser, MeecoApprovedSubmission, MessageResponse, NatsService, NotificationHelper, PinoLogger, SecretManagerBase, Singleton } from '@guardian/common';
 import { NatsConnection } from 'nats';
 import { MeecoAuth, Users } from '#helpers';
 import { Mutex } from 'async-mutex';
@@ -97,6 +97,22 @@ export class WebSocketsService {
         this.registerConnection();
         this.registerMessageHandler();
         await this.channel.init();
+        this.channel.configureAvailableEvents([
+            MessageAPI.SEND_STATUS,
+            'update-record',
+            'update-request',
+            'update-restore',
+            'update-test',
+            'update-block',
+            'block-error',
+            'update-user-info',
+            'update-user-balance',
+            MessageAPI.UPDATE_STATUS,
+        ]);
+    }
+
+    public configureSecretManager(secretManager: SecretManagerBase) {
+        this.channel.configureSecretManager(secretManager);
     }
 
     /**

@@ -19,6 +19,7 @@ export class ListenerService extends NatsService {
     ) {
         super();
         this.map = new Map<string, Listener>();
+        this.configureAvailableEvents(Object.values(ListenerEvents));
     }
 
     /**

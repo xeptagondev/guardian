@@ -82,6 +82,8 @@ Promise.all([
         await new OldSecretManager().setConnection(cn).init();
         const secretManager = SecretManager.New();
         new AccountService().configureSecretManager(secretManager);
+        new WalletService().configureSecretManager(secretManager);
+        new RoleService().configureSecretManager(secretManager);
 
         validator.setValidator(async () => {
             if (!ApplicationEnvironment.demoMode) {

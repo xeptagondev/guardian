@@ -145,6 +145,8 @@ export class TopicListener {
                 return;
             }
 
+            TopicListener.channel.addAdditionalAvailableEvents([`${ListenerEvents.GET_LISTENER_MESSAGE}.${this._listenerId}`]);
+
             this._subscription = TopicListener.channel
                 .subscribe(`${ListenerEvents.GET_LISTENER_MESSAGE}.${this._listenerId}`, async (msg: any) => {
                     await this.sendData(msg);

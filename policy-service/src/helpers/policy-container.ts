@@ -155,6 +155,8 @@ export class PolicyContainer extends NatsService {
         this.stopServiceScript = process.env.RUN_SERVICE_SCRIPT;
         this.instanceId = GenerateUUIDv4();
         this._policiInfoArrays = new Map();
+
+        this.configureAvailableEvents(Object.values(PolicyEvents));
     }
 
     /**

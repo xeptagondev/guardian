@@ -87,6 +87,26 @@ Promise.all([
             }
         }
 
+        let { SERVICE_JWT_PUBLIC_KEY } = await secretManager.getSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+
+        if (!SERVICE_JWT_PUBLIC_KEY) {
+            SERVICE_JWT_PUBLIC_KEY = process.env.SERVICE_JWT_PUBLIC_KEY;
+            if (SERVICE_JWT_PUBLIC_KEY.length < 8) {
+                return false;
+            }
+            await secretManager.setSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_PUBLIC_KEY});
+        }
+
+        let { SERVICE_JWT_SECRET_KEY } = await secretManager.getSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+
+        if (!SERVICE_JWT_SECRET_KEY) {
+            SERVICE_JWT_SECRET_KEY = process.env.SERVICE_JWT_SECRET_KEY;
+            if (SERVICE_JWT_SECRET_KEY.length < 8) {
+                return false;
+            }
+            await secretManager.setSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_SECRET_KEY});
+        }
+
         HederaSDKHelper.setTransactionLogSender(async (data) => {
             await channel.publish(`guardians.transaction-log-event`, data);
         });
@@ -94,6 +114,8 @@ Promise.all([
         await state.updateState(ApplicationStates.INITIALIZING);
         const w = new Worker(IPFS_STORAGE_KEY, IPFS_STORAGE_PROOF, IPFS_STORAGE_API_KEY, channelName, logger);
         await w.setConnection(cn).init();
+        w.configureSecretManager(secretManager);
+        new Users().configureSecretManager(secretManager);
 
         return true;
     });

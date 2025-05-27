@@ -105,6 +105,8 @@ export enum PolicyAccessCode {
 export class PolicyEngine extends NatsService {
     constructor(private readonly logger: PinoLogger) {
         super();
+
+        this.configureAvailableEvents([PolicyEvents.POLICY_READY])
     }
 
     /**

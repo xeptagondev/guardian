@@ -4,7 +4,7 @@ import { PinoLogger, RunFunctionAsync, Workers } from '../helpers/index.js';
 import { MessageResponse } from '../models/index.js';
 import { Singleton } from '../decorators/singleton.js';
 import { NatsService } from '../mq/index.js';
-import { SecretManager } from '../secret-manager/index.js';
+import { SecretManager, SecretManagerBase } from '../secret-manager/index.js';
 
 /**
  * Transaction log level
@@ -299,8 +299,9 @@ export class TransactionLogger extends NatsService {
      * Init logger
      * @param channel
      */
-    public async initialization(channel: any, lvl: TransactionLogLvl): Promise<void> {
+    public async initialization(channel: any, lvl: TransactionLogLvl, secretManager: SecretManagerBase): Promise<void> {
         await super.setConnection(channel).init();
+        super.configureSecretManager(secretManager);
         this.setLogLevel(lvl);
         this.setLogFunction((types: string[], date: string, duration: string, name: string, attr?: string[], userId?: string | null) => {
             const log = new PinoLogger();

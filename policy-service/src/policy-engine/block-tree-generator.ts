@@ -16,6 +16,11 @@ import { PolicyActionsService } from './actions-service.js';
  */
 @Singleton
 export class BlockTreeGenerator extends NatsService {
+    constructor() {
+        super();
+
+        this.configureAvailableEvents(Object.values(PolicyEvents));
+    }
     /**
      * Policy models map
      * @private

@@ -119,20 +119,28 @@ Promise.all([
 
     DatabaseServer.connectGridFS();
 
-    new PolicyServiceChannelsContainer().setConnection(cn);
-    new TransactionLogger().initialization(
-        cn,
-        process.env.TRANSACTION_LOG_LEVEL as TransactionLogLvl
-    );
-    new GuardiansService().setConnection(cn).init();
-    const channel = new MessageBrokerChannel(cn, 'guardians');
-
-    const logger: PinoLogger = pinoLoggerInitialization(loggerMongo);
-
-    const state = new ApplicationState();
-    await state.setServiceName('GUARDIAN_SERVICE').setConnection(cn).init();
     const secretManager = SecretManager.New();
     await new OldSecretManager().setConnection(cn).init();
+
+    let { SERVICE_JWT_PUBLIC_KEY } = await secretManager.getSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+    if (!SERVICE_JWT_PUBLIC_KEY) {
+        SERVICE_JWT_PUBLIC_KEY = process.env.SERVICE_JWT_PUBLIC_KEY;
+        if (SERVICE_JWT_PUBLIC_KEY.length < 8) {
+            throw new Error(`${process.env.SERVICE_CHANNEL} service jwt keys not configured`);
+        }
+        await secretManager.setSecrets(`publickey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_PUBLIC_KEY});
+    }
+
+    let { SERVICE_JWT_SECRET_KEY } = await secretManager.getSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`);
+
+    if (!SERVICE_JWT_SECRET_KEY) {
+        SERVICE_JWT_SECRET_KEY = process.env.SERVICE_JWT_SECRET_KEY;
+        if (SERVICE_JWT_SECRET_KEY.length < 8) {
+            throw new Error(`${process.env.SERVICE_CHANNEL} service jwt keys not configured`);
+        }
+        await secretManager.setSecrets(`secretkey/jwt-service/${process.env.SERVICE_CHANNEL}`, {SERVICE_JWT_SECRET_KEY});
+    }
+
     let { OPERATOR_ID, OPERATOR_KEY } = await secretManager.getSecrets('keys/operator');
     if (!OPERATOR_ID) {
         OPERATOR_ID = process.env.OPERATOR_ID;
@@ -143,6 +151,21 @@ Promise.all([
         })
 
     }
+
+    new PolicyServiceChannelsContainer().setConnection(cn);
+    new TransactionLogger().initialization(
+        cn,
+        process.env.TRANSACTION_LOG_LEVEL as TransactionLogLvl,
+        secretManager,
+    );
+    new GuardiansService().setConnection(cn).init();
+    const channel = new MessageBrokerChannel(cn, 'guardians');
+
+    const logger: PinoLogger = pinoLoggerInitialization(loggerMongo);
+
+    const state = new ApplicationState();
+    await state.setServiceName('GUARDIAN_SERVICE').setConnection(cn).init();
+
     await new AISuggestionsService().setConnection(cn).init();
 
     await state.updateState(ApplicationStates.STARTED);
@@ -295,6 +318,8 @@ Promise.all([
             await policyService.init();
             policyService.registerListeners(logger);
             await policyEngine.init();
+            policyEngine.configureSecretManager(secretManager);
+            policyService.configureSecretManager(secretManager);
         } catch (error) {
             console.error(error.message);
             process.exit(0);

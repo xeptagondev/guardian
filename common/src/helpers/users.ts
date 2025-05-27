@@ -32,6 +32,16 @@ export class Users extends NatsService {
     }
 
     /**
+     * Configure secret manager
+     * @param secretManager
+     */
+    public configureSecretManager(secretManager: any): void {
+        super.configureSecretManager(secretManager);
+
+        this.wallet.configureSecretManager(secretManager);
+    }
+
+    /**
      * Get user
      * @param target
      * @param userId
