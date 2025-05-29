@@ -93,4 +93,12 @@
                    (blur)="onSave()">
         </td>
     </tr>
+    <tr class="propRow" [attr.collapse]="propHidden.main">
+        <td class="propRowCol"></td>
+        <td class="propRowCell cellName">Serial Numbers</td>
+        <td class="propRowCell">
+            <input class="prop-input" [(ngModel)]="properties.serialNumbers" [readonly]="readonly"
+                   (blur)="onSave()">
+        </td>
+    </tr>
 </table>
