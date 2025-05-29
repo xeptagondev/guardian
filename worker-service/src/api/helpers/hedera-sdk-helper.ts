@@ -721,18 +721,22 @@ export class HederaSDKHelper {
         wipeKey: string | PrivateKey,
         amount: number,
         userId: string | null,
+        serialNumbers?: number[],
         transactionMemo?: string
     ): Promise<boolean> {
         const client = this.client;
 
         const _wipeKey = HederaUtils.parsPrivateKey(wipeKey, true, 'Wipe Key');
-        const transaction = new TokenWipeTransaction()
+        let transaction = new TokenWipeTransaction()
             .setAccountId(targetId)
             .setTokenId(tokenId)
             .setAmount(amount)
             .setTransactionMemo(transactionMemo)
             .setMaxTransactionFee(MAX_FEE)
             .freezeWith(client);
+        if (serialNumbers) {
+            transaction = transaction.setSerials(serialNumbers);
+        }
         const signTx = await transaction.sign(_wipeKey);
         const receipt = await this.executeAndReceipt(client, signTx, 'TokenWipeTransaction', userId);
         const transactionStatus = receipt.status;

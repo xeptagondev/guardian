@@ -7,7 +7,7 @@ import { Token as TokenCollection, VcHelper, VcDocumentDefinition as VcDocument,
 import { PolicyUtils } from '../helpers/utils.js';
 import { AnyBlockType, IPolicyDocument, IPolicyEventState } from '../policy-engine.interface.js';
 import { IPolicyEvent, PolicyInputEventType, PolicyOutputEventType } from '../interfaces/index.js';
-import { ChildrenType, ControlType } from '../interfaces/block-about.js';
+import { ChildrenType, ControlType, PropertyType } from '../interfaces/block-about.js';
 import { PolicyUser, UserCredentials } from '../policy-user.js';
 import { ExternalDocuments, ExternalEvent, ExternalEventType } from '../interfaces/external-event.js';
 import { MintService } from '../mint/mint-service.js';
@@ -34,7 +34,16 @@ import { MintService } from '../mint/mint-service.js';
             PolicyOutputEventType.RefreshEvent,
             PolicyOutputEventType.ErrorEvent
         ],
-        defaultEvent: true
+        defaultEvent: true,
+        properties: [
+            {
+                name: 'serialNumbers',
+                label: 'Comma-separated serial numbers',
+                title: 'Comma-separated serial numbers',
+                type: PropertyType.Input,
+                default: undefined,
+            },
+        ],
     },
     variables: [
         { path: 'options.tokenId', alias: 'token', type: 'Token' }
@@ -53,7 +62,8 @@ export class RetirementBlock {
         didDocument: HederaDidDocument,
         token: any,
         data: any,
-        ref: AnyBlockType
+        ref: AnyBlockType,
+        serialNumbers?: number[]
     ): Promise<VcDocument> {
         const vcHelper = new VcHelper();
         const policySchema = await PolicyUtils.loadSchemaByType(ref, SchemaEntity.WIPE_TOKEN);
@@ -62,7 +72,8 @@ export class RetirementBlock {
             ...SchemaHelper.getContext(policySchema),
             date: (new Date()).toISOString(),
             tokenId: token.tokenId,
-            amount: amount.toString()
+            amount: amount.toString(),
+            serialNumbers: serialNumbers?.join(',')
         }
         const uuid = await ref.components.generateUUID();
         const wipeVC = await vcHelper.createVerifiableCredential(
@@ -120,7 +131,8 @@ export class RetirementBlock {
         const uuid: string = await ref.components.generateUUID();
         const amount = PolicyUtils.aggregate(ref.options.rule, documents);
         const [tokenValue, tokenAmount] = PolicyUtils.tokenAmount(token, amount);
-        const wipeVC = await this.createWipeVC(policyOwnerDidDocument, token, tokenAmount, ref);
+        const serialNumbers = ref.options.serialNumbers?.split(',').map(Number);
+        const wipeVC = await this.createWipeVC(policyOwnerDidDocument, token, tokenAmount, ref, serialNumbers);
         const vcs = [].concat(documents, wipeVC);
         const vp = await this.createVP(policyOwnerDidDocument, uuid, vcs);
 
@@ -167,7 +179,7 @@ export class RetirementBlock {
         vpDocument.relationships = relationships;
         await ref.databaseServer.saveVP(vpDocument);
 
-        await MintService.wipe(ref, token, tokenValue, policyOwnerHederaCred, targetAccountId, vpMessageResult.getId(), userId);
+        await MintService.wipe(ref, token, tokenValue, policyOwnerHederaCred, targetAccountId, vpMessageResult.getId(), userId, serialNumbers);
 
         return [vpDocument, tokenValue];
     }

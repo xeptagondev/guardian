@@ -716,6 +716,7 @@ export class Worker extends NatsService {
                         hederaAccountKey,
                         targetAccount,
                         tokenValue,
+                        serialNumbers,
                         dryRun,
                         token,
                         wipeKey,
@@ -726,7 +727,7 @@ export class Worker extends NatsService {
                     if (token.tokenType === 'non-fungible') {
                         result.error = 'unsupported operation';
                     } else {
-                        await client.wipe(token.tokenId, targetAccount, wipeKey, tokenValue, userId, uuid);
+                        await client.wipe(token.tokenId, targetAccount, wipeKey, tokenValue, userId, uuid, serialNumbers);
                         result.data = {}
                     }
 
