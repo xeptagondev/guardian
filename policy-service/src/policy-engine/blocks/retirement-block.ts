@@ -35,18 +35,10 @@ import { MintService } from '../mint/mint-service.js';
             PolicyOutputEventType.ErrorEvent
         ],
         defaultEvent: true,
-        properties: [
-            {
-                name: 'serialNumbers',
-                label: 'Comma-separated serial numbers',
-                title: 'Comma-separated serial numbers',
-                type: PropertyType.Input,
-                default: undefined,
-            },
-        ],
     },
     variables: [
-        { path: 'options.tokenId', alias: 'token', type: 'Token' }
+        { path: 'options.tokenId', alias: 'token', type: 'Token' },
+        { path: 'options.serialNumbers', alias: 'serialNumbers', type: 'String' },
     ]
 })
 export class RetirementBlock {
