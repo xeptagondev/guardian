@@ -48,6 +48,7 @@ export class RetirementBlock {
      * @param token
      * @param data
      * @param ref
+     * @param serialNumbers
      * @private
      */
     private async createWipeVC(

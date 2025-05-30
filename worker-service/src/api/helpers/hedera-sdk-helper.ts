@@ -710,6 +710,7 @@ export class HederaSDKHelper {
      * @param {string | PrivateKey} wipeKey - Token Wipe key
      * @param {number} amount - amount
      * @param userId
+     * @param {number[]} [serialNumbers] - serial numbers
      * @param {string} [transactionMemo] - Memo field
      *
      * @returns {boolean} - Status
