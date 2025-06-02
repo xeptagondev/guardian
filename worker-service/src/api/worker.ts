@@ -724,13 +724,8 @@ export class Worker extends NatsService {
                         payload: { userId }
                     } = task.data;
                     client = new HederaSDKHelper(hederaAccountId, hederaAccountKey, dryRun, networkOptions);
-                    if (token.tokenType === 'non-fungible') {
-                        result.error = 'unsupported operation';
-                    } else {
-                        await client.wipe(token.tokenId, targetAccount, wipeKey, tokenValue, userId, uuid, serialNumbers);
-                        result.data = {}
-                    }
-
+                    await client.wipe(token.tokenId, targetAccount, wipeKey, tokenValue, userId, uuid, serialNumbers);
+                    result.data = {}
                     break;
                 }
 
