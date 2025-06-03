@@ -734,10 +734,9 @@ export class HederaSDKHelper {
             .setAmount(amount)
             .setTransactionMemo(transactionMemo)
             .setMaxTransactionFee(MAX_FEE)
-            .freezeWith(client);
-        if (serialNumbers) {
-            transaction = transaction.setSerials(serialNumbers);
-        }
+            .freezeWith(client)
+            .setSerials(serialNumbers);
+        console.log('_Wipe Key', _wipeKey, 'serialNumbers', serialNumbers, 'wipeKey', wipeKey, 'userId', userId, 'tokenId', tokenId, 'targetId', targetId, 'amount', amount );
         const signTx = await transaction.sign(_wipeKey);
         const receipt = await this.executeAndReceipt(client, signTx, 'TokenWipeTransaction', userId);
         const transactionStatus = receipt.status;
