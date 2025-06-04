@@ -278,7 +278,10 @@ export async function permissionAPI(logger: PinoLogger): Promise<void> {
             try {
                 const { did, keyType, entityId } = msg;
 
+                
                 const entity = KEY_TYPE_KEY_ENTITY.get(keyType);
+
+                logger.info(`KEY_TYPE_KEY_ENTITY: ${KEY_TYPE_KEY_ENTITY}`, ['GUARDIAN_SERVICE'], userId);
 
                 logger.info(`Checking key permissions for DID: ${msg.did} KeyType: ${msg.keyType} EntityId: ${msg.entityId} UserId: ${userId} entity: ${entity}`, ['GUARDIAN_SERVICE'], userId);
 
