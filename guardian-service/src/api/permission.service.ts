@@ -304,13 +304,16 @@ export async function permissionAPI(logger: PinoLogger): Promise<void> {
                                 tokenId: entityId
                             }) > 0
                         );
-                    case KeyEntity.TOPIC:
+                    case KeyEntity.TOPIC: {
+                        const count = await dataBaseServer.count(Topic, {
+                            owner: did,
+                            topicId: entityId
+                        })
+                        logger.info(`Topic count DID: ${did} topicId: ${entityId} count: ${count}`, ['GUARDIAN_SERVICE'], userId);  
                         return new MessageResponse(
-                            await dataBaseServer.count(Topic, {
-                                owner: did,
-                                topicId: entityId
-                            }) > 0
+                            count > 0
                         );
+                    }
                     default:
                         return new MessageResponse(false);
                 }
