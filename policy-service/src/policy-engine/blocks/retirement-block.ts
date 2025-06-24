@@ -256,6 +256,8 @@ export class RetirementBlock {
         }
         const topicId = topicIds[0];
 
+        ref.log(`Topic Id: ${topicId} ref.options.accountId: ${ref.options.accountId} docs: ${JSON.stringify(docs[0].owner)} user: ${event?.user?.userId}`);
+
         let targetAccountId: string;
         if (ref.options.accountId) {
             targetAccountId = firstAccounts;
