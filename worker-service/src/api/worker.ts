@@ -725,7 +725,7 @@ export class Worker extends NatsService {
                     } = task.data;
                     client = new HederaSDKHelper(hederaAccountId, hederaAccountKey, dryRun, networkOptions);
                     this.logger.info(`Wipe Key: ${wipeKey}, serialNumbers: ${serialNumbers}, wipeKey: ${wipeKey}, userId: ${userId}, tokenId: ${token.tokenId}, targetId: ${targetAccount}, amount: ${tokenValue}`, [this.workerID, 'WORKER'], userId);
-                    await client.wipe(token.tokenId, targetAccount, wipeKey, tokenValue, userId, serialNumbers, uuid);
+                    await client.wipe(token.tokenId, targetAccount, wipeKey, tokenValue, userId, token.tokenType, serialNumbers, uuid);
                     result.data = {}
                     break;
                 }

@@ -710,6 +710,7 @@ export class HederaSDKHelper {
      * @param {string | PrivateKey} wipeKey - Token Wipe key
      * @param {number} amount - amount
      * @param userId
+     * @param {string} tokenType - token type
      * @param {number[]} [serialNumbers] - serial numbers
      * @param {string} [transactionMemo] - Memo field
      *
@@ -722,6 +723,7 @@ export class HederaSDKHelper {
         wipeKey: string | PrivateKey,
         amount: number,
         userId: string | null,
+        tokenType: string,
         serialNumbers?: number[],
         transactionMemo?: string
     ): Promise<boolean> {
@@ -731,12 +733,18 @@ export class HederaSDKHelper {
         let transaction = new TokenWipeTransaction()
             .setAccountId(targetId)
             .setTokenId(tokenId)
-            .setAmount(amount)
             .setTransactionMemo(transactionMemo)
             .setMaxTransactionFee(MAX_FEE)
-            .freezeWith(client)
-            .setSerials(serialNumbers);
-        console.log('_Wipe Key', _wipeKey, 'serialNumbers', serialNumbers, 'wipeKey', wipeKey, 'userId', userId, 'tokenId', tokenId, 'targetId', targetId, 'amount', amount );
+            .freezeWith(client);
+
+        if (tokenType === 'non-fungible') {
+            transaction = transaction.setSerials(serialNumbers);
+        }
+        else {
+            transaction = transaction.setAmount(amount);
+        }
+
+        console.log('_Wipe Key', _wipeKey, 'serialNumbers', serialNumbers, 'wipeKey', wipeKey, 'userId', userId, 'tokenId', tokenId, 'targetId', targetId, 'amount', amount, 'tokenType', tokenType);
         const signTx = await transaction.sign(_wipeKey);
         const receipt = await this.executeAndReceipt(client, signTx, 'TokenWipeTransaction', userId);
         const transactionStatus = receipt.status;
