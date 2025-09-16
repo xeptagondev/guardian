@@ -304,7 +304,7 @@ export class PolicyRequestsComponent implements OnInit {
             width: '640px',
             styleClass: 'guardian-dialog',
             data: {
-                header: 'Delete key',
+                header: 'Approve request',
                 text: `Are you sure want to approve request?`,
                 buttons: [{
                     name: 'Close',
@@ -335,7 +335,7 @@ export class PolicyRequestsComponent implements OnInit {
             width: '640px',
             styleClass: 'guardian-dialog',
             data: {
-                header: 'Delete key',
+                header: 'Reject request',
                 text: `Are you sure want to reject request?`,
                 buttons: [{
                     name: 'Close',
@@ -366,7 +366,7 @@ export class PolicyRequestsComponent implements OnInit {
             width: '640px',
             styleClass: 'guardian-dialog',
             data: {
-                header: 'Delete key',
+                header: 'Cancel request',
                 text: `Are you sure want to cancel request?`,
                 buttons: [{
                     name: 'Close',
@@ -432,7 +432,7 @@ export class PolicyRequestsComponent implements OnInit {
 
     getOperationName(row: any) {
         if (row.type === PolicyActionType.REQUEST) {
-            switch (row.document?.type) {
+            switch (row.documentType) {
                 case 'sign-and-send-role':
                     return 'Select role';
                 case 'generate-did':
@@ -450,25 +450,34 @@ export class PolicyRequestsComponent implements OnInit {
                 case 'dissociate-token':
                     return 'Dissociate token';
                 default:
-                    return row.document?.type;
+                    return row.documentType;
             }
         }
         return '';
     }
 
-    public openVCDocument(document: any) {
-        const dialogRef = this.dialogService.open(VCViewerDialog, {
-            showHeader: false,
-            width: '1000px',
-            styleClass: 'guardian-dialog',
-            data: {
-                row: null,
-                document: document,
-                title: 'Document',
-                type: 'JSON',
-            }
-        });
-        dialogRef.onClose.subscribe(async (result) => {
-        });
+    public openVCDocument(row: any) {
+        this.externalPoliciesService
+            .getRequestDocument({ startMessageId: row.startMessageId })
+            .subscribe((response) => {
+                const dialogRef = this.dialogService.open(VCViewerDialog, {
+                    showHeader: false,
+                    width: '1000px',
+                    styleClass: 'guardian-dialog',
+                    data: {
+                        row: null,
+                        document: response?.body?.document || response?.body,
+                        title: 'Document',
+                        type: 'JSON',
+                    }
+                });
+                dialogRef.onClose.subscribe(async (result) => {
+                });
+                setTimeout(() => {
+                    this.loading = false;
+                }, 500);
+            }, (e) => {
+                this.loading = false;
+            });
     }
 }

@@ -32,7 +32,8 @@ import {
     Wallet,
     Workers,
     entities,
-    JwtServicesValidator
+    JwtServicesValidator,
+    NotificationEvents
 } from '@guardian/common';
 import { ApplicationStates, PolicyEvents, PolicyStatus, WorkerTaskType } from '@guardian/interfaces';
 import { AccountId, PrivateKey, TopicId } from '@hashgraph/sdk';
@@ -124,27 +125,7 @@ Promise.all([
     const secretManager = SecretManager.New();
     const jwtServiceName = 'GUARDIAN_SERVICE';
 
-    JwtServicesValidator.setSecretManager(secretManager)
-    JwtServicesValidator.setServiceName(jwtServiceName)
-
-    let { SERVICE_JWT_PUBLIC_KEY } = await secretManager.getSecrets(`publickey/jwt-service/${jwtServiceName}`);
-    if (!SERVICE_JWT_PUBLIC_KEY) {
-        SERVICE_JWT_PUBLIC_KEY = process.env.SERVICE_JWT_PUBLIC_KEY;
-        if (SERVICE_JWT_PUBLIC_KEY?.length < 8) {
-            throw new Error(`${jwtServiceName} service jwt keys not configured`);
-        }
-        await secretManager.setSecrets(`publickey/jwt-service/${jwtServiceName}`, {SERVICE_JWT_PUBLIC_KEY});
-    }
-
-    let { SERVICE_JWT_SECRET_KEY } = await secretManager.getSecrets(`secretkey/jwt-service/${jwtServiceName}`);
-
-    if (!SERVICE_JWT_SECRET_KEY) {
-        SERVICE_JWT_SECRET_KEY = process.env.SERVICE_JWT_SECRET_KEY;
-        if (SERVICE_JWT_SECRET_KEY?.length < 8) {
-            throw new Error(`${jwtServiceName} service jwt keys not configured`);
-        }
-        await secretManager.setSecrets(`secretkey/jwt-service/${jwtServiceName}`, {SERVICE_JWT_SECRET_KEY});
-    }
+    JwtServicesValidator.setServiceName(jwtServiceName);
 
     let { OPERATOR_ID, OPERATOR_KEY } = await secretManager.getSecrets('keys/operator');
     if (!OPERATOR_ID) {
@@ -166,6 +147,7 @@ Promise.all([
     const channel = new MessageBrokerChannel(cn, 'guardians');
 
     const logger: PinoLogger = pinoLoggerInitialization(loggerMongo);
+    NotificationEvents.init(new GuardiansService());
 
     const state = new ApplicationState();
     await state.setServiceName('GUARDIAN_SERVICE').setConnection(cn).init();
@@ -310,7 +292,7 @@ Promise.all([
                     topicMemo: TopicMemo.getGlobalTopicMemo(),
                     payload: { userId: null }
                 }
-            }, 10);
+            }, { priority: 10 });
         }
 
         state.updateState(ApplicationStates.INITIALIZING);

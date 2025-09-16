@@ -1,4 +1,4 @@
-# 💻 Schema Differentiation using UI
+# Schema Differentiation using UI
 
 We can compare two schemas by following some steps as follows:
 
@@ -6,7 +6,7 @@ We can compare two schemas by following some steps as follows:
 
 We click on **Compare** button present in Schemas tab as shown below:
 
-<figure><img src="../../../../.gitbook/assets/image (10) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
+<figure><img src="../../../../.gitbook/assets/image (10) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1) (1).png" alt=""><figcaption></figcaption></figure>
 
 ## 2. Comparison View
 

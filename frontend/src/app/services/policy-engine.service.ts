@@ -264,6 +264,14 @@ export class PolicyEngineService {
         return this.http.post<any>(`${this.url}/${policyId}/dry-run/restart`, null);
     }
 
+    public runBlock(policyId: string, config: any): Observable<any> {
+        return this.http.post<any>(`${this.url}/${policyId}/dry-run/block`, config);
+    }
+
+    public getBlockHistory(policyId: string, tag: string): Observable<any> {
+        return this.http.get<any>(`${this.url}/${policyId}/dry-run/block/${tag}/history`);
+    }
+
     public createSavepoint(policyId: string): Observable<any> {
         return this.http.post<any>(`${this.url}/${policyId}/savepoint/create`, null);
     }
@@ -475,5 +483,14 @@ export class PolicyEngineService {
             params = params.set('pageSize', String(pageSize));
         }
         return params;
+    }
+
+    public sendData(url: string, data: any, token: string): Observable<any> {
+        return this.http.post<string>(url, data, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+        });
     }
 }

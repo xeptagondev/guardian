@@ -4,7 +4,6 @@ import { ISchema, UserPermissions } from '@guardian/interfaces';
 import { forkJoin, of, Subscription } from 'rxjs';
 import { PolicyEngineService } from 'src/app/services/policy-engine.service';
 import { ProfileService } from 'src/app/services/profile.service';
-import { DialogService } from 'primeng/dynamicdialog';
 import { UntypedFormControl, UntypedFormGroup } from '@angular/forms';
 import { SchemaService } from 'src/app/services/schema.service';
 
@@ -35,6 +34,7 @@ export class ProjectDataExportComponent implements OnInit {
     public columns: IColumn[];
     public allPolicies: any[] = [];
     public currentPolicy: any = null;
+    public policyId: string;
 
     public filtersCount: number = 0;
     public showMoreFilters = false;
@@ -45,9 +45,6 @@ export class ProjectDataExportComponent implements OnInit {
     
     public selectedRows: any[] = [];
 
-    public selectedSchemas!: ISchema[];
-    public selectedOwners!: string[];
-    public selectedTokens!: string[];
     public selectedAll: boolean = false;
 
     private subscription = new Subscription();
@@ -149,11 +146,11 @@ export class ProjectDataExportComponent implements OnInit {
 
     private loadFiltersData() {
         forkJoin([
-            this.user.SCHEMAS_RULE_READ
-                ? this.schemaService.getSchemasByPolicy(this.currentPolicy.id)
+            this.user.SCHEMAS_SCHEMA_READ
+                ? this.schemaService.getSchemasByPolicy(this.policyId)
                 : of([]),
-            this.policyEngineService.getPolicyDocumentOwners(this.currentPolicy.id),
-            this.policyEngineService.getPolicyTokens(this.currentPolicy.id),
+            this.policyEngineService.getPolicyDocumentOwners(this.policyId),
+            this.policyEngineService.getPolicyTokens(this.policyId),
         ]).subscribe((value) => {
             const schemas: ISchema[] = value[0] || [];
             const owners: string[] = value[1] || [];
@@ -192,9 +189,9 @@ export class ProjectDataExportComponent implements OnInit {
             });
             this.allPolicies.forEach((p: any) => p.label = p.name);
 
-            const policy = this.route.snapshot.params['id'];
-            if(policy) {
-                this.currentPolicy = this.allPolicies.find((p) => p.id === policy);
+            this.policyId = this.route.snapshot.params['id'];
+            if(this.policyId) {
+                this.currentPolicy = this.allPolicies.find((p) => p.id === this.policyId);
             }
             
             if(!this.currentPolicy) {
@@ -250,7 +247,7 @@ export class ProjectDataExportComponent implements OnInit {
             options.owners = [this.user.did];
         }
 
-        if (!this.user.SCHEMAS_RULE_READ) {
+        if (!this.user.SCHEMAS_SCHEMA_READ) {
             const control = this.filtersForm.get('schemas');
             if (control) {
                 control.disable();
@@ -260,7 +257,7 @@ export class ProjectDataExportComponent implements OnInit {
         this.loading = true;
         this.policyEngineService
             .searchDocuments(
-                this.currentPolicy.id,
+                this.policyId,
                 options,
                 this.pageIndex,
                 this.pageSize
@@ -321,10 +318,22 @@ export class ProjectDataExportComponent implements OnInit {
         this.showMoreFilters = !this.showMoreFilters;
     }
 
+    get selectedSchemas() {
+        return this.filtersForm?.get('schemas')?.value;
+    }
+
+    get selectedOwners() {
+        return this.filtersForm?.get('owners')?.value;
+    }
+
+    get selectedTokens() {
+        return this.filtersForm?.get('tokens')?.value;
+    }
+
     private setFiltersFromQueryParams(params: any) {
-        this.selectedSchemas = params.schemas ? this.schemas.filter(schema => params.schemas.split(',')?.some((iri: string) => schema.iri === iri)) || [] : [];
-        this.selectedOwners = params.owners ? params.owners.split(',') : [];
-        this.selectedTokens = params.tokens ? params.tokens.split(',') : [];
+        this.filtersForm?.get('schemas')?.setValue(params.schemas ? this.schemas.filter(schema => params.schemas.split(',')?.some((iri: string) => schema.iri === iri)) || [] : []);
+        this.filtersForm?.get('owners')?.setValue(params.owners ? params.owners.split(',') : []);
+        this.filtersForm?.get('tokens')?.setValue(params.tokens ? params.tokens.split(',') : []);
         this.filtersForm?.get('related')?.setValue(params.related ? params.related.split(',') : []);
 
         this.filtersForm.patchValue({

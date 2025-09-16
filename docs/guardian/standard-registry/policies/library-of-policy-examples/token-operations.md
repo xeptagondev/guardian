@@ -1,4 +1,4 @@
-# 🪙 Token Operations
+# Token Operations
 
 For a demo example of following steps, here is the policy timestamp: **1675164687.693099003**
 
@@ -60,7 +60,7 @@ Switch to the ‘**Tokens**’ tab and create a new token
 
 3.3 Configure the formula which would define the amount of tokens minted
 
-![Adding formula for tokens](<../../../../.gitbook/assets/8 (3) (1) (1).png>)
+![Adding formula for tokens](<../../../../.gitbook/assets/8 (3) (1) (1) (1).png>)
 
 3.4 Configure the account where tokens will be sent to upon minting
 
