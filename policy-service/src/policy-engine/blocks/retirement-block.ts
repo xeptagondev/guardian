@@ -238,8 +238,6 @@ export class RetirementBlock {
         }
         
         const token = await this.getToken(ref, docs);
-
-        const token = await this.getToken(ref, docs);
         if (!token) {
             throw new BlockActionError('Bad token id', ref.blockType, ref.uuid);
         }
