@@ -1,5 +1,5 @@
 import { WebSocketsService } from '../api/service/websockets.js';
-import { MessageResponse, NatsService } from '@guardian/common';
+import { INotificationInfo, MessageResponse, NatsService } from '@guardian/common';
 import {
     GenerateUUIDv4,
     IStatus,
@@ -86,6 +86,32 @@ export class TaskManager {
     ]);
 
     /**
+     * NotifyTask lock
+     */
+    private readonly notifyTaskLock: Set<string> = new Set();
+
+    /**
+     * Notify task progress
+     * @param taskId
+     */
+    private notifyTaskProgress(taskId: string, canSkip: boolean = false) {
+        if (canSkip) {
+            // Skip task if already in queue
+            if (this.notifyTaskLock.has(taskId)) {
+                return;
+            }
+            // Send websocket with rate limit
+            setTimeout(() => {
+                this.notifyTaskLock.delete(taskId);
+                this.wsService.notifyTaskProgress(this.tasks[taskId]);
+            }, 1 * 1000);
+            this.notifyTaskLock.add(taskId);
+        } else {
+            this.wsService.notifyTaskProgress(this.tasks[taskId]);
+        }
+    }
+
+    /**
      * Set task manager dependecies
      * @param wsService
      * @param cn
@@ -99,7 +125,7 @@ export class TaskManager {
             const { taskId, statuses, result, error, info } = msg;
             if (taskId) {
                 if (info) {
-                    this.addInfo(taskId, info, statuses);
+                    this.addInfo(taskId, info);
                 } else if (statuses) {
                     this.addStatuses(taskId, statuses);
                 }
@@ -161,7 +187,7 @@ export class TaskManager {
         const task = this.tasks[taskId];
         if (task) {
             task.statuses.push(...statuses);
-            this.wsService.notifyTaskProgress(task);
+            this.notifyTaskProgress(taskId);
         } else if (skipIfNotFound) {
             return;
         } else {
@@ -177,17 +203,19 @@ export class TaskManager {
      */
     public addInfo(
         taskId: string,
-        info: any,
-        statuses: IStatus[],
+        info: INotificationInfo,
         skipIfNotFound: boolean = true
     ): void {
         const task = this.tasks[taskId];
         if (task) {
-            task.info = info;
-            if (statuses) {
-                task.statuses.push(...statuses);
+            if (
+                !task.info ||
+                !task.info.timestamp ||
+                info.timestamp >= task.info.timestamp
+            ) {
+                task.info = info;
             }
-            this.wsService.notifyTaskProgress(task);
+            this.notifyTaskProgress(taskId, true);
         } else if (skipIfNotFound) {
             return;
         } else {
@@ -225,7 +253,7 @@ export class TaskManager {
         const task = this.tasks[taskId];
         if (task) {
             task.result = result;
-            this.wsService.notifyTaskProgress(task);
+            this.notifyTaskProgress(taskId);
         } else if (skipIfNotFound) {
             return;
         } else {
@@ -247,7 +275,7 @@ export class TaskManager {
         const task = this.tasks[taskId];
         if (task) {
             task.error = error;
-            this.wsService.notifyTaskProgress(task);
+            this.notifyTaskProgress(taskId);
         } else if (skipIfNotFound) {
             return;
         } else {

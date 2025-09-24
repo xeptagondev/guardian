@@ -111,144 +111,142 @@
 
 ## Part III: Schema Design and Development
 
-### Chapter 8: Schema Architecture and Design Principles
+### Chapter 8: Schema Architecture and Foundations
 
-**Purpose**: Establish best practices for schema design in Guardian.
+**Purpose**: Understand Guardian's schema system fundamentals and architectural patterns.
 
 **Key Topics**:
 
-* Schema tree architecture and hierarchy design
-* Sub-schema patterns and reusability
-* Field types and their appropriate usage
-* Validation rules and constraints
-* User experience considerations in schema design
-* Performance implications of schema structure
-* Versioning and evolution strategies
+* Guardian's JSON Schema integration with Verifiable Credentials
+* Two-part schema architecture (Project Description + Calculations)
+* Field type selection and parameter mapping principles
+* Schema template structure and organization
+* Basic conditional logic and field visibility
+* Performance considerations for schema design
 
-**VM0033 Context**: Design principles applied to VM0033's complex data requirements, including multiple calculation methods and conditional logic.
+**VM0033 Context**: VM0033's two-part architecture demonstrating how complex wetland restoration methodology translates into Guardian schema structure with 400+ components.
 
 ### Chapter 9: Project Design Document (PDD) Schema Development
 
-**Purpose**: Create comprehensive PDD schemas that capture all project information.
+**Purpose**: Build comprehensive PDD schemas using Excel-first approach with step-by-step implementation.
 
 **Key Topics**:
 
-* Project information and metadata schemas
-* Baseline scenario documentation
-* Project activity descriptions and justifications
-* Stakeholder consultation schemas
-* Environmental impact assessments
-* Emission reduction estimation schemas
-* Supporting document attachments
+* Excel schema template usage and structure
+* Step-by-step PDD schema construction process
+* Conditional logic implementation with enum selections
+* Sub-schema creation and organization
+* Field key management for calculation code readability
+* Guardian import process and testing
 
-**VM0033 Context**: Complete PDD schema for VM0033 tidal wetland projects, including all required sections and conditional fields based on project type.
+**VM0033 Context**: Complete walkthrough of building VM0033 PDD schema from Excel template, including certification pathway conditionals and calculation parameter capture.
 
 ### Chapter 10: Monitoring Report Schema Development
 
-**Purpose**: Design schemas for ongoing monitoring and verification.
+**Purpose**: Create time-series monitoring schemas that handle annual data collection and calculation updates.
 
 **Key Topics**:
 
-* Monitoring parameter schemas and data collection
-* Temporal data handling and time series
-* Quality assurance and quality control fields
-* Evidence and documentation requirements
-* Calculation update mechanisms
-* Verification and validation workflows
+* Temporal data structures for monitoring periods
+* Annual parameter tracking and time-series organization
+* Quality control fields and evidence documentation
+* Field key management for time-series calculations
+* VVB verification workflow support
+* Integration with PDD schema parameters
 
-**VM0033 Context**: VM0033 monitoring report schema covering all required monitoring parameters, including water table depth, vegetation coverage, and emission measurements.
+**VM0033 Context**: VM0033 monitoring schema development covering herbaceous vegetation monitoring, carbon stock tracking, and temporal boundary management over 100-year crediting periods.
 
 ### Chapter 11: Advanced Schema Techniques
 
-**Purpose**: Master advanced schema features for complex methodologies.
+**Purpose**: Master API schema management, field properties, and advanced Guardian features.
 
 **Key Topics**:
 
-* Conditional field visibility and dynamic forms
-* Enum types and controlled vocabularies
-* Auto-calculation fields and formula integration
-* Cross-schema references and relationships
-* File upload and document management
-* Multi-language support and localization
+* API-based schema operations and updates
+* Field key naming best practices for calculation code
+* Standardized Property Definitions from GBBC specifications
+* Four Required field types: None, Hidden, Required, Auto Calculate
+* Schema UUID management for efficient development
+* Bulk operations and version control strategies
 
-**VM0033 Context**: Implementation of VM0033's complex conditional logic, including different calculation methods based on wetland type and restoration activity.
+**VM0033 Context**: Advanced schema management techniques used in VM0033 development, including Auto Calculate field implementation for equation results and UUID management for policy integration.
 
-### Chapter 12: Schema Testing and Validation
+### Chapter 12: Schema Testing and Validation Checklist
 
-**Purpose**: Ensure schema quality and functionality before policy integration.
+**Purpose**: Validate schemas using Guardian's testing features before deployment.
 
 **Key Topics**:
 
-* Schema validation techniques and tools
-* User acceptance testing for schemas
-* Data integrity and constraint testing
-* Performance testing with large datasets
-* Cross-browser and device compatibility
-* Accessibility and usability testing
+* Default Values, Suggested Values, and Test Values configuration
+* Schema preview testing and functionality validation
+* UUID integration into policy workflow blocks
+* Test artifact completeness checking
+* Field validation rules and user experience optimization
+* Pre-deployment checklist and user testing
 
-**VM0033 Context**: Comprehensive testing approach for VM0033 schemas, including validation of complex calculation logic and conditional field behavior.
+**VM0033 Context**: Practical testing approach used for VM0033 schema validation, including systematic testing of conditional logic and calculation field behavior.
 
 ## Part IV: Policy Workflow Design
 
-### Chapter 13: Stakeholder Analysis and Role Definition
+### Chapter 13: Policy Workflow Architecture and Design Principles
 
-**Purpose**: Design appropriate roles and permissions for methodology stakeholders.
-
-**Key Topics**:
-
-* Stakeholder mapping and responsibility analysis
-* Guardian role system and permission models
-* Role-based access control implementation
-* Workflow permissions and document visibility
-* Multi-organization coordination
-* Conflict resolution and escalation procedures
-
-**VM0033 Context**: VM0033 stakeholder ecosystem including Verra as registry, VVBs, project developers, and community stakeholders.
-
-### Chapter 14: Carbon Credit Certification Workflow Design
-
-**Purpose**: Design the complete certification process from registration to credit issuance.
+**Purpose**: Establish foundational understanding of Guardian policy architecture and design patterns for environmental methodology implementation.
 
 **Key Topics**:
 
-* Project registration and listing workflows
-* Validation process design and VVB assignment
-* Verification workflows and evidence collection
-* Registry review and approval processes
-* Credit issuance and token minting
-* Appeals and dispute resolution mechanisms
+* Guardian policy architecture fundamentals and component overview
+* Event-driven workflow block communication system
+* Policy lifecycle management and versioning strategies
+* Hedera blockchain integration for immutable audit trails
+* Document flow design patterns and state management
+* Security considerations and access control architecture
 
-**VM0033 Context**: Complete VM0033 certification workflow following Verra's VCS program requirements and procedures.
+**VM0033 Context**: Guardian policy architecture analysis using VM0033 production implementation as reference for tidal wetland restoration methodology digitization.
 
-### Chapter 15: Policy Workflow Block Configuration
+### Chapter 14: Guardian Workflow Blocks and Configuration
 
-**Purpose**: Master the configuration of Guardian's policy workflow blocks.
-
-**Key Topics**:
-
-* Request blocks for data collection
-* Send blocks for data storage and transmission
-* Interface container blocks for user experience
-* Role blocks and permission management
-* Calculate blocks for data processing
-* Mint blocks for token issuance
-
-**VM0033 Context**: Detailed configuration of all blocks needed for VM0033 workflow, with specific examples and parameter settings.
-
-### Chapter 16: Document Flow and State Management
-
-**Purpose**: Manage complex document states and transitions throughout the workflow.
+**Purpose**: Master Guardian's workflow block system for building environmental certification workflows.
 
 **Key Topics**:
 
-* Document state modeling and transitions
-* Status tracking and progress indicators
-* Approval workflows and multi-party sign-offs
-* Document versioning and change management
-* Audit trails and immutable records
-* Error handling and recovery procedures
+* interfaceDocumentsSourceBlock for document management and filtering
+* buttonBlock configurations for user interactions and workflow transitions
+* requestVcDocumentBlock for data collection and schema integration
+* sendToGuardianBlock for data persistence and blockchain storage
+* Role-based permissions and access control implementation
+* Event-driven communication between workflow blocks
 
-**VM0033 Context**: VM0033 document flow from PDD submission through credit issuance, including all intermediate states and approval gates.
+**VM0033 Context**: Complete workflow block configuration using VM0033 production policy JSON, covering project submission, VVB approval, and document management workflows.
+
+### Chapter 15: VM0033 Implementation Deep Dive
+
+**Purpose**: Deep technical analysis of VM0033 policy implementation using actual Guardian production configurations.
+
+**Key Topics**:
+
+* VVB document approval workflow with real JSON configurations
+* Project submission and review processes using Guardian blocks
+* Role-based workflow analysis (Project_Proponent, VVB, Owner)
+* Document filtering and status management implementations
+* Button configuration patterns for workflow transitions
+* End-to-end integration patterns and event routing
+
+**VM0033 Context**: Complete analysis of VM0033 production policy JSON with extracted block configurations, focusing on real-world implementation patterns for tidal wetland restoration certification.
+
+### Chapter 16: Advanced Policy Patterns
+
+**Purpose**: Advanced Guardian policy implementation patterns using production VM0033 configurations.
+
+**Key Topics**:
+
+* Transformation blocks for external API integration (Verra project hub)
+* Document validation blocks for data integrity and business rule enforcement
+* External data integration patterns (Kanop satellite monitoring, IoT devices)
+* Policy testing frameworks including dry-run mode and programmatic testing
+* Demo mode configuration for training and development environments
+* Production deployment patterns and error handling strategies
+
+**VM0033 Context**: Real implementation examples from VM0033 production policy including dataTransformationAddon for Verra API integration, documentValidatorBlock configurations, and comprehensive testing approaches.
 
 ## Part V: Calculation Logic Implementation
 

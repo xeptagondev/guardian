@@ -1,60 +1,45 @@
 # Creating new Module
 
-{% swagger method="post" path="" baseUrl="/modules" summary="Creates a new module." %}
-{% swagger-description %}
+## Creates a new module.
+
+<mark style="color:green;">`POST`</mark> `/modules`
+
 Creates a new module. Only users with the Standard Registry role are allowed to make the request.
-{% endswagger-description %}
 
-{% swagger-parameter in="body" required="true" type="Json" %}
-Object that contains module configuration
-{% endswagger-parameter %}
+#### Request Body
 
-{% swagger-response status="201: Created" description="Successful Operation" %}
-````scheme
-```typescript
-{
-  createDate: string
-  updateDate: string
-  _id: string
-  name: string
-  description: string
-  config: Config
-  creator: string
-  owner: string
-  type: string
-  status: string
-  uuid: string
-  codeVersion: string
-  configFileId: string
-  id: string
-}
-```
+| Name                               | Type | Description                               |
+| ---------------------------------- | ---- | ----------------------------------------- |
+| <mark style="color:red;">\*</mark> | Json | Object that contains module configuration |
+
+{% tabs %}
+{% tab title="201: Created Successful Operation" %}
+\`\`\`\`scheme \`\`\`typescript { createDate: string updateDate: string \_id: string name: string description: string config: Config creator: string owner: string type: string status: string uuid: string codeVersion: string configFileId: string id: string } \`\`\` \`\`\`\` \{% endtab %\}
+
+\{% tab title="401: Unauthorized Unauthorized" %\} \`
+
+\`\`javascript { // Response }
+
 ````
-{% endswagger-response %}
 
-{% swagger-response status="401: Unauthorized" description="Unauthorized" %}
+</div>
+
+<div data-gb-custom-block data-tag="tab" data-title='403: Forbidden Forbidden'>
+
 ```javascript
 {
     // Response
 }
-```
-{% endswagger-response %}
+````
+{% endtab %}
 
-{% swagger-response status="403: Forbidden" description="Forbidden" %}
-```javascript
-{
-    // Response
-}
-```
-{% endswagger-response %}
-
-{% swagger-response status="422: Unprocessable Entity" description="Unprocessable Entity" %}
+{% tab title="422: Unprocessable Entity Unprocessable Entity" %}
 ```
 Invalid module config
 ```
-{% endswagger-response %}
+{% endtab %}
 
-{% swagger-response status="500: Internal Server Error" description="Internal Server Error" %}
+{% tab title="500: Internal Server Error Internal Server Error" %}
 ```javascript
 {
    content:
@@ -63,5 +48,5 @@ Invalid module config
                 $ref: '#/components/schemas/Error'
 }
 ```
-{% endswagger-response %}
-{% endswagger %}
+{% endtab %}
+{% endtabs %}
