@@ -699,7 +699,7 @@ export class HederaSDKHelper {
         const transactionStatus = receipt.status;
 
         if (transactionStatus === Status.Success) {
-            return receipt.serials.map(e => e.toNumber())
+            return receipt.serials ? receipt.serials.map(e => e.toNumber()) : []
         } else {
             return null;
         }
@@ -740,7 +740,11 @@ export class HederaSDKHelper {
             .setMaxTransactionFee(MAX_FEE);
 
         if (tokenType === 'non-fungible') {
-            transaction = transaction.setSerials(serialNumbers);
+            if (serialNumbers && serialNumbers.length > 0) {
+                transaction = transaction.setSerials(serialNumbers);
+            } else {
+                throw new Error('Serial numbers are required for non-fungible token wipe operations');
+            }
         }
         else {
             transaction = transaction.setAmount(amount);
