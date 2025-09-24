@@ -67,7 +67,7 @@ export class RetirementBlock {
             date: (new Date()).toISOString(),
             tokenId: token.tokenId,
             amount: amount.toString(),
-            serialNumbers: serialNumbers?.join(',')
+            ...(serialNumbers && { serialNumbers: serialNumbers.join(',') })
         }
         const uuid = await ref.components.generateUUID();
         const wipeVC = await vcHelper.createVerifiableCredential(
