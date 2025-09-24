@@ -737,8 +737,7 @@ export class HederaSDKHelper {
             .setAccountId(targetId)
             .setTokenId(tokenId)
             .setTransactionMemo(transactionMemo)
-            .setMaxTransactionFee(MAX_FEE)
-            .freezeWith(client);
+            .setMaxTransactionFee(MAX_FEE);
 
         if (tokenType === 'non-fungible') {
             transaction = transaction.setSerials(serialNumbers);
@@ -746,6 +745,8 @@ export class HederaSDKHelper {
         else {
             transaction = transaction.setAmount(amount);
         }
+
+        transaction = transaction.freezeWith(client);
 
         console.log('_Wipe Key', _wipeKey, 'serialNumbers', serialNumbers, 'wipeKey', wipeKey, 'userId', userId, 'tokenId', tokenId, 'targetId', targetId, 'amount', amount, 'tokenType', tokenType);
         const signTx = await transaction.sign(_wipeKey);
