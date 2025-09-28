@@ -752,7 +752,6 @@ export class HederaSDKHelper {
 
         transaction = transaction.freezeWith(client);
 
-        console.log('_Wipe Key', _wipeKey, 'serialNumbers', serialNumbers, 'wipeKey', wipeKey, 'userId', userId, 'tokenId', tokenId, 'targetId', targetId, 'amount', amount, 'tokenType', tokenType);
         const signTx = await transaction.sign(_wipeKey);
         const receipt = await this.executeAndReceipt(client, signTx, 'TokenWipeTransaction', userId);
         const transactionStatus = receipt.status;

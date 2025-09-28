@@ -624,8 +624,6 @@ export class MintService {
                 }
             );
         } else {
-
-            MintService.logger.info(`Owner: ${token.owner}, Token ID: ${token.tokenId}, Wipe Key: ${KeyType.TOKEN_WIPE_KEY}, User ID: ${userId}`, ['POLICY_SERVICE'], userId);
             const wipeKey = await MintService.wallet.getUserKey(
                 token.owner,
                 KeyType.TOKEN_WIPE_KEY,

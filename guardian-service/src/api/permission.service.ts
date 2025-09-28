@@ -290,18 +290,7 @@ export async function permissionAPI(logger: PinoLogger): Promise<void> {
             try {
                 const { did, keyType, entityId } = msg;
 
-                
                 const entity = KEY_TYPE_KEY_ENTITY.get(keyType);
-
-                logger.info(
-                    `KEY_TYPE_KEY_ENTITY: ${JSON.stringify(Array.from(KEY_TYPE_KEY_ENTITY.entries()))}`,
-                    ['GUARDIAN_SERVICE'],
-                    userId
-                  );
-                  
-
-                logger.info(`Checking key permissions for DID: ${msg.did} KeyType: ${msg.keyType} EntityId: ${msg.entityId} UserId: ${userId} entity: ${entity}`, ['GUARDIAN_SERVICE'], userId);
-
                 if (!entity) {
                     return new MessageResponse(false);
                 }
@@ -329,7 +318,6 @@ export async function permissionAPI(logger: PinoLogger): Promise<void> {
                             owner: did,
                             topicId: entityId
                         })
-                        logger.info(`Topic count DID: ${did} topicId: ${entityId} count: ${count}`, ['GUARDIAN_SERVICE'], userId);  
                         return new MessageResponse(
                             count > 0
                         );
