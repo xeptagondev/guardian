@@ -1,9 +1,9 @@
 import { ActionCallback, BasicBlock } from '../helpers/decorators/index.js';
 import { BlockActionError } from '../errors/index.js';
-import { DocumentCategoryType, DocumentSignature, LocationType, SchemaEntity, SchemaHelper } from '@guardian/interfaces';
+import { DocumentCategoryType, DocumentSignature, LocationType, SchemaEntity, SchemaHelper, TokenType } from '@guardian/interfaces';
 import { PolicyComponentsUtils } from '../policy-components-utils.js';
 import { CatchErrors } from '../helpers/decorators/catch-errors.js';
-import { Token as TokenCollection, VcHelper, VcDocumentDefinition as VcDocument, MessageServer, VCMessage, MessageAction, VPMessage, HederaDidDocument } from '@guardian/common';
+import { Token as TokenCollection, VcHelper, VcDocumentDefinition as VcDocument, MessageServer, VCMessage, MessageAction, VPMessage, HederaDidDocument} from '@guardian/common';
 import { PolicyUtils } from '../helpers/utils.js';
 import { AnyBlockType, IPolicyDocument, IPolicyEventState } from '../policy-engine.interface.js';
 import { IPolicyEvent, PolicyInputEventType, PolicyOutputEventType } from '../interfaces/index.js';
@@ -125,7 +125,36 @@ export class RetirementBlock {
         const uuid: string = await ref.components.generateUUID();
         const amount = PolicyUtils.aggregate(ref.options.rule, documents);
         const [tokenValue, tokenAmount] = PolicyUtils.tokenAmount(token, amount);
-        const serialNumbers = ref.options.serialNumbers?.split(',').map(Number);
+        
+        let serialNumbers:number[] = []
+        if (token.tokenType === TokenType.NON_FUNGIBLE) {
+            const startOpt = ref.options.startSerialNumber;
+            const endOpt = ref.options.endSerialNumber;
+            const hasStart =
+                startOpt !== null &&
+                startOpt !== undefined &&
+                (typeof startOpt !== 'string' || startOpt.trim() !== '');
+            const hasEnd =
+                endOpt !== null &&
+                endOpt !== undefined &&
+                (typeof endOpt !== 'string' || endOpt.trim() !== '');
+            if (!hasStart || !hasEnd) {
+                throw new Error('For NON_FUNGIBLE tokens, Serial numbers are required');
+            }
+
+            const startRule = PolicyUtils.aggregate(String(startOpt), documents);
+            const endRule = PolicyUtils.aggregate(String(endOpt), documents);
+
+            if (!Number.isInteger(startRule) || !Number.isInteger(endRule)) {
+                throw new Error('Serial numbers must be integers');
+            }
+            if (startRule < 0 || endRule < 0) {
+                throw new Error('Serial numbers must be non-negative');
+            }
+
+            serialNumbers = PolicyUtils.aggregateSerialRange(startRule, endRule);
+        }
+        
         const wipeVC = await this.createWipeVC(policyOwnerDidDocument, token, tokenAmount, ref, serialNumbers);
         const vcs = [].concat(documents, wipeVC);
         const vp = await this.createVP(policyOwnerDidDocument, uuid, vcs);
