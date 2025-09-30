@@ -286,7 +286,6 @@ export async function permissionAPI(logger: PinoLogger): Promise<void> {
     ApiResponse(MessageAPI.CHECK_KEY_PERMISSIONS,
         async (msg: { did: string, keyType: KeyType, entityId: string, userId: string | null }) => {
             const userId = msg?.userId
-
             try {
                 const { did, keyType, entityId } = msg;
 
