@@ -38,7 +38,8 @@ import { MintService } from '../mint/mint-service.js';
     },
     variables: [
         { path: 'options.tokenId', alias: 'token', type: 'Token' },
-        { path: 'options.serialNumbers', alias: 'serialNumbers', type: 'String' },
+        { path: 'options.startSerialNumber', alias: 'startSerialNumber', type: 'String' },
+        { path: 'options.endSerialNumber', alias: 'endSerialNumber', type: 'String' },
         { path: 'options.template', alias: 'template', type: 'TokenTemplate' }
     ]
 })
@@ -123,10 +124,10 @@ export class RetirementBlock {
         const policyOwnerSignOptions = await policyOwner.loadSignOptions(ref, userId);
 
         const uuid: string = await ref.components.generateUUID();
-        const amount = PolicyUtils.aggregate(ref.options.rule, documents);
-        const [tokenValue, tokenAmount] = PolicyUtils.tokenAmount(token, amount);
         
-        let serialNumbers:number[] = []
+        let serialNumbers: number[] = []
+        let tokenValue: number = 0;
+        let tokenAmount: string = '0';
         if (token.tokenType === TokenType.NON_FUNGIBLE) {
             const startOpt = ref.options.startSerialNumber;
             const endOpt = ref.options.endSerialNumber;
@@ -148,11 +149,25 @@ export class RetirementBlock {
             if (!Number.isInteger(startRule) || !Number.isInteger(endRule)) {
                 throw new Error('Serial numbers must be integers');
             }
-            if (startRule < 0 || endRule < 0) {
-                throw new Error('Serial numbers must be non-negative');
+            if (startRule < 1 || endRule < 1) {
+                throw new Error('Serial numbers must be greater than or equal to 1');
+            }
+            if (startRule > endRule) {
+                throw new Error('End serial number must be greater than or equal to start serial number');
             }
 
             serialNumbers = PolicyUtils.aggregateSerialRange(startRule, endRule);
+        }
+        else if (token.tokenType === TokenType.FUNGIBLE) {
+            const ruleOpt =  ref.options.rule
+            const hasRule =
+                ruleOpt !== null && ruleOpt !== undefined &&
+                (typeof ruleOpt !== 'string' || ruleOpt.trim() !== '');
+             if (!hasRule) {
+                throw new Error('For FUNGIBLE tokens, Rule is required');
+            }
+            const amount = PolicyUtils.aggregate(ref.options.rule, documents);
+            [tokenValue, tokenAmount] = PolicyUtils.tokenAmount(token, amount);
         }
         
         const wipeVC = await this.createWipeVC(policyOwnerDidDocument, token, tokenAmount, ref, serialNumbers);
