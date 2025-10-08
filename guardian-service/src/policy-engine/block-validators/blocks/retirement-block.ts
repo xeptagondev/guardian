@@ -39,12 +39,8 @@ export class RetirementBlock {
                 validator.addError('Option "rule" must be a string');
             }
 
-            if (ref.options.startSerialNumber && typeof ref.options.startSerialNumber !== 'string') {
-                validator.addError('Option "start serial number" must be a string');
-            }
-
-            if (ref.options.endSerialNumber && typeof ref.options.endSerialNumber !== 'string') {
-                validator.addError('Option "end serial number" must be a string');
+            if (ref.options.serialNumbersExpression && typeof ref.options.serialNumbersExpression !== 'string') {
+                validator.addError('Option "serial numbers" must be a string');
             }
 
             const accountType = ['default', 'custom'];

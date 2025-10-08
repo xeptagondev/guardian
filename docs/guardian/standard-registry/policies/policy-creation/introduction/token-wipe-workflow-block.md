@@ -3,7 +3,7 @@
 ### Description
 This block allows to wipe tokens. 
 * **Fungible (FT):** Wipes the amount computed by **Rule**.
-* **Non-Fungible (NFT):** Wipes the serials in the **inclusive range** from **Start Serial Number** to **End Serial Number**. If the block is configured with **fixed serial numbers** , the wipe operation will always target that same serial range. This effectively makes the run **single-use for those serials**. To keep the policy reusable across documents, configure **Start/End Serial Number** to be derived from the selected document.
+* **Non-Fungible (NFT):** Wipes one or more serial numbers defined by a flexible Serial Numbers Expression. If the block is configured with **fixed serial numbers** (e.g., 1,2-5,10), the wipe operation will always target that same serial range. This effectively makes the run **single-use for those serials**. To keep the policy **reusable across documents**, configure serial numbers to be derived from the selected document.
 
 
 ### Properties
@@ -21,9 +21,8 @@ This block allows to wipe tokens.
 | UI Property         | Definition                                                                                      | Examples                                              |
 | ------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Token       | Select which token to wipe. The token must exist in the Guardian instance. | specific token                        |
-| Rule        | **FT required.** Enter any wiping calculations.                                             | `field0`, `10` |
-| Start Serial Number        | **NFT required.** Enter start serial number for wiping calculations.                                             | `field1`, `5`        |
-| End Serial Number	        | **NFT required.** Enter end serial number for wiping calculations.                                             | `field2`, `12`         |
+| Rule        | **FT required.** Enter any FT wiping calculations.                                             | `field0`, `10` |
+| Serial Numbers        | **NFT required.** Enter serials and ranges for NFT wiping. Supports comma-separated and range formats.                                             | `field0,field1-field2,field3`, `1,2-5,10`        |
 
 ### Events
 

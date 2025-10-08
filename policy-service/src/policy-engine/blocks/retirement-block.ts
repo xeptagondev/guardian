@@ -38,8 +38,7 @@ import { MintService } from '../mint/mint-service.js';
     },
     variables: [
         { path: 'options.tokenId', alias: 'token', type: 'Token' },
-        { path: 'options.startSerialNumber', alias: 'startSerialNumber', type: 'String' },
-        { path: 'options.endSerialNumber', alias: 'endSerialNumber', type: 'String' },
+        { path: 'options.serialNumbersExpression', alias: 'serialNumbersExpression', type: 'String' },
         { path: 'options.template', alias: 'template', type: 'TokenTemplate' }
     ]
 })
@@ -129,34 +128,54 @@ export class RetirementBlock {
         let tokenValue: number = 0;
         let tokenAmount: string = '0';
         if (token.tokenType === TokenType.NON_FUNGIBLE) {
-            const startOpt = ref.options.startSerialNumber;
-            const endOpt = ref.options.endSerialNumber;
-            const hasStart =
-                startOpt !== null &&
-                startOpt !== undefined &&
-                (typeof startOpt !== 'string' || startOpt.trim() !== '');
-            const hasEnd =
-                endOpt !== null &&
-                endOpt !== undefined &&
-                (typeof endOpt !== 'string' || endOpt.trim() !== '');
-            if (!hasStart || !hasEnd) {
-                throw new Error('For NON_FUNGIBLE tokens, Serial numbers are required');
+            const exprOpt = ref.options.serialNumbersExpression;
+            if (!exprOpt || !String(exprOpt).trim()) {
+                throw new Error('For NON_FUNGIBLE tokens, Serial numbers is required');
             }
+            const wipeTokens = String(exprOpt).split(',').map(t => t.trim()).filter(Boolean);
+            const out = new Set<number>();
 
-            const startRule = PolicyUtils.aggregate(String(startOpt), documents);
-            const endRule = PolicyUtils.aggregate(String(endOpt), documents);
+            for (const tok of wipeTokens) {
+                const dash = tok.indexOf('-');
+                if (dash > 0) {
+                    const leftRaw  = tok.slice(0, dash).trim();
+                    const rightRaw = tok.slice(dash + 1).trim();
 
-            if (!Number.isInteger(startRule) || !Number.isInteger(endRule)) {
-                throw new Error('Serial numbers must be integers');
-            }
-            if (startRule < 1 || endRule < 1) {
-                throw new Error('Serial numbers must be greater than or equal to 1');
-            }
-            if (startRule > endRule) {
-                throw new Error('End serial number must be greater than or equal to start serial number');
-            }
+                    const startRule = PolicyUtils.aggregate(String(leftRaw), documents);
+                    const endRule   = PolicyUtils.aggregate(String(rightRaw), documents);
 
-            serialNumbers = PolicyUtils.aggregateSerialRange(startRule, endRule);
+                    if (!Number.isInteger(startRule) || !Number.isInteger(endRule)) {
+                        throw new Error(`Serial numbers must be integers.`);
+                    }
+                    if (startRule < 1 || endRule < 1) {
+                        throw new Error('Serial numbers must be greater than or equal to 1');
+                    }
+                    if (startRule > endRule) {
+                        throw new Error(`End serial number must be greater than or equal to start serial number.`);
+                    }
+                    for (const n of PolicyUtils.aggregateSerialRange(startRule, endRule)) out.add(n);
+                } else {
+                    const valRule = PolicyUtils.aggregate(
+                        String(tok),
+                        documents
+                    );
+                    if (!Number.isInteger(valRule)) {
+                        throw new Error(
+                            `Serial numbers must be integers.`
+                        );
+                    }
+                    if (valRule < 1) {
+                        throw new Error(
+                            "Serial numbers must be greater than or equal to 1."
+                        );
+                    }
+                    out.add(valRule);
+                }
+            }
+            serialNumbers = Array.from(out).sort((a, b) => a - b);
+            if (serialNumbers.length === 0) {
+                throw new Error('No valid Serial Numbers found');
+            }
         }
         else if (token.tokenType === TokenType.FUNGIBLE) {
             const ruleOpt =  ref.options.rule
