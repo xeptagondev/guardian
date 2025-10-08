@@ -95,18 +95,10 @@
     </tr>
     <tr class="propRow" [attr.collapse]="propHidden.main">
         <td class="propRowCol"></td>
-        <td class="propRowCell cellName">Start Serial Number</td>
+        <td class="propRowCell cellName">Serial Numbers</td>
         <td class="propRowCell">
-            <input class="prop-input" [(ngModel)]="properties.startSerialNumber" [readonly]="readonly"
-                   (blur)="onSave()">
-        </td>
-    </tr>
-    <tr class="propRow" [attr.collapse]="propHidden.main">
-        <td class="propRowCol"></td>
-        <td class="propRowCell cellName">End Serial Number</td>
-        <td class="propRowCell">
-            <input class="prop-input" [(ngModel)]="properties.endSerialNumber" [readonly]="readonly"
-                   (blur)="onSave()">
+            <input class="prop-input" [(ngModel)]="properties.serialNumbersExpression" [readonly]="readonly"
+                   (blur)="onSave()"  placeholder="Examples: 1,2-5,10  |  field0,field1-field5,field10">
         </td>
     </tr>
 </table>
