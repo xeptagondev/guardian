@@ -9,10 +9,10 @@ const totalRetirements = computed(() => Math.round(totalIssuance.value * 0.37));
 const avgProjectSize = computed(() => Math.round(totalIssuance.value / activeProjects.value));
 
 const metrics = computed(() => [
-    { label: 'Total Issuance', value: `${formatCredits(totalIssuance.value)} tCO2e`, change: '+12.3%', trend: 'up' },
+    { label: 'Total Issuance', value: `${formatCredits(totalIssuance.value)}`, change: '+12.3%', trend: 'up' },
     { label: 'Active Projects', value: activeProjects.value.toLocaleString(), change: `+${activeProjects.value}`, trend: 'up' },
-    { label: 'Retirements', value: `${formatCredits(totalRetirements.value)} tCO2e`, change: '+8.7%', trend: 'up' },
-    { label: 'Avg. Project Size', value: `${formatCredits(avgProjectSize.value)} tCO2e`, change: '-2.1%', trend: 'down' },
+    { label: 'Retirements', value: `${formatCredits(totalRetirements.value)}`, change: '+8.7%', trend: 'up' },
+    { label: 'Avg. Project Size', value: `${formatCredits(avgProjectSize.value)}`, change: '-2.1%', trend: 'down' },
 ]);
 
 // Credits by category derived from projects
@@ -64,8 +64,8 @@ const byMethodology = computed(() => {
 
         <div class="border-t">
             <div class="px-6 py-4">
-                <h2 class="text-base font-semibold text-foreground">Credits by Methodology</h2>
-                <p class="text-xs text-muted-foreground mt-0.5">Distribution of issued credits across methodology types</p>
+                <h2 class="text-base font-semibold text-foreground">Issuances by Methodology</h2>
+                <p class="text-xs text-muted-foreground mt-0.5">Distribution of issuances across methodology types</p>
             </div>
             <div class="px-6 pb-6">
                 <div class="rounded-xl border bg-card p-5">

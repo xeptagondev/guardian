@@ -79,7 +79,7 @@ const activityLog = computed(() => {
         { date: project.value.createdAt, action: 'Project registered on Guardian', type: 'registry' },
         { date: new Date(base.getTime() + 30 * 86400000).toISOString().split('T')[0], action: 'First monitoring period started', type: 'monitoring' },
         { date: new Date(base.getTime() + 180 * 86400000).toISOString().split('T')[0], action: 'Verification report submitted', type: 'verification' },
-        { date: new Date(base.getTime() + 210 * 86400000).toISOString().split('T')[0], action: 'Credits issued to Hedera token', type: 'credit' },
+        { date: new Date(base.getTime() + 210 * 86400000).toISOString().split('T')[0], action: 'Tokens issued to Hedera', type: 'credit' },
     ];
 });
 
@@ -100,7 +100,7 @@ const methodologySteps = computed(() => {
         { label: 'Registration', desc: 'Project registration on registry', status: 'complete' },
         { label: 'Monitoring', desc: 'Data collection & MRV reporting', status: project.value.status === 'Monitoring' ? 'active' : 'complete' },
         { label: 'Verification', desc: 'Emission reduction verification', status: project.value.status === 'Verification' ? 'active' : (project.value.status === 'Monitoring' ? 'pending' : 'complete') },
-        { label: 'Issuance', desc: 'Credit minting to Hedera token', status: project.value.status === 'Active' ? 'complete' : 'pending' },
+        { label: 'Issuance', desc: 'Token minting to Hedera', status: project.value.status === 'Active' ? 'complete' : 'pending' },
     ];
 });
 
@@ -227,19 +227,19 @@ const fullMethodologyName = computed(() => {
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Projected Emission Reductions</div>
-                    <div class="text-sm font-medium text-foreground">{{ formatNumber(project.credits) }} tCO2e</div>
+                    <div class="text-sm font-medium text-foreground">{{ formatNumber(project.credits) }}</div>
                 </div>
             </div>
         </div>
 
-        <!-- Linked Credits -->
+        <!-- Linked Issuances -->
         <div class="rounded-xl border bg-card overflow-hidden">
             <div class="px-5 py-3.5 border-b bg-muted/30 flex items-center justify-between">
                 <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
                     <Coins class="h-4 w-4 text-primary" />
-                    Linked Credits
+                    Linked Issuances
                 </h2>
-                <span class="text-xs text-muted-foreground">{{ linkedCredits.length }} credit(s)</span>
+                <span class="text-xs text-muted-foreground">{{ linkedCredits.length }} issuance(s)</span>
             </div>
             <div v-if="linkedCredits.length > 0">
                 <table class="w-full text-sm">
@@ -283,7 +283,7 @@ const fullMethodologyName = computed(() => {
                 </table>
             </div>
             <div v-else class="px-5 py-8 text-center text-sm text-muted-foreground">
-                No credits have been issued for this project yet.
+                No issuances have been made for this project yet.
             </div>
         </div>
 
@@ -304,7 +304,6 @@ const fullMethodologyName = computed(() => {
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Baseline Emissions</div>
                     </div>
                     <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.baseline }}</div>
-                    <div class="text-[11px] text-muted-foreground">tCO2e</div>
                 </div>
                 <div class="bg-card px-5 py-5">
                     <div class="flex items-center gap-2 mb-2">
@@ -314,7 +313,6 @@ const fullMethodologyName = computed(() => {
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Project Emissions</div>
                     </div>
                     <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.project }}</div>
-                    <div class="text-[11px] text-muted-foreground">tCO2e</div>
                 </div>
                 <div class="bg-card px-5 py-5">
                     <div class="flex items-center gap-2 mb-2">
@@ -324,7 +322,6 @@ const fullMethodologyName = computed(() => {
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Leakage Emissions</div>
                     </div>
                     <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.leakage }}</div>
-                    <div class="text-[11px] text-muted-foreground">tCO2e</div>
                 </div>
                 <div class="bg-card px-5 py-5">
                     <div class="flex items-center gap-2 mb-2">
@@ -334,7 +331,6 @@ const fullMethodologyName = computed(() => {
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Baseline Emission Factor</div>
                     </div>
                     <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.baselineEmissionFactor }}</div>
-                    <div class="text-[11px] text-muted-foreground">tCO2e/unit</div>
                 </div>
             </div>
         </div>

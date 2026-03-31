@@ -23,7 +23,7 @@ const lastSyncTime = lastSyncDate.toLocaleTimeString('en-US', { hour: '2-digit',
 const navItems = [
     { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
     { label: 'Projects', icon: FolderKanban, to: '/projects' },
-    { label: 'Credits', icon: Coins, to: '/credits' },
+    { label: 'Issuances', icon: Coins, to: '/credits' },
     { label: 'Methodologies', icon: BookOpen, to: '/methodologies' },
     { label: 'Registries', icon: Building2, to: '/registries' },
     { label: 'Developers', icon: Users, to: '/developers' },

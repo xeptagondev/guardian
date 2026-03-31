@@ -161,12 +161,12 @@ const filteredStats = computed(() => {
             to: '/projects',
         },
         {
-            label: 'Total Credits',
+            label: 'Total Issuances',
             value: formatCredits(stats.value.totalCredits),
             change: hasActiveFilter.value ? '' : '+12.3%',
             trend: 'up',
-            sub: 'tCO2e issued on-chain',
-            tooltip: 'Sum of all carbon credits (in tonnes of CO2 equivalent) issued on-chain across matching projects. The change indicator shows the percentage growth in total credits compared to the previous year.',
+            sub: 'Issued on-chain',
+            tooltip: 'Sum of all issuances on-chain across matching projects. The change indicator shows the percentage growth in total issuances compared to the previous year.',
             icon: Coins,
             accent: 'text-stat-rose',
             accentBg: 'bg-stat-rose/10',
@@ -436,11 +436,11 @@ const filteredStats = computed(() => {
                                         </div>
                                     </div>
 
-                                    <!-- Credits -->
+                                    <!-- Issuances -->
                                     <div class="pt-2 border-t">
                                         <div class="flex items-center justify-between">
-                                            <span class="text-xs text-muted-foreground">Total Credits Issued</span>
-                                            <span class="text-sm font-bold text-foreground">{{ activeDetail.credits }} tCO2e</span>
+                                            <span class="text-xs text-muted-foreground">Total Issuances</span>
+                                            <span class="text-sm font-bold text-foreground">{{ activeDetail.credits }}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -456,7 +456,7 @@ const filteredStats = computed(() => {
                             <tr class="border-b bg-muted/30">
                                 <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Country</th>
                                 <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Projects</th>
-                                <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Credits Issued</th>
+                                <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Issuances</th>
                                 <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Methodologies</th>
                             </tr>
                         </thead>
@@ -489,8 +489,8 @@ const filteredStats = computed(() => {
         <div class="border-t">
             <div class="flex items-center justify-between px-6 py-4">
                 <div>
-                    <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Sector & Registry Breakdown <InfoTooltip text="Distribution of projects and credits by sector and registry. Toggle between project count and credit volume. Reflects current developer/registry filters." /></h2>
-                    <p class="text-xs text-muted-foreground mt-0.5">Distribution of projects and credits by sector and registry</p>
+                    <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Sector & Registry Breakdown <InfoTooltip text="Distribution of projects and issuances by sector and registry. Toggle between project count and issuance volume. Reflects current developer/registry filters." /></h2>
+                    <p class="text-xs text-muted-foreground mt-0.5">Distribution of projects and issuances by sector and registry</p>
                 </div>
                 <div class="flex items-center rounded-lg border p-0.5">
                     <button
@@ -509,7 +509,7 @@ const filteredStats = computed(() => {
                             : 'text-muted-foreground hover:text-foreground'"
                         @click="chartMode = 'credits'"
                     >
-                        Credits
+                        Issuances
                     </button>
                 </div>
             </div>
@@ -528,7 +528,7 @@ const filteredStats = computed(() => {
                                         {{ sectorTotal > 0 ? ((chartMode === 'projects' ? s.projectCount : s.creditCount) / sectorTotal * 100).toFixed(1) : '0.0' }}%
                                     </span>
                                     <span class="text-xs text-muted-foreground tabular-nums shrink-0">
-                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : `${formatCredits(s.creditCount)} tCO2e` }}
+                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : `${formatCredits(s.creditCount)}` }}
                                     </span>
                                 </div>
                             </div>
@@ -548,7 +548,7 @@ const filteredStats = computed(() => {
                                         {{ registryTotal > 0 ? ((chartMode === 'projects' ? s.projectCount : s.creditCount) / registryTotal * 100).toFixed(1) : '0.0' }}%
                                     </span>
                                     <span class="text-xs text-muted-foreground tabular-nums shrink-0">
-                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : `${formatCredits(s.creditCount)} tCO2e` }}
+                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : `${formatCredits(s.creditCount)}` }}
                                     </span>
                                 </div>
                             </div>
@@ -565,7 +565,7 @@ const filteredStats = computed(() => {
                 <div class="lg:border-r">
                     <div class="flex items-center justify-between px-6 py-4">
                         <div>
-                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Top Registries <InfoTooltip text="Ranked by project count. Policies = unique methodologies published. Credits = total tCO2e issued on-chain by this registry." /></h2>
+                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Top Registries <InfoTooltip text="Ranked by project count. Policies = unique methodologies published. Issuances = total issued on-chain by this registry." /></h2>
                             <p class="text-xs text-muted-foreground mt-0.5">Most active by policy and project count</p>
                         </div>
                         <NuxtLink to="/registries" class="text-xs font-medium text-primary hover:underline">View all</NuxtLink>
@@ -578,7 +578,7 @@ const filteredStats = computed(() => {
                                         <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</th>
                                         <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Policies</th>
                                         <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Projects</th>
-                                        <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Credits</th>
+                                        <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Issuances</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y">
@@ -607,8 +607,8 @@ const filteredStats = computed(() => {
                 <div>
                     <div class="flex items-center justify-between px-6 py-4">
                         <div>
-                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Credit Issuance <InfoTooltip text="Monthly credit issuance volume derived from project creation dates. Each bar represents total credits (millions tCO2e) for that month." /></h2>
-                            <p class="text-xs text-muted-foreground mt-0.5">Monthly volume (millions tCO2e)</p>
+                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Issuance Trend <InfoTooltip text="Monthly issuance volume derived from project creation dates. Each bar represents total issuances (millions) for that month." /></h2>
+                            <p class="text-xs text-muted-foreground mt-0.5">Monthly volume (millions)</p>
                         </div>
                         <NuxtLink to="/analytics" class="text-xs font-medium text-primary hover:underline">Analytics</NuxtLink>
                     </div>
@@ -634,7 +634,7 @@ const filteredStats = computed(() => {
                             </div>
                             <div class="flex items-center justify-between mt-4 pt-3 border-t">
                                 <span class="text-xs text-muted-foreground">{{ issuanceMonths.length > 0 ? `${issuanceMonths.length}-month total` : 'Total' }}</span>
-                                <span class="text-sm font-semibold text-foreground">{{ issuanceTotal }}M tCO2e</span>
+                                <span class="text-sm font-semibold text-foreground">{{ issuanceTotal }}M</span>
                             </div>
                         </div>
                     </div>

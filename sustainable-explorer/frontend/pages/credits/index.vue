@@ -39,8 +39,8 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
 <template>
     <div class="space-y-0">
         <div class="px-6 pt-6 pb-4">
-            <h1 class="text-2xl font-bold text-foreground">Credits</h1>
-            <p class="text-sm text-muted-foreground mt-1">Carbon credit tokens issued on Hedera</p>
+            <h1 class="text-2xl font-bold text-foreground">Issuances</h1>
+            <p class="text-sm text-muted-foreground mt-1">Tokens issued on Hedera</p>
         </div>
 
         <div class="px-6 pb-3">
@@ -55,7 +55,7 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
                             <SortableHeader label="Token" sort-key="name" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Symbol" sort-key="symbol" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Type" sort-key="type" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
-                            <SortableHeader label="Supply" sort-key="supply" align="right" tooltip="Total token supply minted on Hedera. For fungible tokens this is the total tCO2e. For NFTs this is the number of unique serials." :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
+                            <SortableHeader label="Supply" sort-key="supply" align="right" tooltip="Total token supply minted on Hedera. For fungible tokens this is the total supply. For NFTs this is the number of unique serials." :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Project" sort-key="project" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Registry" sort-key="registry" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">VC</th>
@@ -79,7 +79,7 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
                                 </button>
                             </td>
                         </tr>
-                        <tr v-if="paginated.length === 0"><td colspan="7" class="py-12 text-center text-sm text-muted-foreground">No credits match your filters</td></tr>
+                        <tr v-if="paginated.length === 0"><td colspan="7" class="py-12 text-center text-sm text-muted-foreground">No issuances match your filters</td></tr>
                     </tbody>
                 </table>
             </div>

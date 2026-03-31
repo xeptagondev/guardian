@@ -199,8 +199,8 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         if (sortedCredits.length > 0) {
             activities.push({
                 time: '8 min ago',
-                action: 'Credits issued',
-                detail: `${formatCredits(sortedCredits[0].supply)} tCO2e \u2014 ${sortedCredits[0].name}`,
+                action: 'Issuances minted',
+                detail: `${formatCredits(sortedCredits[0].supply)} \u2014 ${sortedCredits[0].name}`,
                 type: 'credit',
             });
         }
@@ -237,8 +237,8 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         if (sortedCredits.length > 1) {
             activities.push({
                 time: '2 hours ago',
-                action: 'Credits retired',
-                detail: `${formatCredits(Math.round(sortedCredits[1].supply * 0.1))} tCO2e \u2014 ${sortedCredits[1].name}`,
+                action: 'Issuances retired',
+                detail: `${formatCredits(Math.round(sortedCredits[1].supply * 0.1))} \u2014 ${sortedCredits[1].name}`,
                 type: 'retirement',
             });
         }

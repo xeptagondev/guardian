@@ -18,7 +18,7 @@ const route = useRoute();
 const routeMeta: Record<string, { label: string; icon: any }> = {
     '/': { label: 'Dashboard', icon: LayoutDashboard },
     '/projects': { label: 'Projects', icon: FolderKanban },
-    '/credits': { label: 'Credits', icon: Coins },
+    '/credits': { label: 'Issuances', icon: Coins },
     '/methodologies': { label: 'Methodologies', icon: BookOpen },
     '/registries': { label: 'Registries', icon: Building2 },
     '/developers': { label: 'Developers', icon: Users },
@@ -102,11 +102,11 @@ const searchIndex = computed(() => {
     // Credits
     for (const c of MOCK_CREDITS) {
         items.push({
-            type: 'Credit',
+            type: 'Issuance',
             icon: Coins,
             color: 'text-stat-rose',
             title: `${c.name} (${c.symbol})`,
-            sub: `Token ${c.tokenId} \u00b7 ${formatCredits(c.supply)} tCO2e`,
+            sub: `Token ${c.tokenId} \u00b7 ${formatCredits(c.supply)}`,
             to: '/credits',
         });
     }
