@@ -10,7 +10,9 @@ const queues = [
     { name: 'maintenance-refresh-mvs', waiting: 0, active: 0, completed: 1440, failed: 0 },
 ];
 
-const syncProgress = 73;
+const syncDate = new Date(Date.now() - 15 * 60 * 1000);
+const syncDateFormatted = syncDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const syncTimeFormatted = syncDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 </script>
 
 <template>
@@ -22,10 +24,11 @@ const syncProgress = 73;
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 px-6 pb-6">
             <div class="rounded-xl border bg-card p-4">
-                <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Sync Progress</span>
-                <div class="text-2xl font-bold text-foreground mt-2">{{ syncProgress }}%</div>
-                <div class="mt-2 h-2 rounded-full bg-muted overflow-hidden">
-                    <div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${syncProgress}%` }" />
+                <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Data Synced Up To</span>
+                <div class="text-lg font-bold text-foreground mt-2">{{ syncDateFormatted }}</div>
+                <div class="flex items-center gap-1.5 mt-1">
+                    <CheckCircle2 class="h-3.5 w-3.5 text-stat-green" />
+                    <span class="text-xs text-muted-foreground">{{ syncTimeFormatted }}</span>
                 </div>
             </div>
             <div class="rounded-xl border bg-card p-4">
