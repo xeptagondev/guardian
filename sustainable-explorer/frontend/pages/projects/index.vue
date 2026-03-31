@@ -1,10 +1,22 @@
 <script setup lang="ts">
-import { FolderKanban } from 'lucide-vue-next';
+import { FolderKanban, FileJson } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import { formatCredits } from '~/lib/format';
 import { SDG_LIST } from '~/lib/sdgs';
+import { generateProjectVc } from '~/lib/mock-vc';
+import type { Project } from '~/types/models';
 
 const { projects, total, filterOptions } = useProjects();
+
+const vcViewerOpen = ref(false);
+const vcViewerTitle = ref('');
+const vcViewerData = ref<Record<string, any> | null>(null);
+
+function viewVc(p: Project) {
+    vcViewerTitle.value = p.name;
+    vcViewerData.value = generateProjectVc(p);
+    vcViewerOpen.value = true;
+}
 
 const allProjects = computed(() => projects.value.map(p => ({
     ...p,
@@ -103,6 +115,7 @@ const statusColor: Record<string, string> = {
                                 </span>
                             </th>
                             <SortableHeader label="Vintage" sort-key="vintage" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
+                            <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">VC</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y">
@@ -112,7 +125,7 @@ const statusColor: Record<string, string> = {
                             class="hover:bg-muted/30 transition-colors cursor-pointer"
                         >
                             <td class="py-3 px-4">
-                                <span class="font-medium text-foreground hover:text-primary transition-colors">{{ p.name }}</span>
+                                <NuxtLink :to="`/projects/${p.id}`" class="font-medium text-foreground hover:text-primary transition-colors">{{ p.name }}</NuxtLink>
                             </td>
                             <td class="py-3 px-4 text-muted-foreground">{{ p.flag }} {{ p.country }}</td>
                             <td class="py-3 px-4">
@@ -134,9 +147,18 @@ const statusColor: Record<string, string> = {
                                 <SdgBadges :ids="p.sdgs" :max="4" />
                             </td>
                             <td class="py-3 px-4 text-muted-foreground tabular-nums">{{ p.vintage }}</td>
+                            <td class="py-3 px-3 text-center">
+                                <button
+                                    class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                                    title="View raw VC"
+                                    @click.stop="viewVc(p)"
+                                >
+                                    <FileJson class="h-3.5 w-3.5" />
+                                </button>
+                            </td>
                         </tr>
                         <tr v-if="paginated.length === 0">
-                            <td colspan="9" class="py-12 text-center text-sm text-muted-foreground">No projects match your filters</td>
+                            <td colspan="10" class="py-12 text-center text-sm text-muted-foreground">No projects match your filters</td>
                         </tr>
                     </tbody>
                 </table>
@@ -149,5 +171,7 @@ const statusColor: Record<string, string> = {
                 :page-size="pageSize"
             />
         </div>
+
+        <VcJsonViewer :open="vcViewerOpen" :title="vcViewerTitle" :data="vcViewerData" @close="vcViewerOpen = false" />
     </div>
 </template>

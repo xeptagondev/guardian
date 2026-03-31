@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { Coins } from 'lucide-vue-next';
+import { Coins, FileJson } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import { formatCredits } from '~/lib/format';
+import { generateCreditVc } from '~/lib/mock-vc';
 
 const { credits, total, filterOptions } = useCredits();
+
+const vcViewerOpen = ref(false);
+const vcViewerTitle = ref('');
+const vcViewerData = ref<Record<string, any> | null>(null);
+
+function viewVc(c: any) {
+    vcViewerTitle.value = c.name;
+    vcViewerData.value = generateCreditVc(c, c.project);
+    vcViewerOpen.value = true;
+}
 
 const allCredits = computed(() => credits.value.map(c => ({
     ...c,
@@ -47,6 +58,7 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
                             <SortableHeader label="Supply" sort-key="supply" align="right" tooltip="Total token supply minted on Hedera. For fungible tokens this is the total tCO2e. For NFTs this is the number of unique serials." :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Project" sort-key="project" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Registry" sort-key="registry" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
+                            <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">VC</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y">
@@ -57,12 +69,23 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
                             <td class="py-3 px-4 text-right tabular-nums font-medium">{{ c.supplyFormatted }}</td>
                             <td class="py-3 px-4 text-muted-foreground">{{ c.project }}</td>
                             <td class="py-3 px-4 text-muted-foreground">{{ c.registry }}</td>
+                            <td class="py-3 px-3 text-center">
+                                <button
+                                    class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                                    title="View raw VC"
+                                    @click.stop="viewVc(c)"
+                                >
+                                    <FileJson class="h-3.5 w-3.5" />
+                                </button>
+                            </td>
                         </tr>
-                        <tr v-if="paginated.length === 0"><td colspan="6" class="py-12 text-center text-sm text-muted-foreground">No credits match your filters</td></tr>
+                        <tr v-if="paginated.length === 0"><td colspan="7" class="py-12 text-center text-sm text-muted-foreground">No credits match your filters</td></tr>
                     </tbody>
                 </table>
             </div>
             <Pagination v-model:current-page="currentPage" :total-pages="totalPages" :total-items="filtered.length" :page-size="pageSize" />
         </div>
+
+        <VcJsonViewer :open="vcViewerOpen" :title="vcViewerTitle" :data="vcViewerData" @close="vcViewerOpen = false" />
     </div>
 </template>

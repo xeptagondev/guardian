@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import {
-    PanelLeft, Globe, ChevronDown, Search, Check,
-    FolderKanban, Coins, BookOpen, Building2, ArrowRight,
+    PanelLeft, Globe, ChevronDown, ChevronRight, Search, Check,
+    LayoutDashboard, FolderKanban, Coins, BookOpen, Building2, Users,
+    Target, BarChart3, Activity, ArrowRight,
 } from 'lucide-vue-next';
 import { onClickOutside, useDebounceFn } from '@vueuse/core';
 import { networkOptions } from '~/composables/useNetwork';
@@ -11,6 +12,59 @@ import { formatCredits } from '~/lib/format';
 const collapsed = useState('sidebar-collapsed', () => false);
 const { currentNetwork, setNetwork } = useNetwork();
 const router = useRouter();
+const route = useRoute();
+
+// --- Breadcrumbs ---
+const routeMeta: Record<string, { label: string; icon: any }> = {
+    '/': { label: 'Dashboard', icon: LayoutDashboard },
+    '/projects': { label: 'Projects', icon: FolderKanban },
+    '/credits': { label: 'Credits', icon: Coins },
+    '/methodologies': { label: 'Methodologies', icon: BookOpen },
+    '/registries': { label: 'Registries', icon: Building2 },
+    '/developers': { label: 'Developers', icon: Users },
+    '/sdgs': { label: 'SDGs', icon: Target },
+    '/analytics': { label: 'Analytics', icon: BarChart3 },
+    '/search': { label: 'Search', icon: Search },
+    '/status': { label: 'Sync Status', icon: Activity },
+};
+
+const breadcrumbs = computed(() => {
+    const path = route.path;
+    const crumbs: { label: string; icon: any; to?: string }[] = [];
+
+    // Always start with Dashboard
+    if (path === '/') {
+        crumbs.push({ label: 'Dashboard', icon: LayoutDashboard });
+        return crumbs;
+    }
+    crumbs.push({ label: 'Dashboard', icon: LayoutDashboard, to: '/' });
+
+    // Split path into segments
+    const segments = path.split('/').filter(Boolean);
+    const parentPath = '/' + segments[0];
+    const meta = routeMeta[parentPath];
+
+    if (meta) {
+        if (segments.length === 1) {
+            // Top-level page (e.g. /projects) — no link, it's the current page
+            crumbs.push({ label: meta.label, icon: meta.icon });
+        } else {
+            // Detail page (e.g. /projects/3) — parent is a link
+            crumbs.push({ label: meta.label, icon: meta.icon, to: parentPath });
+
+            // Resolve detail label from mock data
+            const paramId = segments[1];
+            let detailLabel = paramId;
+            if (parentPath === '/projects') {
+                const project = MOCK_PROJECTS.find(p => p.id === paramId);
+                detailLabel = project?.name || 'Not Found';
+            }
+            crumbs.push({ label: detailLabel });
+        }
+    }
+
+    return crumbs;
+});
 
 // --- Network dropdown ---
 const networkDropdownOpen = ref(false);
@@ -164,6 +218,28 @@ function onSearchKeydown(e: KeyboardEvent) {
         >
             <PanelLeft class="h-4 w-4" />
         </button>
+
+        <!-- Breadcrumbs -->
+        <nav v-if="breadcrumbs.length > 0" class="flex items-center gap-1.5 min-w-0">
+            <template v-for="(crumb, idx) in breadcrumbs" :key="idx">
+                <ChevronRight v-if="idx > 0" class="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+                <NuxtLink
+                    v-if="crumb.to"
+                    :to="crumb.to"
+                    class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                    <component :is="crumb.icon" v-if="crumb.icon" class="h-3.5 w-3.5" />
+                    {{ crumb.label }}
+                </NuxtLink>
+                <span
+                    v-else
+                    class="flex items-center gap-1 text-xs font-medium text-foreground truncate max-w-[200px]"
+                >
+                    <component :is="crumb.icon" v-if="crumb.icon" class="h-3.5 w-3.5 shrink-0" />
+                    {{ crumb.label }}
+                </span>
+            </template>
+        </nav>
 
         <!-- Center: search with autocomplete -->
         <div class="flex-1 flex justify-center">

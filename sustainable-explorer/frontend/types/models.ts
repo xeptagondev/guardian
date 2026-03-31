@@ -18,6 +18,7 @@ export interface Project {
     sector: string;
     sectoralScope: string;
     createdAt: string;
+    rawVc?: Record<string, any>;
 }
 
 export interface Credit {
@@ -30,6 +31,7 @@ export interface Credit {
     projectId: string;
     registry: string;
     mintDate: string;
+    rawVc?: Record<string, any>;
 }
 
 export interface Registry {
