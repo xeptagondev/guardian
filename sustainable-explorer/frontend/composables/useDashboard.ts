@@ -1,4 +1,4 @@
-import { MOCK_PROJECTS, MOCK_CREDITS } from '~/data';
+import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_RETIREMENTS } from '~/data';
 import type { ActivityItem, MapPoint, MapCountry } from '~/types/models';
 import { formatCredits } from '~/lib/format';
 
@@ -139,39 +139,108 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             .sort((a, b) => b.projects - a.projects);
     });
 
-    // Issuance months derived from filtered projects grouped by createdAt month
-    const issuanceMonths = computed(() => {
-        const monthMap: Record<string, number> = {};
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    // Aggregation helper: group date/value pairs by period
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const quarterNames = ['Q1', 'Q2', 'Q3', 'Q4'];
 
-        for (const p of filteredProjects.value) {
-            const date = new Date(p.createdAt);
-            const key = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}`;
-            const label = monthNames[date.getMonth()];
-            monthMap[key] = (monthMap[key] || 0) + Math.round(p.credits / 1000000) || 1;
+    function aggregateByPeriod(
+        entries: { date: string; value: number }[],
+        period: 'monthly' | 'quarterly' | 'yearly',
+    ): { label: string; value: number }[] {
+        const map: Record<string, number> = {};
+
+        for (const e of entries) {
+            const d = new Date(e.date);
+            let key: string;
+            let label: string;
+            if (period === 'yearly') {
+                key = String(d.getFullYear());
+                label = key;
+            } else if (period === 'quarterly') {
+                const q = Math.floor(d.getMonth() / 3);
+                key = `${d.getFullYear()}-Q${q}`;
+                label = `${quarterNames[q]} ${d.getFullYear()}`;
+            } else {
+                key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+                label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`;
+            }
+            map[key] = (map[key] || 0) + e.value;
         }
 
-        // Sort by date and take last 6 months
-        return Object.entries(monthMap)
+        return Object.entries(map)
             .sort((a, b) => a[0].localeCompare(b[0]))
-            .slice(-6)
-            .map(([key, value]) => {
-                const [, monthIdx] = key.split('-');
-                return {
-                    month: monthNames[parseInt(monthIdx)],
-                    value: Math.max(value, 1),
-                };
+            .map(([, value]) => {
+                // reverse-lookup label from sorted entries
+                return { label: '', value: Math.max(Math.round(value), 1) };
             });
-    });
+    }
 
+    // Build issuance time series from filtered projects
+    function buildIssuanceSeries(period: 'monthly' | 'quarterly' | 'yearly'): { label: string; value: number }[] {
+        const map: Record<string, { sortKey: string; label: string; value: number }> = {};
+
+        for (const p of filteredProjects.value) {
+            const d = new Date(p.createdAt);
+            const val = p.credits / 1000000;
+            let sortKey: string;
+            let label: string;
+            if (period === 'yearly') {
+                sortKey = String(d.getFullYear());
+                label = sortKey;
+            } else if (period === 'quarterly') {
+                const q = Math.floor(d.getMonth() / 3);
+                sortKey = `${d.getFullYear()}-Q${q}`;
+                label = `${quarterNames[q]} '${String(d.getFullYear()).slice(2)}`;
+            } else {
+                sortKey = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+                label = `${monthNames[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`;
+            }
+            if (!map[sortKey]) map[sortKey] = { sortKey, label, value: 0 };
+            map[sortKey].value += val;
+        }
+
+        return Object.values(map)
+            .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+            .map(e => ({ label: e.label, value: Math.max(Math.round(e.value * 10) / 10, 0.1) }));
+    }
+
+    function buildRetirementSeries(period: 'monthly' | 'quarterly' | 'yearly'): { label: string; value: number }[] {
+        const map: Record<string, { sortKey: string; label: string; value: number }> = {};
+
+        for (const r of filteredRetirements.value) {
+            const d = new Date(r.date);
+            const val = r.quantity / 1000000;
+            let sortKey: string;
+            let label: string;
+            if (period === 'yearly') {
+                sortKey = String(d.getFullYear());
+                label = sortKey;
+            } else if (period === 'quarterly') {
+                const q = Math.floor(d.getMonth() / 3);
+                sortKey = `${d.getFullYear()}-Q${q}`;
+                label = `${quarterNames[q]} '${String(d.getFullYear()).slice(2)}`;
+            } else {
+                sortKey = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+                label = `${monthNames[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`;
+            }
+            if (!map[sortKey]) map[sortKey] = { sortKey, label, value: 0 };
+            map[sortKey].value += val;
+        }
+
+        return Object.values(map)
+            .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+            .map(e => ({ label: e.label, value: Math.max(Math.round(e.value * 10) / 10, 0.1) }));
+    }
+
+    // Keep backward-compat computed values (default monthly)
+    const issuanceMonths = computed(() => buildIssuanceSeries('monthly'));
     const issuanceMax = computed(() => {
         const vals = issuanceMonths.value.map(m => m.value);
         return vals.length > 0 ? Math.max(...vals) : 1;
     });
-
-    const issuanceTotal = computed(() => {
-        return issuanceMonths.value.reduce((sum, m) => sum + m.value, 0);
-    });
+    const issuanceTotal = computed(() =>
+        Math.round(issuanceMonths.value.reduce((sum, m) => sum + m.value, 0) * 10) / 10,
+    );
 
     // Recent activity derived from the most recent projects and credits
     const recentActivity = computed<ActivityItem[]>(() => {
@@ -383,6 +452,59 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         };
     }
 
+    // Total retired from mock retirements, filtered by relevant projects
+    const filteredRetirements = computed(() => {
+        const projectIds = new Set(filteredProjects.value.map(p => p.id));
+        return MOCK_RETIREMENTS.filter(r => projectIds.has(r.projectId));
+    });
+
+    const totalRetired = computed(() => filteredRetirements.value.reduce((sum, r) => sum + r.quantity, 0));
+
+    // Retirement trend by month
+    const retirementMonths = computed(() => {
+        const monthMap: Record<string, number> = {};
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        for (const r of filteredRetirements.value) {
+            const date = new Date(r.date);
+            const key = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}`;
+            monthMap[key] = (monthMap[key] || 0) + Math.round(r.quantity / 1000000) || 1;
+        }
+
+        return Object.entries(monthMap)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .slice(-6)
+            .map(([key, value]) => {
+                const [, monthIdx] = key.split('-');
+                return { month: monthNames[parseInt(monthIdx)], value: Math.max(value, 1) };
+            });
+    });
+
+    const retirementMax = computed(() => {
+        const vals = retirementMonths.value.map(m => m.value);
+        return vals.length > 0 ? Math.max(...vals) : 1;
+    });
+
+    const retirementTotal = computed(() => retirementMonths.value.reduce((sum, m) => sum + m.value, 0));
+
+    // Vintage distribution
+    const vintageDistribution = computed(() => {
+        const vintageMap: Record<string, { projects: number; credits: number }> = {};
+        for (const p of filteredProjects.value) {
+            if (!vintageMap[p.vintage]) vintageMap[p.vintage] = { projects: 0, credits: 0 };
+            vintageMap[p.vintage].projects++;
+            vintageMap[p.vintage].credits += p.credits;
+        }
+        return Object.entries(vintageMap)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([year, data]) => ({ year, projects: data.projects, credits: data.credits }));
+    });
+
+    const vintageMax = computed(() => {
+        const vals = vintageDistribution.value.map(v => v.credits);
+        return vals.length > 0 ? Math.max(...vals) : 1;
+    });
+
     return {
         stats,
         hasActiveFilter,
@@ -399,5 +521,13 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         developerOptions,
         registryOptions,
         getCountryDetail,
+        totalRetired,
+        retirementMonths,
+        retirementMax,
+        retirementTotal,
+        vintageDistribution,
+        vintageMax,
+        buildIssuanceSeries,
+        buildRetirementSeries,
     };
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FolderKanban, FileJson } from 'lucide-vue-next';
+import { FolderKanban, FileJson, Sparkles } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import { formatCredits } from '~/lib/format';
 import { SDG_LIST } from '~/lib/sdgs';
@@ -23,13 +23,31 @@ const allProjects = computed(() => projects.value.map(p => ({
     creditsFormatted: formatCredits(p.credits),
 })));
 
-const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters } =
+const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters, applyPreset } =
     useFilteredPagination(allProjects, {
         searchFields: ['name', 'country', 'methodology', 'registry', 'sector', 'sectoralScope'],
         pageSize: 8,
         defaultSort: { key: 'credits', dir: 'desc' },
         arrayFields: ['sdgs'],
     });
+
+const presets = [
+    { label: 'Active Forestry', filters: { status: 'Active', sector: 'Forestry and Land Use' } },
+    { label: 'Gold Standard', filters: { registry: 'Gold Standard' } },
+    { label: 'SDG 13: Climate Action', filters: { sdgs: '13' } },
+    { label: 'Verification Pending', filters: { status: 'Verification' } },
+    { label: 'Vintage 2024', filters: { vintage: '2024' } },
+    { label: 'Blue Carbon', search: 'Blue Carbon' },
+];
+
+// Summary statistics for filtered results
+const summaryStats = computed(() => {
+    const f = filtered.value;
+    const totalIssuances = f.reduce((sum, p) => sum + p.credits, 0);
+    const uniqueCountries = new Set(f.map(p => p.country)).size;
+    const uniqueRegistries = new Set(f.map(p => p.registry)).size;
+    return { totalIssuances, uniqueCountries, uniqueRegistries };
+});
 
 const filters = computed<FilterOption[]>(() => [
     {
@@ -94,6 +112,34 @@ const statusColor: Record<string, string> = {
                 @filter="setFilter"
                 @clear="clearFilters"
             />
+
+            <!-- Preset Templates -->
+            <div class="flex items-center gap-2 mt-2.5 flex-wrap">
+                <span class="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Sparkles class="h-3 w-3" /> Quick filters:
+                </span>
+                <button
+                    v-for="preset in presets"
+                    :key="preset.label"
+                    class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    @click="applyPreset({ search: preset.search, filters: preset.filters } as any)"
+                >
+                    {{ preset.label }}
+                </button>
+            </div>
+        </div>
+
+        <!-- Summary Stats -->
+        <div v-if="filtered.length !== total" class="px-6 pb-3">
+            <div class="flex items-center gap-4 rounded-lg bg-muted/50 px-4 py-2.5 text-xs">
+                <span class="font-medium text-foreground">{{ filtered.length }} projects found</span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">Total issuances: <strong class="text-foreground">{{ formatCredits(summaryStats.totalIssuances) }}</strong></span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">Countries: <strong class="text-foreground">{{ summaryStats.uniqueCountries }}</strong></span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">Registries: <strong class="text-foreground">{{ summaryStats.uniqueRegistries }}</strong></span>
+            </div>
         </div>
 
         <div class="px-6 pb-6">

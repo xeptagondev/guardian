@@ -34,6 +34,30 @@ export interface Credit {
     rawVc?: Record<string, any>;
 }
 
+export interface Transfer {
+    id: string;
+    creditId: string;
+    projectId: string;
+    from: string;
+    to: string;
+    quantity: number;
+    date: string;
+    txHash: string;
+    status: 'Completed' | 'Pending';
+}
+
+export interface Retirement {
+    id: string;
+    creditId: string;
+    projectId: string;
+    beneficiary: string;
+    quantity: number;
+    date: string;
+    txHash: string;
+    reason: string;
+    status: 'Completed' | 'Pending';
+}
+
 export interface Registry {
     id: string;
     name: string;

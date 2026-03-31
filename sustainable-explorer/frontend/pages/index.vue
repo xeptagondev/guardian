@@ -19,6 +19,7 @@ import {
     ChevronDown,
     X,
     Check,
+    Flame,
 } from 'lucide-vue-next';
 import { formatCredits } from '~/lib/format';
 
@@ -26,14 +27,24 @@ const viewMode = ref<'map' | 'table'>('map');
 const chartMode = ref<'projects' | 'credits'>('projects');
 const selectedCountry = ref<string | null>(null);
 
-// --- Filter dropdowns ---
-const selectedDeveloper = ref<string>('All Developers');
-const selectedRegistry = ref<string>('All Registries');
+// --- Filter dropdowns (sync with URL) ---
+const route = useRoute();
+const router = useRouter();
+
+const selectedDeveloper = ref<string>((route.query.developer as string) || 'All Developers');
+const selectedRegistry = ref<string>((route.query.registry as string) || 'All Registries');
 
 const dashboardFilters = computed(() => ({
     developer: selectedDeveloper.value,
     registry: selectedRegistry.value,
 }));
+
+function syncDashboardUrl() {
+    const query: Record<string, string> = {};
+    if (selectedDeveloper.value && selectedDeveloper.value !== 'All Developers') query.developer = selectedDeveloper.value;
+    if (selectedRegistry.value && selectedRegistry.value !== 'All Registries') query.registry = selectedRegistry.value;
+    router.replace({ query });
+}
 
 const {
     stats,
@@ -51,7 +62,29 @@ const {
     developerOptions,
     registryOptions,
     getCountryDetail,
+    totalRetired,
+    retirementMonths,
+    retirementMax,
+    retirementTotal,
+    vintageDistribution,
+    vintageMax,
+    buildIssuanceSeries,
+    buildRetirementSeries,
 } = useDashboard(dashboardFilters);
+
+type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
+const issuancePeriod = ref<TimePeriod>('monthly');
+const retirementPeriod = ref<TimePeriod>('monthly');
+
+const issuanceSeriesData = computed(() => buildIssuanceSeries(issuancePeriod.value));
+const issuanceSeriesTotal = computed(() =>
+    Math.round(issuanceSeriesData.value.reduce((s, d) => s + d.value, 0) * 10) / 10,
+);
+
+const retirementSeriesData = computed(() => buildRetirementSeries(retirementPeriod.value));
+const retirementSeriesTotal = computed(() =>
+    Math.round(retirementSeriesData.value.reduce((s, d) => s + d.value, 0) * 10) / 10,
+);
 
 const sectorChartSegments = computed(() =>
     sectorBreakdown.value.map(s => ({
@@ -83,14 +116,17 @@ onClickOutside(registryRef, () => { registryDropdownOpen.value = false; });
 function selectDeveloper(val: string) {
     selectedDeveloper.value = val;
     developerDropdownOpen.value = false;
+    syncDashboardUrl();
 }
 function selectRegistry(val: string) {
     selectedRegistry.value = val;
     registryDropdownOpen.value = false;
+    syncDashboardUrl();
 }
 function clearFilters() {
     selectedDeveloper.value = 'All Developers';
     selectedRegistry.value = 'All Registries';
+    syncDashboardUrl();
 }
 
 const activeDetail = computed(() => {
@@ -170,6 +206,18 @@ const filteredStats = computed(() => {
             icon: Coins,
             accent: 'text-stat-rose',
             accentBg: 'bg-stat-rose/10',
+            to: '/credits',
+        },
+        {
+            label: 'Total Retired',
+            value: formatCredits(totalRetired.value),
+            change: hasActiveFilter.value ? '' : '+8.7%',
+            trend: 'up',
+            sub: 'Permanently retired',
+            tooltip: 'Sum of all issuances permanently retired (burned) for offsetting purposes across matching projects.',
+            icon: Flame,
+            accent: 'text-orange-500',
+            accentBg: 'bg-orange-500/10',
             to: '/credits',
         },
     ];
@@ -298,7 +346,7 @@ const filteredStats = computed(() => {
         </div>
 
         <!-- Stat Cards -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 px-6 pb-6">
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 px-6 pb-6">
             <NuxtLink
                 v-for="s in filteredStats"
                 :key="s.label"
@@ -607,34 +655,110 @@ const filteredStats = computed(() => {
                 <div>
                     <div class="flex items-center justify-between px-6 py-4">
                         <div>
-                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Issuance Trend <InfoTooltip text="Monthly issuance volume derived from project creation dates. Each bar represents total issuances (millions) for that month." /></h2>
-                            <p class="text-xs text-muted-foreground mt-0.5">Monthly volume (millions)</p>
+                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Issuance Trend <InfoTooltip text="Issuance volume over time derived from project creation dates." /></h2>
+                            <p class="text-xs text-muted-foreground mt-0.5">Volume (millions)</p>
                         </div>
-                        <NuxtLink to="/analytics" class="text-xs font-medium text-primary hover:underline">Analytics</NuxtLink>
+                        <div class="flex items-center gap-2">
+                            <div class="flex items-center rounded-lg border p-0.5">
+                                <button
+                                    v-for="p in (['monthly', 'quarterly', 'yearly'] as const)"
+                                    :key="p"
+                                    class="rounded-md px-2.5 py-0.5 text-[11px] font-medium transition-colors"
+                                    :class="issuancePeriod === p ? 'bg-foreground text-background shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                                    @click="issuancePeriod = p"
+                                >
+                                    {{ p === 'monthly' ? 'Monthly' : p === 'quarterly' ? 'Quarterly' : 'Yearly' }}
+                                </button>
+                            </div>
+                            <NuxtLink to="/analytics" class="text-xs font-medium text-primary hover:underline">Analytics</NuxtLink>
+                        </div>
                     </div>
                     <div class="px-6 pb-6">
                         <div class="rounded-xl border bg-card p-5">
-                            <!-- Simple bar chart with CSS -->
-                            <div v-if="issuanceMonths.length > 0" class="flex items-end gap-3 h-48">
+                            <TrendLineChart
+                                :data="issuanceSeriesData"
+                                color="hsl(142, 76%, 36%)"
+                                fill-color="hsl(142, 76%, 36%, 0.08)"
+                                empty-text="No issuance data matches the selected filters"
+                            />
+                            <div class="flex items-center justify-between mt-4 pt-3 border-t">
+                                <span class="text-xs text-muted-foreground">{{ issuanceSeriesData.length }} {{ issuancePeriod === 'monthly' ? 'months' : issuancePeriod === 'quarterly' ? 'quarters' : 'years' }}</span>
+                                <span class="text-sm font-semibold text-foreground">{{ issuanceSeriesTotal }}M total</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Retirement Trend & Vintage Distribution -->
+        <div class="border-t">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-0">
+                <!-- Retirement Trend -->
+                <div class="lg:border-r">
+                    <div class="flex items-center justify-between px-6 py-4">
+                        <div>
+                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Retirement Trend <InfoTooltip text="Retirement volume over time. Shows issuances permanently retired (burned) for offsetting." /></h2>
+                            <p class="text-xs text-muted-foreground mt-0.5">Volume (millions)</p>
+                        </div>
+                        <div class="flex items-center rounded-lg border p-0.5">
+                            <button
+                                v-for="p in (['monthly', 'quarterly', 'yearly'] as const)"
+                                :key="p"
+                                class="rounded-md px-2.5 py-0.5 text-[11px] font-medium transition-colors"
+                                :class="retirementPeriod === p ? 'bg-foreground text-background shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                                @click="retirementPeriod = p"
+                            >
+                                {{ p === 'monthly' ? 'Monthly' : p === 'quarterly' ? 'Quarterly' : 'Yearly' }}
+                            </button>
+                        </div>
+                    </div>
+                    <div class="px-6 pb-6">
+                        <div class="rounded-xl border bg-card p-5">
+                            <TrendLineChart
+                                :data="retirementSeriesData"
+                                color="hsl(24, 95%, 53%)"
+                                fill-color="hsl(24, 95%, 53%, 0.08)"
+                                empty-text="No retirement data matches the selected filters"
+                            />
+                            <div class="flex items-center justify-between mt-4 pt-3 border-t">
+                                <span class="text-xs text-muted-foreground">{{ retirementSeriesData.length }} {{ retirementPeriod === 'monthly' ? 'months' : retirementPeriod === 'quarterly' ? 'quarters' : 'years' }}</span>
+                                <span class="text-sm font-semibold text-foreground">{{ retirementSeriesTotal }}M total</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Vintage Distribution -->
+                <div>
+                    <div class="flex items-center justify-between px-6 py-4">
+                        <div>
+                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">Vintage Distribution <InfoTooltip text="Distribution of issuances by vintage year. Shows which years have the most credits issued across matching projects." /></h2>
+                            <p class="text-xs text-muted-foreground mt-0.5">Issuances by vintage year</p>
+                        </div>
+                    </div>
+                    <div class="px-6 pb-6">
+                        <div class="rounded-xl border bg-card p-5">
+                            <div v-if="vintageDistribution.length > 0" class="flex items-end gap-3 h-48">
                                 <div
-                                    v-for="m in issuanceMonths"
-                                    :key="m.month"
+                                    v-for="v in vintageDistribution"
+                                    :key="v.year"
                                     class="flex-1 flex flex-col items-center gap-2"
                                 >
-                                    <span class="text-[11px] font-medium text-muted-foreground tabular-nums">{{ m.value }}M</span>
+                                    <span class="text-[11px] font-medium text-muted-foreground tabular-nums">{{ formatCredits(v.credits) }}</span>
                                     <div
-                                        class="w-full rounded-t-md bg-primary/80 hover:bg-primary transition-colors"
-                                        :style="{ height: `${(m.value / issuanceMax) * 140}px` }"
+                                        class="w-full rounded-t-md bg-chart-2/80 hover:bg-chart-2 transition-colors"
+                                        :style="{ height: `${(v.credits / vintageMax) * 140}px` }"
                                     />
-                                    <span class="text-[11px] text-muted-foreground">{{ m.month }}</span>
+                                    <span class="text-[11px] text-muted-foreground">{{ v.year }}</span>
                                 </div>
                             </div>
                             <div v-else class="flex items-center justify-center h-48 text-sm text-muted-foreground">
-                                No issuance data matches the selected filters
+                                No vintage data matches the selected filters
                             </div>
                             <div class="flex items-center justify-between mt-4 pt-3 border-t">
-                                <span class="text-xs text-muted-foreground">{{ issuanceMonths.length > 0 ? `${issuanceMonths.length}-month total` : 'Total' }}</span>
-                                <span class="text-sm font-semibold text-foreground">{{ issuanceTotal }}M</span>
+                                <span class="text-xs text-muted-foreground">{{ vintageDistribution.length }} vintages</span>
+                                <span class="text-sm font-semibold text-foreground">{{ vintageDistribution.reduce((s, v) => s + v.projects, 0) }} projects</span>
                             </div>
                         </div>
                     </div>

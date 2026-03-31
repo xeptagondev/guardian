@@ -7,14 +7,64 @@ export function useFilteredPagination<T>(
         pageSize?: number;
         arrayFields?: (keyof T)[];
         defaultSort?: { key: keyof T; dir: 'asc' | 'desc' };
+        syncUrl?: boolean;
     },
 ) {
-    const searchQuery = ref('');
-    const currentPage = ref(1);
+    const route = useRoute();
+    const router = useRouter();
+    const syncUrl = opts.syncUrl ?? true;
+
+    // Initialize from URL query params if available
+    const initialQuery = route.query;
+    const searchQuery = ref((initialQuery.q as string) || '');
+    const currentPage = ref(initialQuery.page ? parseInt(initialQuery.page as string) : 1);
     const pageSize = opts.pageSize ?? 10;
-    const activeFilters = ref<Record<string, string>>({});
-    const sortKey = ref<keyof T | null>(opts.defaultSort?.key ?? null) as Ref<keyof T | null>;
-    const sortDir = ref<SortDirection>(opts.defaultSort?.dir ?? null);
+    const activeFilters = ref<Record<string, string>>(parseFiltersFromQuery(initialQuery));
+    const sortKey = ref<keyof T | null>(
+        (initialQuery.sort as keyof T | undefined) ?? opts.defaultSort?.key ?? null,
+    ) as Ref<keyof T | null>;
+    const sortDir = ref<SortDirection>(
+        (initialQuery.dir as SortDirection) ?? opts.defaultSort?.dir ?? null,
+    );
+
+    function parseFiltersFromQuery(query: Record<string, any>): Record<string, string> {
+        const reserved = new Set(['q', 'page', 'sort', 'dir']);
+        const filters: Record<string, string> = {};
+        for (const [key, val] of Object.entries(query)) {
+            if (!reserved.has(key) && typeof val === 'string' && val) {
+                filters[key] = val;
+            }
+        }
+        return filters;
+    }
+
+    function buildQuery(): Record<string, string> {
+        const query: Record<string, string> = {};
+        if (searchQuery.value) query.q = searchQuery.value;
+        if (currentPage.value > 1) query.page = String(currentPage.value);
+        if (sortKey.value && sortDir.value) {
+            // Only include sort in URL if it differs from default
+            const isDefault = opts.defaultSort
+                && sortKey.value === opts.defaultSort.key
+                && sortDir.value === opts.defaultSort.dir;
+            if (!isDefault) {
+                query.sort = String(sortKey.value);
+                query.dir = sortDir.value;
+            }
+        }
+        for (const [key, val] of Object.entries(activeFilters.value)) {
+            if (val && val !== 'all') query[key] = val;
+        }
+        return query;
+    }
+
+    let skipUrlSync = false;
+
+    function syncToUrl() {
+        if (!syncUrl || skipUrlSync) return;
+        const query = buildQuery();
+        router.replace({ query });
+    }
 
     function toggleSort(key: keyof T) {
         if (sortKey.value === key) {
@@ -31,6 +81,7 @@ export function useFilteredPagination<T>(
             sortDir.value = 'asc';
         }
         currentPage.value = 1;
+        syncToUrl();
     }
 
     const filtered = computed(() => {
@@ -98,16 +149,37 @@ export function useFilteredPagination<T>(
     function setFilter(key: string, value: string) {
         activeFilters.value = { ...activeFilters.value, [key]: value };
         currentPage.value = 1;
+        syncToUrl();
     }
 
     function clearFilters() {
         activeFilters.value = {};
         searchQuery.value = '';
         currentPage.value = 1;
+        syncToUrl();
+    }
+
+    // Apply preset: sets search + filters + sort in one go
+    function applyPreset(preset: { search?: string; filters?: Record<string, string>; sort?: { key: keyof T; dir: 'asc' | 'desc' } }) {
+        skipUrlSync = true;
+        searchQuery.value = preset.search || '';
+        activeFilters.value = preset.filters ? { ...preset.filters } : {};
+        if (preset.sort) {
+            sortKey.value = preset.sort.key;
+            sortDir.value = preset.sort.dir;
+        }
+        currentPage.value = 1;
+        skipUrlSync = false;
+        syncToUrl();
     }
 
     watch(searchQuery, () => {
         currentPage.value = 1;
+        syncToUrl();
+    });
+
+    watch(currentPage, () => {
+        syncToUrl();
     });
 
     return {
@@ -123,5 +195,6 @@ export function useFilteredPagination<T>(
         toggleSort,
         setFilter,
         clearFilters,
+        applyPreset,
     };
 }

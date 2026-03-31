@@ -3,20 +3,33 @@ import {
     ArrowLeft, FileJson, MapPin, Calendar, Building2, Shield, Coins,
     ChevronDown, ChevronUp, Copy, Check, Users, BookOpen, Target,
     Globe, Leaf, FolderKanban, Layers, BarChart3, Clock, Activity,
-    GitBranch, ArrowRight, CheckCircle2, Circle, Zap, FileText, Network,
+    GitBranch, ArrowRight, CheckCircle2, Circle, Zap, FileText, Network, Repeat, Flame,
     TrendingUp, TrendingDown, AlertTriangle, Database, ExternalLink,
 } from 'lucide-vue-next';
-import { MOCK_PROJECTS, MOCK_CREDITS } from '~/data';
+import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_TRANSFERS, MOCK_RETIREMENTS } from '~/data';
 import { formatCredits, formatNumber } from '~/lib/format';
 import { getSDG } from '~/lib/sdgs';
 import { generateProjectVc, generateCreditVc } from '~/lib/mock-vc';
+import { REGISTRY_TERM_MAPPINGS } from '~/lib/registry-terms';
 
 const route = useRoute();
 const projectId = computed(() => route.params.id as string);
 const project = computed(() => MOCK_PROJECTS.find(p => p.id === projectId.value));
 const linkedCredits = computed(() => MOCK_CREDITS.filter(c => c.projectId === projectId.value));
+const linkedTransfers = computed(() => MOCK_TRANSFERS.filter(t => t.projectId === projectId.value));
+const linkedRetirements = computed(() => MOCK_RETIREMENTS.filter(r => r.projectId === projectId.value));
 const projectVc = computed(() => project.value ? generateProjectVc(project.value) : null);
 
+// Lifecycle summary
+const lifecycleSummary = computed(() => {
+    const totalIssued = linkedCredits.value.reduce((sum, c) => sum + c.supply, 0);
+    const totalTransferred = linkedTransfers.value.reduce((sum, t) => sum + t.quantity, 0);
+    const totalRetired = linkedRetirements.value.reduce((sum, r) => sum + r.quantity, 0);
+    const active = totalIssued - totalRetired;
+    return { totalIssued, totalTransferred, totalRetired, active };
+});
+
+const termMappingOpen = ref(false);
 const vcViewerOpen = ref(false);
 const vcViewerTitle = ref('');
 const vcViewerData = ref<Record<string, any> | null>(null);
@@ -230,6 +243,42 @@ const fullMethodologyName = computed(() => {
                     <div class="text-sm font-medium text-foreground">{{ formatNumber(project.credits) }}</div>
                 </div>
             </div>
+
+            <!-- Registry Term Mapping (collapsible) -->
+            <div class="border-t">
+                <button
+                    class="flex w-full items-center justify-between px-5 py-3 text-xs font-medium text-muted-foreground hover:bg-muted/30 transition-colors"
+                    @click="termMappingOpen = !termMappingOpen"
+                >
+                    <span class="flex items-center gap-2">
+                        <Layers class="h-3.5 w-3.5" />
+                        Registry Term Mapping — {{ project.registry }}
+                    </span>
+                    <ChevronDown class="h-3.5 w-3.5 transition-transform" :class="termMappingOpen ? 'rotate-180' : ''" />
+                </button>
+                <div v-if="termMappingOpen" class="border-t">
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="bg-muted/20">
+                                <th class="text-left py-2 px-5 font-medium text-muted-foreground uppercase tracking-wider">Standard Term</th>
+                                <th class="text-left py-2 px-4 font-medium text-muted-foreground uppercase tracking-wider">{{ project.registry }} Term</th>
+                                <th class="text-left py-2 px-4 font-medium text-muted-foreground uppercase tracking-wider">Description</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr v-for="m in REGISTRY_TERM_MAPPINGS" :key="m.canonical" class="hover:bg-muted/20">
+                                <td class="py-2 px-5 font-medium text-foreground">{{ m.canonical }}</td>
+                                <td class="py-2 px-4">
+                                    <span class="inline-flex items-center rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[11px] font-medium">
+                                        {{ m.terms[project.registry] || m.canonical }}
+                                    </span>
+                                </td>
+                                <td class="py-2 px-4 text-muted-foreground">{{ m.description }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
 
         <!-- Linked Issuances -->
@@ -284,6 +333,139 @@ const fullMethodologyName = computed(() => {
             </div>
             <div v-else class="px-5 py-8 text-center text-sm text-muted-foreground">
                 No issuances have been made for this project yet.
+            </div>
+        </div>
+
+        <!-- Credit Lifecycle -->
+        <div class="rounded-xl border bg-card overflow-hidden">
+            <div class="px-5 py-3.5 border-b bg-muted/30">
+                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <GitBranch class="h-4 w-4 text-primary" />
+                    Credit Lifecycle
+                </h2>
+                <p class="text-[11px] text-muted-foreground mt-0.5">Issuance → Transfers → Retirements</p>
+            </div>
+
+            <!-- Lifecycle Summary Bar -->
+            <div class="grid grid-cols-4 gap-px bg-border">
+                <div class="bg-card px-5 py-4 text-center">
+                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ formatNumber(lifecycleSummary.totalIssued) }}</div>
+                    <div class="text-[11px] text-muted-foreground">Total Issued</div>
+                </div>
+                <div class="bg-card px-5 py-4 text-center">
+                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ formatNumber(lifecycleSummary.totalTransferred) }}</div>
+                    <div class="text-[11px] text-muted-foreground">Transferred</div>
+                </div>
+                <div class="bg-card px-5 py-4 text-center">
+                    <div class="text-lg font-semibold text-stat-rose tabular-nums">{{ formatNumber(lifecycleSummary.totalRetired) }}</div>
+                    <div class="text-[11px] text-muted-foreground">Retired</div>
+                </div>
+                <div class="bg-card px-5 py-4 text-center">
+                    <div class="text-lg font-semibold text-stat-green tabular-nums">{{ formatNumber(lifecycleSummary.active) }}</div>
+                    <div class="text-[11px] text-muted-foreground">Active</div>
+                </div>
+            </div>
+
+            <!-- Lifecycle progress bar -->
+            <div class="px-5 py-3 border-t">
+                <div class="flex h-2.5 rounded-full overflow-hidden bg-muted">
+                    <div
+                        v-if="lifecycleSummary.totalIssued > 0"
+                        class="bg-stat-rose transition-all"
+                        :style="{ width: `${(lifecycleSummary.totalRetired / lifecycleSummary.totalIssued) * 100}%` }"
+                        title="Retired"
+                    />
+                    <div
+                        v-if="lifecycleSummary.totalIssued > 0"
+                        class="bg-stat-green transition-all"
+                        :style="{ width: `${(lifecycleSummary.active / lifecycleSummary.totalIssued) * 100}%` }"
+                        title="Active"
+                    />
+                </div>
+                <div class="flex items-center justify-between mt-1.5">
+                    <div class="flex items-center gap-3">
+                        <span class="flex items-center gap-1 text-[10px] text-muted-foreground"><span class="h-2 w-2 rounded-full bg-stat-rose" /> Retired</span>
+                        <span class="flex items-center gap-1 text-[10px] text-muted-foreground"><span class="h-2 w-2 rounded-full bg-stat-green" /> Active</span>
+                    </div>
+                    <span v-if="lifecycleSummary.totalIssued > 0" class="text-[10px] text-muted-foreground">
+                        {{ ((lifecycleSummary.totalRetired / lifecycleSummary.totalIssued) * 100).toFixed(1) }}% retired
+                    </span>
+                </div>
+            </div>
+
+            <!-- Transfers -->
+            <div v-if="linkedTransfers.length > 0" class="border-t">
+                <div class="px-5 py-2.5 bg-muted/20 flex items-center gap-2">
+                    <Repeat class="h-3.5 w-3.5 text-stat-blue" />
+                    <span class="text-xs font-semibold text-foreground">Transfers</span>
+                    <span class="text-[11px] text-muted-foreground">({{ linkedTransfers.length }})</span>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b bg-muted/10">
+                            <th class="text-left py-2 px-5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">From</th>
+                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">To</th>
+                            <th class="text-right py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Quantity</th>
+                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Date</th>
+                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y">
+                        <tr v-for="t in linkedTransfers" :key="t.id" class="hover:bg-muted/30 transition-colors">
+                            <td class="py-2.5 px-5 text-foreground">{{ t.from }}</td>
+                            <td class="py-2.5 px-4">
+                                <span class="flex items-center gap-1.5">
+                                    <ArrowRight class="h-3 w-3 text-stat-blue" />
+                                    <span class="text-foreground">{{ t.to }}</span>
+                                </span>
+                            </td>
+                            <td class="py-2.5 px-4 text-right tabular-nums font-medium">{{ formatNumber(t.quantity) }}</td>
+                            <td class="py-2.5 px-4 text-muted-foreground">{{ t.date }}</td>
+                            <td class="py-2.5 px-4">
+                                <span :class="[t.status === 'Completed' ? 'bg-stat-green/10 text-stat-green' : 'bg-stat-amber/10 text-stat-amber', 'text-[11px] font-medium rounded-full px-2 py-0.5']">
+                                    {{ t.status }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Retirements -->
+            <div v-if="linkedRetirements.length > 0" class="border-t">
+                <div class="px-5 py-2.5 bg-muted/20 flex items-center gap-2">
+                    <Flame class="h-3.5 w-3.5 text-stat-rose" />
+                    <span class="text-xs font-semibold text-foreground">Retirements</span>
+                    <span class="text-[11px] text-muted-foreground">({{ linkedRetirements.length }})</span>
+                </div>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b bg-muted/10">
+                            <th class="text-left py-2 px-5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Beneficiary</th>
+                            <th class="text-right py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Quantity</th>
+                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Reason</th>
+                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Date</th>
+                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y">
+                        <tr v-for="r in linkedRetirements" :key="r.id" class="hover:bg-muted/30 transition-colors">
+                            <td class="py-2.5 px-5 text-foreground font-medium">{{ r.beneficiary }}</td>
+                            <td class="py-2.5 px-4 text-right tabular-nums font-medium">{{ formatNumber(r.quantity) }}</td>
+                            <td class="py-2.5 px-4 text-muted-foreground text-xs">{{ r.reason }}</td>
+                            <td class="py-2.5 px-4 text-muted-foreground">{{ r.date }}</td>
+                            <td class="py-2.5 px-4">
+                                <span class="text-[11px] font-medium rounded-full px-2 py-0.5 bg-stat-green/10 text-stat-green">
+                                    {{ r.status }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div v-if="linkedTransfers.length === 0 && linkedRetirements.length === 0" class="border-t px-5 py-6 text-center text-sm text-muted-foreground">
+                No transfers or retirements recorded for this project yet.
             </div>
         </div>
 
