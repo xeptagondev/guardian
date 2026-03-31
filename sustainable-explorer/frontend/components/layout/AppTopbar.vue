@@ -24,7 +24,6 @@ const routeMeta: Record<string, { label: string; icon: any }> = {
     '/developers': { label: 'Developers', icon: Users },
     '/sdgs': { label: 'SDGs', icon: Target },
     '/analytics': { label: 'Analytics', icon: BarChart3 },
-    '/search': { label: 'Search', icon: Search },
     '/status': { label: 'Sync Status', icon: Activity },
 };
 
@@ -96,7 +95,7 @@ const searchIndex = computed(() => {
             color: 'text-stat-amber',
             title: p.name,
             sub: `${p.registry} ${p.methodology} \u00b7 ${p.status}`,
-            to: '/projects',
+            to: `/projects/${p.id}`,
         });
     }
 
@@ -183,9 +182,6 @@ function selectResult(result: typeof searchIndex.value[0]) {
 
 function onSearchKeydown(e: KeyboardEvent) {
     if (!searchOpen.value || filteredResults.value.length === 0) {
-        if (e.key === 'Enter' && searchQuery.value.trim()) {
-            router.push({ path: '/search', query: { q: searchQuery.value } });
-        }
         return;
     }
 
@@ -199,9 +195,6 @@ function onSearchKeydown(e: KeyboardEvent) {
         e.preventDefault();
         if (selectedIndex.value >= 0) {
             selectResult(filteredResults.value[selectedIndex.value]);
-        } else {
-            searchOpen.value = false;
-            router.push({ path: '/search', query: { q: searchQuery.value } });
         }
     } else if (e.key === 'Escape') {
         searchOpen.value = false;
@@ -287,17 +280,6 @@ function onSearchKeydown(e: KeyboardEvent) {
                             </button>
                         </div>
 
-                        <!-- Footer: full search link -->
-                        <div class="border-t px-3 py-2">
-                            <button
-                                class="flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                                @click="searchOpen = false; router.push({ path: '/search', query: { q: searchQuery } })"
-                            >
-                                <Search class="h-3 w-3" />
-                                <span>Search all for "<strong class="text-foreground">{{ searchQuery }}</strong>"</span>
-                                <ArrowRight class="h-3 w-3 ml-auto" />
-                            </button>
-                        </div>
                     </div>
                 </Transition>
             </div>

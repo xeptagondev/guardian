@@ -130,7 +130,12 @@ async function initMap() {
     }
 }
 
-onMounted(() => { initMap(); });
+onMounted(async () => {
+    await nextTick();
+    await initMap();
+    // Leaflet needs a size recalc after the container is laid out
+    setTimeout(() => { map?.invalidateSize(); }, 100);
+});
 onUnmounted(() => { map?.remove(); map = null; });
 </script>
 

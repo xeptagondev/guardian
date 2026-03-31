@@ -3,7 +3,7 @@ import {
     ArrowLeft, FileJson, MapPin, Calendar, Building2, Shield, Coins,
     ChevronDown, ChevronUp, Copy, Check, Users, BookOpen, Target,
     Globe, Leaf, FolderKanban, Layers, BarChart3, Clock, Activity,
-    GitBranch, ArrowRight, CheckCircle2, Circle, Zap, FileText,
+    GitBranch, ArrowRight, CheckCircle2, Circle, Zap, FileText, Network,
     TrendingUp, TrendingDown, AlertTriangle, Database, ExternalLink,
 } from 'lucide-vue-next';
 import { MOCK_PROJECTS, MOCK_CREDITS } from '~/data';
@@ -383,6 +383,36 @@ const fullMethodologyName = computed(() => {
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Relationships Diagram -->
+        <div class="rounded-xl border bg-card overflow-hidden">
+            <div class="px-5 py-3.5 border-b bg-muted/30">
+                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Network class="h-4 w-4 text-primary" />
+                    Relationships
+                </h2>
+                <p class="text-[11px] text-muted-foreground mt-0.5">Entity relationships between Registry, Policy, Schema, Role, VC, VP, and Token</p>
+            </div>
+            <div class="px-5 py-5">
+                <ClientOnly>
+                    <RelationshipDiagram
+                        :project-name="project.name"
+                        :methodology="project.methodology"
+                        :methodology-id="project.methodologyId"
+                        :registry="project.registry"
+                        :developer="project.developer"
+                        :project-id="project.id"
+                        :vintage="project.vintage"
+                        :country="project.country"
+                        :sector="project.sector"
+                        :token-symbol="linkedCredits[0]?.symbol"
+                        :token-name="linkedCredits[0]?.name"
+                        :token-id="linkedCredits[0]?.tokenId"
+                        @view-vc="({ title, vc }) => { vcViewerTitle = title; vcViewerData = vc; vcViewerOpen = true; }"
+                    />
+                </ClientOnly>
             </div>
         </div>
 

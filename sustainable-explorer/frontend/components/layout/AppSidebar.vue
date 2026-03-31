@@ -8,7 +8,6 @@ import {
     Users,
     Target,
     BarChart3,
-    Search,
     Activity,
     Leaf,
 } from 'lucide-vue-next';
@@ -24,7 +23,6 @@ const navItems = [
     { label: 'Developers', icon: Users, to: '/developers' },
     { label: 'SDGs', icon: Target, to: '/sdgs' },
     { label: 'Analytics', icon: BarChart3, to: '/analytics' },
-    { label: 'Search', icon: Search, to: '/search' },
     { label: 'Sync Status', icon: Activity, to: '/status' },
 ];
 </script>
