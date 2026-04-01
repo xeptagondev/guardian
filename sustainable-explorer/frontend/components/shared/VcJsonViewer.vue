@@ -107,7 +107,7 @@ watch(() => props.open, (val) => {
                             </div>
                             <div>
                                 <h3 class="text-sm font-semibold text-foreground">{{ title }}</h3>
-                                <p class="text-[11px] text-muted-foreground">Verifiable Credential (Raw JSON)</p>
+                                <p class="text-[11px] text-muted-foreground">Raw Data on the blockchain</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-1">

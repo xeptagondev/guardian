@@ -37,7 +37,7 @@ const typeColors: Record<string, { fill: string; stroke: string; label: string }
     policy:   { fill: '#66bb6a', stroke: '#4caf50', label: 'Policy' },
     schema:   { fill: '#ffa726', stroke: '#fb8c00', label: 'Schema' },
     role:     { fill: '#ef5350', stroke: '#e53935', label: 'Role' },
-    vc:       { fill: '#81d4fa', stroke: '#4fc3f7', label: 'VC' },
+    vc:       { fill: '#81d4fa', stroke: '#4fc3f7', label: 'Raw Data' },
     vp:       { fill: '#388e3c', stroke: '#2e7d32', label: 'VP' },
     token:    { fill: '#ff8a65', stroke: '#ff7043', label: 'Token' },
 };
@@ -471,7 +471,7 @@ const nodeRadius = 36;
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z"/>
                                 <polyline stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="14 2 14 8 20 8"/>
                             </svg>
-                            View Verifiable Credential
+                            View Raw Data
                         </button>
                         <a
                             :href="nodeHashscanUrl(selectedNodeData!)"
@@ -485,7 +485,7 @@ const nodeRadius = 36;
                                 <polyline stroke-linecap="round" stroke-linejoin="round" stroke-width="2" points="15 3 21 3 21 9"/>
                                 <line stroke-linecap="round" stroke-linejoin="round" stroke-width="2" x1="10" y1="14" x2="21" y2="3"/>
                             </svg>
-                            View on HashScan
+                            View on Explorer
                         </a>
                     </div>
                 </div>

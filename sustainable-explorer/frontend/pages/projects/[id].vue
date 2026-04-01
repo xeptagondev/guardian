@@ -169,14 +169,14 @@ const fullMethodologyName = computed(() => {
                         class="inline-flex items-center gap-2 rounded-lg border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                     >
                         <ExternalLink class="h-4 w-4 text-primary" />
-                        View on HashScan
+                        View on Explorer
                     </a>
                     <button
                         class="inline-flex items-center gap-2 rounded-lg border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                         @click="viewProjectVc"
                     >
                         <FileJson class="h-4 w-4 text-primary" />
-                        View Raw VC
+                        View Raw Data
                     </button>
                 </div>
             </div>
@@ -299,7 +299,7 @@ const fullMethodologyName = computed(() => {
                             <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Type</th>
                             <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Supply</th>
                             <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Mint Date</th>
-                            <th class="text-center py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">VC</th>
+                            <th class="text-center py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider"><span class="inline-flex items-center gap-1">Raw Data <InfoTooltip text="Raw Data on the blockchain" /></span></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y">
@@ -321,7 +321,7 @@ const fullMethodologyName = computed(() => {
                             <td class="py-3 px-4 text-center">
                                 <button
                                     class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                                    title="View credit VC"
+                                    title="View Raw Data"
                                     @click="viewCreditVc(c)"
                                 >
                                     <FileJson class="h-3.5 w-3.5" />
@@ -571,7 +571,7 @@ const fullMethodologyName = computed(() => {
                     <Network class="h-4 w-4 text-primary" />
                     Relationships
                 </h2>
-                <p class="text-[11px] text-muted-foreground mt-0.5">Entity relationships between Registry, Policy, Schema, Role, VC, VP, and Token</p>
+                <p class="text-[11px] text-muted-foreground mt-0.5">Entity relationships between Registry, Policy, Schema, Role, Raw Data, VP, and Token</p>
             </div>
             <div class="px-5 py-5">
                 <ClientOnly>
@@ -684,7 +684,7 @@ const fullMethodologyName = computed(() => {
             </div>
         </div>
 
-        <!-- VC Viewer Modal -->
+        <!-- Raw Data Viewer Modal -->
         <VcJsonViewer :open="vcViewerOpen" :title="vcViewerTitle" :data="vcViewerData" @close="vcViewerOpen = false" />
     </div>
 </template>

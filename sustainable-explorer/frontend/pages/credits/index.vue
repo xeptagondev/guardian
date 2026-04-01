@@ -58,7 +58,7 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
                             <SortableHeader label="Supply" sort-key="supply" align="right" tooltip="Total token supply minted on Hedera. For fungible tokens this is the total supply. For NFTs this is the number of unique serials." :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Project" sort-key="project" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Registry" sort-key="registry" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
-                            <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">VC</th>
+                            <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider"><span class="inline-flex items-center gap-1">Raw Data <InfoTooltip text="Raw Data on the blockchain" /></span></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y">
@@ -72,7 +72,7 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
                             <td class="py-3 px-3 text-center">
                                 <button
                                     class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                                    title="View raw VC"
+                                    title="View Raw Data"
                                     @click.stop="viewVc(c)"
                                 >
                                     <FileJson class="h-3.5 w-3.5" />

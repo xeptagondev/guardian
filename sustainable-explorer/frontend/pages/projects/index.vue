@@ -161,7 +161,7 @@ const statusColor: Record<string, string> = {
                                 </span>
                             </th>
                             <SortableHeader label="Vintage" sort-key="vintage" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
-                            <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">VC</th>
+                            <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider"><span class="inline-flex items-center gap-1">Raw Data <InfoTooltip text="Raw Data on the blockchain" /></span></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y">
@@ -196,7 +196,7 @@ const statusColor: Record<string, string> = {
                             <td class="py-3 px-3 text-center">
                                 <button
                                     class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                                    title="View raw VC"
+                                    title="View Raw Data"
                                     @click.stop="viewVc(p)"
                                 >
                                     <FileJson class="h-3.5 w-3.5" />
