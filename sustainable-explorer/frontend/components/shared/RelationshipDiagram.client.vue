@@ -154,7 +154,7 @@ function nodeVc(node: RelNode): Record<string, any> {
                 name: props.registry,
                 did: issuer,
                 network: 'mainnet',
-                status: 'Active',
+                status: 'Issuing',
                 policies: [props.methodology],
             }],
         },

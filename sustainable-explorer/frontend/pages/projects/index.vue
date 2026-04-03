@@ -4,9 +4,24 @@ import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import { formatCredits } from '~/lib/format';
 import { SDG_LIST } from '~/lib/sdgs';
 import { generateProjectVc } from '~/lib/mock-vc';
+import { MOCK_TRANSFERS, MOCK_RETIREMENTS } from '~/data';
+import { getMethodologyLongName } from '~/lib/methodologies';
 import type { Project } from '~/types/models';
 
 const { projects, total, filterOptions } = useProjects();
+
+
+// Aggregate transferred/retired per project
+const transferredByProject = computed(() => {
+    const map: Record<string, number> = {};
+    for (const t of MOCK_TRANSFERS) { map[t.projectId] = (map[t.projectId] || 0) + t.quantity; }
+    return map;
+});
+const retiredByProject = computed(() => {
+    const map: Record<string, number> = {};
+    for (const r of MOCK_RETIREMENTS) { map[r.projectId] = (map[r.projectId] || 0) + r.quantity; }
+    return map;
+});
 
 const vcViewerOpen = ref(false);
 const vcViewerTitle = ref('');
@@ -21,6 +36,11 @@ function viewVc(p: Project) {
 const allProjects = computed(() => projects.value.map(p => ({
     ...p,
     creditsFormatted: formatCredits(p.credits),
+    transferred: transferredByProject.value[p.id] || 0,
+    transferredFormatted: formatCredits(transferredByProject.value[p.id] || 0),
+    retired: retiredByProject.value[p.id] || 0,
+    retiredFormatted: formatCredits(retiredByProject.value[p.id] || 0),
+    methodologyLong: getMethodologyLongName(p.methodologyId, p.methodology),
 })));
 
 const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters, applyPreset } =
@@ -32,10 +52,10 @@ const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, act
     });
 
 const presets = [
-    { label: 'Active Forestry', filters: { status: 'Active', sector: 'Forestry and Land Use' } },
+    { label: 'Issuing Forestry', filters: { status: 'Issuing', sector: 'Forestry and Land Use' } },
     { label: 'Gold Standard', filters: { registry: 'Gold Standard' } },
     { label: 'SDG 13: Climate Action', filters: { sdgs: '13' } },
-    { label: 'Verification Pending', filters: { status: 'Verification' } },
+    { label: 'Under Validation', filters: { status: 'Under Validation' } },
     { label: 'Vintage 2024', filters: { vintage: '2024' } },
     { label: 'Blue Carbon', search: 'Blue Carbon' },
 ];
@@ -88,9 +108,11 @@ const filters = computed<FilterOption[]>(() => [
 ]);
 
 const statusColor: Record<string, string> = {
-    Active: 'bg-stat-green/10 text-stat-green',
-    Verification: 'bg-stat-amber/10 text-stat-amber',
-    Monitoring: 'bg-stat-blue/10 text-stat-blue',
+    Registered: 'bg-slate-100 text-slate-600',
+    'Under Validation': 'bg-stat-amber/10 text-stat-amber',
+    Verified: 'bg-stat-blue/10 text-stat-blue',
+    Issuing: 'bg-stat-green/10 text-stat-green',
+    Completed: 'bg-purple-50 text-purple-600',
 };
 </script>
 
@@ -143,24 +165,25 @@ const statusColor: Record<string, string> = {
         </div>
 
         <div class="px-6 pb-6">
-            <div class="rounded-xl border bg-card overflow-hidden">
-                <table class="w-full text-sm">
+            <div class="rounded-xl border bg-card overflow-x-auto">
+                <table class="w-full text-sm min-w-[900px]">
                     <thead>
                         <tr class="border-b bg-muted/30">
                             <SortableHeader label="Project" sort-key="name" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Country" sort-key="country" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
+                            <SortableHeader label="Registry" sort-key="registry" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Methodology" sort-key="methodology" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
-                            <SortableHeader label="Sector" sort-key="sector" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
-                            <SortableHeader label="Sectoral Scope" sort-key="sectoralScope" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
+                            <SortableHeader label="Sector" sort-key="sector" tooltip="Includes Sectoral Scope as additional detail" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Issuances" sort-key="credits" align="right" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
+                            <SortableHeader label="Transferred" sort-key="transferred" align="right" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
+                            <SortableHeader label="Retired" sort-key="retired" align="right" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader label="Status" sort-key="status" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
-                            <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                            <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider min-w-[160px]">
                                 <span class="inline-flex items-center gap-1">
                                     SDGs
                                     <InfoTooltip text="UN Sustainable Development Goals this project contributes to. Hover over each icon for the full goal name." />
                                 </span>
                             </th>
-                            <SortableHeader label="Vintage" sort-key="vintage" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <th class="text-center py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider"><span class="inline-flex items-center gap-1">Raw Data <InfoTooltip text="Raw Data on the blockchain" /></span></th>
                         </tr>
                     </thead>
@@ -173,17 +196,44 @@ const statusColor: Record<string, string> = {
                             <td class="py-3 px-4">
                                 <NuxtLink :to="`/projects/${p.id}`" class="font-medium text-foreground hover:text-primary transition-colors">{{ p.name }}</NuxtLink>
                             </td>
-                            <td class="py-3 px-4 text-muted-foreground">{{ p.flag }} {{ p.country }}</td>
+                            <td class="py-3 px-4 text-muted-foreground">
+                                <div class="group relative inline-flex items-center gap-1.5">
+                                    <CountryFlag :code="p.countryCode" size="sm" />
+                                    <span class="hidden md:inline">{{ p.country }}</span>
+                                    <div class="md:hidden pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity z-[100]">
+                                        <div class="whitespace-nowrap rounded-md bg-foreground px-2.5 py-1 text-[11px] text-background shadow-lg">
+                                            {{ p.country }}
+                                        </div>
+                                        <div class="mx-auto h-0 w-0 border-x-[5px] border-x-transparent border-t-[5px] border-t-foreground" />
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="py-3 px-4 text-muted-foreground text-xs">{{ p.registry }}</td>
                             <td class="py-3 px-4">
-                                <span class="text-xs bg-muted rounded px-1.5 py-0.5">{{ p.methodology }}</span>
+                                <div class="group relative inline-block">
+                                    <span class="text-xs bg-muted rounded px-1.5 py-0.5 cursor-default">{{ p.methodology }}</span>
+                                    <div class="pointer-events-none absolute bottom-full left-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity z-[100] w-80">
+                                        <div class="whitespace-normal rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg leading-snug">
+                                            {{ p.methodologyLong }}
+                                        </div>
+                                        <div class="ml-3 h-0 w-0 border-x-[5px] border-x-transparent border-t-[5px] border-t-foreground" />
+                                    </div>
+                                </div>
                             </td>
                             <td class="py-3 px-4">
-                                <span class="text-xs text-muted-foreground">{{ p.sector }}</span>
-                            </td>
-                            <td class="py-3 px-4">
-                                <span class="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground">{{ p.sectoralScope }}</span>
+                                <div class="group relative inline-block">
+                                    <span class="text-xs text-muted-foreground cursor-default">{{ p.sector }}</span>
+                                    <div class="pointer-events-none absolute bottom-full left-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity z-[100] max-w-xs">
+                                        <div class="whitespace-normal rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg leading-snug">
+                                            Sectoral Scope: {{ p.sectoralScope }}
+                                        </div>
+                                        <div class="ml-3 h-0 w-0 border-x-[5px] border-x-transparent border-t-[5px] border-t-foreground" />
+                                    </div>
+                                </div>
                             </td>
                             <td class="py-3 px-4 text-right tabular-nums font-medium">{{ p.creditsFormatted }}</td>
+                            <td class="py-3 px-4 text-right tabular-nums text-muted-foreground">{{ p.transferredFormatted }}</td>
+                            <td class="py-3 px-4 text-right tabular-nums text-muted-foreground">{{ p.retiredFormatted }}</td>
                             <td class="py-3 px-4">
                                 <span :class="[statusColor[p.status] || 'bg-muted text-muted-foreground', 'text-xs font-medium rounded-full px-2 py-0.5']">
                                     {{ p.status }}
@@ -192,7 +242,6 @@ const statusColor: Record<string, string> = {
                             <td class="py-3 px-4">
                                 <SdgBadges :ids="p.sdgs" :max="4" />
                             </td>
-                            <td class="py-3 px-4 text-muted-foreground tabular-nums">{{ p.vintage }}</td>
                             <td class="py-3 px-3 text-center">
                                 <button
                                     class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -204,7 +253,7 @@ const statusColor: Record<string, string> = {
                             </td>
                         </tr>
                         <tr v-if="paginated.length === 0">
-                            <td colspan="10" class="py-12 text-center text-sm text-muted-foreground">No projects match your filters</td>
+                            <td colspan="11" class="py-12 text-center text-sm text-muted-foreground">No projects match your filters</td>
                         </tr>
                     </tbody>
                 </table>

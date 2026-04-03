@@ -429,7 +429,7 @@ const filteredStats = computed(() => {
                                     <!-- Country header -->
                                     <div class="flex items-center justify-between">
                                         <div class="flex items-center gap-2">
-                                            <span class="text-xl">{{ activeDetail.flag }}</span>
+                                            <CountryFlag :code="selectedCountry!" size="lg" />
                                             <h3 class="text-sm font-semibold text-foreground">{{ activeDetail.name }}</h3>
                                         </div>
                                         <button
@@ -516,7 +516,7 @@ const filteredStats = computed(() => {
                             >
                                 <td class="py-2.5 px-4">
                                     <span class="flex items-center gap-2">
-                                        <span class="text-base">{{ c.flag }}</span>
+                                        <CountryFlag :code="c.code" size="sm" />
                                         <span class="font-medium text-foreground">{{ c.name }}</span>
                                     </span>
                                 </td>

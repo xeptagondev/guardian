@@ -11,6 +11,7 @@ import { formatCredits, formatNumber } from '~/lib/format';
 import { getSDG } from '~/lib/sdgs';
 import { generateProjectVc, generateCreditVc } from '~/lib/mock-vc';
 import { REGISTRY_TERM_MAPPINGS } from '~/lib/registry-terms';
+import { getMethodologyName } from '~/lib/methodologies';
 
 const route = useRoute();
 const projectId = computed(() => route.params.id as string);
@@ -48,11 +49,11 @@ function viewCreditVc(c: typeof MOCK_CREDITS[number]) {
 }
 
 const statusColor: Record<string, { bg: string; text: string; dot: string }> = {
-    Active: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-    Verified: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-    Validated: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
-    Verification: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
-    Monitoring: { bg: 'bg-sky-50', text: 'text-sky-700', dot: 'bg-sky-500' },
+    Registered: { bg: 'bg-slate-50', text: 'text-slate-600', dot: 'bg-slate-400' },
+    'Under Validation': { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
+    Verified: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
+    Issuing: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+    Completed: { bg: 'bg-purple-50', text: 'text-purple-600', dot: 'bg-purple-500' },
 };
 
 const creditingPeriodStart = computed(() => {
@@ -111,25 +112,11 @@ const methodologySteps = computed(() => {
         { label: 'Project Design', desc: 'PDD submission & stakeholder consultation', status: 'complete' },
         { label: 'Validation', desc: 'Third-party validation audit', status: 'complete' },
         { label: 'Registration', desc: 'Project registration on registry', status: 'complete' },
-        { label: 'Monitoring', desc: 'Data collection & MRV reporting', status: project.value.status === 'Monitoring' ? 'active' : 'complete' },
-        { label: 'Verification', desc: 'Emission reduction verification', status: project.value.status === 'Verification' ? 'active' : (project.value.status === 'Monitoring' ? 'pending' : 'complete') },
-        { label: 'Issuance', desc: 'Token minting to Hedera', status: project.value.status === 'Active' ? 'complete' : 'pending' },
+        { label: 'Monitoring', desc: 'Data collection & MRV reporting', status: ['Verified', 'Issuing', 'Completed'].includes(project.value.status) ? 'complete' : (project.value.status === 'Under Validation' ? 'active' : 'pending') },
+        { label: 'Verification', desc: 'Emission reduction verification', status: ['Issuing', 'Completed'].includes(project.value.status) ? 'complete' : (project.value.status === 'Verified' ? 'active' : 'pending') },
+        { label: 'Issuance', desc: 'Token minting to Hedera', status: project.value.status === 'Completed' ? 'complete' : (project.value.status === 'Issuing' ? 'active' : 'pending') },
     ];
 });
-
-const methodologyNameOverrides: Record<string, string> = {
-    'vm0007': 'VM0007 — REDD+ Methodology',
-    'vm0033': 'VM0033 — Tidal Wetland and Seagrass',
-    'vm0044': 'VM0044 — Biochar',
-    'vm0036': 'VM0036 — Peatland Rewetting',
-    'acm0002': 'ACM0002 — Grid Connected RE',
-    'acm0001': 'ACM0001 — Landfill Gas',
-    'acm0006': 'ACM0006 — Biomass Energy',
-    'ar-acm0003': 'AR-ACM0003 — Reforestation',
-    'gs-cookstove': 'GS Cookstove Methodology',
-    'gs-sdw': 'GS Safe Drinking Water v1.0',
-    'gs-clean-energy': 'GS Clean Energy Methodology',
-};
 
 // Generate a deterministic mock transaction timestamp from project creation date
 const hashscanUrl = computed(() => {
@@ -142,7 +129,7 @@ const hashscanUrl = computed(() => {
 
 const fullMethodologyName = computed(() => {
     if (!project.value) return '';
-    return methodologyNameOverrides[project.value.methodologyId] || project.value.methodology;
+    return getMethodologyName(project.value.methodologyId) || project.value.methodology;
 });
 </script>
 
@@ -158,7 +145,7 @@ const fullMethodologyName = computed(() => {
                 <div class="min-w-0">
                     <h1 class="text-2xl font-bold text-foreground">{{ project.name }}</h1>
                     <p class="text-sm text-muted-foreground mt-1">
-                        {{ project.flag }} {{ project.country }} &middot; {{ project.registry }} &middot; {{ project.developer }}
+                        <CountryFlag :code="project.countryCode" size="sm" class="mr-0.5" /> {{ project.country }} &middot; {{ project.registry }} &middot; {{ project.developer }}
                     </p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
@@ -197,7 +184,7 @@ const fullMethodologyName = computed(() => {
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Country</div>
-                    <div class="text-sm font-medium text-foreground">{{ project.flag }} {{ project.country }}</div>
+                    <div class="text-sm font-medium text-foreground flex items-center gap-1.5"><CountryFlag :code="project.countryCode" size="sm" /> {{ project.country }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Status</div>

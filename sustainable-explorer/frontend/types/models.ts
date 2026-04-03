@@ -11,7 +11,7 @@ export interface Project {
     registry: string;
     developer: string;
     credits: number;
-    status: 'Active' | 'Verification' | 'Monitoring';
+    status: 'Registered' | 'Under Validation' | 'Verified' | 'Issuing' | 'Completed';
     vintage: string;
     sdgs: number[];
     category: string;

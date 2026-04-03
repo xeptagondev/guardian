@@ -1,6 +1,7 @@
 import { MOCK_PROJECTS } from '~/data';
 import type { Methodology } from '~/types/models';
 import { formatCredits } from '~/lib/format';
+import { METHODOLOGY_NAMES } from '~/lib/methodologies';
 
 export function useMethodologies(filters?: Ref<{ registry?: string; category?: string; search?: string }>) {
     const methodologies = computed<Methodology[]>(() => {
@@ -21,20 +22,7 @@ export function useMethodologies(filters?: Ref<{ registry?: string; category?: s
             methMap[p.methodologyId].credits += p.credits;
         }
 
-        // Expanded methodology names for better display
-        const nameOverrides: Record<string, string> = {
-            'vm0007': 'VM0007 \u2014 REDD+ Methodology',
-            'vm0033': 'VM0033 \u2014 Tidal Wetland and Seagrass',
-            'vm0044': 'VM0044 \u2014 Biochar',
-            'vm0036': 'VM0036 \u2014 Peatland Rewetting',
-            'acm0002': 'ACM0002 \u2014 Grid Connected RE',
-            'acm0001': 'ACM0001 \u2014 Landfill Gas',
-            'acm0006': 'ACM0006 \u2014 Biomass Energy',
-            'ar-acm0003': 'AR-ACM0003 \u2014 Reforestation',
-            'gs-cookstove': 'GS Cookstove Methodology',
-            'gs-sdw': 'GS Safe Drinking Water v1.0',
-            'gs-clean-energy': 'GS Clean Energy Methodology',
-        };
+        const nameOverrides = METHODOLOGY_NAMES;
 
         // Schema count pseudo-derived from project count
         const schemaBase: Record<string, number> = {
