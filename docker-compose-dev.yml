@@ -1,0 +1,113 @@
+# =============================================================================
+# docker-compose-dev.yml — LOCAL DEVELOPMENT INFRASTRUCTURE ONLY
+# =============================================================================
+# This file starts only the third-party infrastructure services required for
+# local development. Application services are run directly on the host via
+# `yarn dev:backend` (with hot-reload) rather than in Docker.
+#
+# Services included:
+#   - MongoDB 6.0.26    → localhost:27017
+#   - NATS 2.9.25       → localhost:4222  (monitoring: 8222)
+#   - IPFS Kubo v0.39.0 → localhost:5001  (API), 8080 (gateway), 4001 (swarm)
+#   - Redict 7.3.6      → localhost:6379  (Redis-compatible cache)
+#   - Mongo Express     → localhost:8081  (admin UI)
+#
+# Usage:
+#   yarn dev:infra          # start infrastructure in background
+#   yarn dev:infra:down     # stop infrastructure
+#   yarn dev:infra:logs     # tail infrastructure logs
+#
+# Both this file and docker-compose.yml can run simultaneously because:
+#   - Container names are prefixed with "dev-"
+#   - This file uses a separate named network (guardian-dev)
+# =============================================================================
+
+name: guardian-dev
+
+services:
+  mongo:
+    container_name: dev-mongo
+    image: mongo:6.0.26
+    command: "--setParameter allowDiskUseByDefault=true"
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - guardian_dev_mongo:/data/db
+    networks:
+      - guardian-dev
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    init: true
+
+  nats:
+    container_name: dev-nats
+    image: nats:2.9.25
+    command: "-c /etc/nats/nats.conf --http_port 8222"
+    restart: unless-stopped
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./configs/nats.conf:/etc/nats/nats.conf:ro
+    networks:
+      - guardian-dev
+    init: true
+
+  ipfs-node:
+    container_name: dev-ipfs
+    image: ipfs/kubo:v0.39.0
+    restart: unless-stopped
+    environment:
+      IPFS_TELEMETRY: "off"
+    ports:
+      - "4001:4001"
+      - "5001:5001"
+      - "8080:8080"
+    volumes:
+      - guardian_dev_ipfs:/data/ipfs
+    networks:
+      - guardian-dev
+    init: true
+
+  cache:
+    container_name: dev-cache
+    image: registry.redict.io/redict:7.3.6-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - guardian-dev
+    init: true
+
+  mongo-express:
+    container_name: dev-mongo-express
+    image: mongo-express:1.0.2-20
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://dev-mongo:27017
+      ME_CONFIG_SITE_BASEURL: /
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: pass
+    networks:
+      - guardian-dev
+    init: true
+
+networks:
+  guardian-dev:
+    driver: bridge
+
+volumes:
+  guardian_dev_mongo:
+    name: guardian_dev_mongo
+  guardian_dev_ipfs:
+    name: guardian_dev_ipfs
