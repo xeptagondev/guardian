@@ -1,6 +1,8 @@
 {
     "devDependencies": {
-        "detect-secrets": "^1.0.6"
+        "concurrently": "^8.2.2",
+        "detect-secrets": "^1.0.6",
+        "dotenv-cli": "^7.4.2"
     },
     "name": "guardian",
     "packageManager": "yarn@1.22.21",
@@ -12,7 +14,25 @@
     },
     "scripts": {
         "detect-secrets": "detect-secrets-launcher --word-list exclude-secrets.txt k8s-manifests/**/* */src/**.ts **/.env*",
-        "publish-policies": "guardian-cli publish-policies \"Methodology Library\" -c \"configs/automatic-publish-policies.config.json\" -o \"published-policies.txt\""
+        "publish-policies": "guardian-cli publish-policies \"Methodology Library\" -c \"configs/automatic-publish-policies.config.json\" -o \"published-policies.txt\"",
+
+        "dev:infra": "docker compose -f docker-compose-dev.yml up -d",
+        "dev:infra:down": "docker compose -f docker-compose-dev.yml down",
+        "dev:infra:logs": "docker compose -f docker-compose-dev.yml logs -f",
+
+        "dev:deps": "yarn workspace @guardian/interfaces build && yarn workspace @guardian/common build",
+
+        "dev:backend": "yarn dev:deps && concurrently --prefix-colors \"bgBlue.bold,bgGreen.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgRed.bold,bgWhite.bold\" --names \"auth,guardian,worker,policy,gateway,notify,logger\" \"yarn workspace auth-service dev\" \"yarn workspace guardian-service dev\" \"yarn workspace worker-service dev\" \"yarn workspace policy-service dev\" \"yarn workspace api-gateway dev\" \"yarn workspace notification-service dev\" \"yarn workspace logger-service dev\"",
+
+        "dev:backend:run": "dotenv -e .env.dev -- concurrently --prefix-colors \"bgBlue.bold,bgGreen.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgRed.bold,bgWhite.bold\" --names \"auth,guardian,worker,policy,gateway,notify,logger\" \"yarn --cwd auth-service dev:docker\" \"yarn --cwd guardian-service dev:docker\" \"yarn --cwd worker-service dev:docker\" \"yarn --cwd policy-service dev:docker\" \"yarn --cwd api-gateway dev:docker\" \"yarn --cwd notification-service dev:docker\" \"yarn --cwd logger-service dev:docker\"",
+
+        "dev:frontend": "yarn --cwd frontend install && yarn --cwd frontend start",
+
+        "dev:indexer": "yarn workspace indexer-service dev",
+
+        "dev": "concurrently --names \"backend,frontend\" --prefix-colors \"bgBlue.bold,bgGreen.bold\" \"yarn dev:backend\" \"yarn dev:frontend\"",
+
+        "dev:all": "yarn dev:infra && concurrently --names \"backend,frontend\" --prefix-colors \"bgBlue.bold,bgGreen.bold\" \"yarn dev:backend\" \"yarn dev:frontend\""
     },
     "version": "3.5.0",
     "workspaces": [
