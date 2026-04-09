@@ -147,6 +147,7 @@ yarn dev:all
 | `policy-service` | 5006 (internal) | Policy execution |
 | `worker-service` | 6555 (internal) | Background tasks (IPFS, Hedera) |
 | `notification-service` | — | WebSocket events over NATS |
+| `application-events` | 3012 | SSE endpoint (`GET /api/events/subscribe`) |
 | `logger-service` | 6555 (internal) | Centralized log aggregation |
 | `frontend` | 4200 | Angular dev server |
 | MongoDB | 27017 | Dev container (`dev-mongo`) |
