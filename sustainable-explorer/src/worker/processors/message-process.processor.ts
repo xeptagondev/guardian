@@ -25,6 +25,7 @@ export class MessageProcessProcessor extends WorkerHost {
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.METHODOLOGY_SCHEMA_SYNC) private readonly methodologySchemaQueue: Queue,
     ) {
         super();
     }
@@ -134,6 +135,20 @@ export class MessageProcessProcessor extends WorkerHost {
                 messageTimestamp: consensusTimestamp,
             }, {
                 jobId: `ipfs-${cid}`,
+            });
+        }
+
+        // Enqueue schema extraction for canonical methodology publish events.
+        if (parsed.type === 'Instance-Policy' && parsed.action === 'publish-policy') {
+            const cid = parsed.files[0] || null;
+            await this.methodologySchemaQueue.add('sync', {
+                topicId,
+                consensusTimestamp,
+                cid,
+            }, {
+                jobId: cid
+                    ? `schema-${topicId}-${cid}`
+                    : `schema-${topicId}-${consensusTimestamp}`,
             });
         }
 

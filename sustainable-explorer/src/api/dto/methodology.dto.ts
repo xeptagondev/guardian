@@ -130,61 +130,73 @@ export class PaginatedMethodologiesDto {
 }
 
 export class MethodologySchemaFieldDto {
-    @ApiProperty({ description: 'Field tag/key in the schema document' })
+    @ApiProperty({ description: 'Field key/tag in schema' })
     tag: string;
 
-    @ApiProperty({ description: 'Display label for the field' })
+    @ApiProperty({ description: 'Human-readable field label' })
     fieldName: string;
 
     @ApiProperty({ description: 'Whether the field is required' })
     required: boolean;
 
     @ApiProperty({
-        description: 'Normalized field data type',
+        description: 'Normalized Guardian field data type',
         enum: ['text', 'number', 'boolean', 'enum', 'array', 'object'],
     })
     dataType: 'text' | 'number' | 'boolean' | 'enum' | 'array' | 'object';
 
-    @ApiPropertyOptional({ description: 'Referenced schema IRI when dataType is object' })
+    @ApiPropertyOptional({ description: 'Linked schema reference when dataType is object' })
     selectedSchema?: string;
 
     @ApiPropertyOptional({
         type: [String],
-        description: 'Allowed enum options when dataType is enum',
+        description: 'Allowed options when dataType is enum',
     })
     options?: string[];
 }
 
-export class MethodologySchemaSyncItemDto {
-    @ApiProperty({ description: 'Schema UUID' })
-    uuid: string;
+export class MethodologySchemaRecordDto {
+    @ApiProperty({ description: 'Row identifier' })
+    id: string;
 
-    @ApiProperty({ description: 'Schema IRI (for example #uuid&version)' })
+    @ApiProperty({ description: 'Methodology topic ID' })
+    topicId: string;
+
+    @ApiProperty({ description: 'Policy ZIP CID used during extraction' })
+    cid: string;
+
+    @ApiProperty({ description: 'Schema UUID from Guardian schema JSON' })
+    schemaUuid: string;
+
+    @ApiProperty({ description: 'Schema IRI' })
     iri: string;
 
-    @ApiProperty({ description: 'Schema display name' })
+    @ApiProperty({ description: 'Schema name' })
     name: string;
 
     @ApiPropertyOptional({ description: 'Schema description' })
-    description?: string;
+    description: string | null;
 
     @ApiProperty({ type: [MethodologySchemaFieldDto] })
     fields: MethodologySchemaFieldDto[];
+
+    @ApiProperty()
+    createdAt: Date;
+
+    @ApiProperty()
+    updatedAt: Date;
 }
 
-export class MethodologySchemaSyncResponseDto {
+export class MethodologySchemasResponseDto {
     @ApiProperty({ description: 'Hedera network this data belongs to' })
     network: string;
 
     @ApiProperty({ description: 'Methodology topic ID used for lookup' })
     topicId: string;
 
-    @ApiProperty({ description: 'IPFS CID used to download policy ZIP' })
-    cid: string;
+    @ApiProperty({ description: 'Number of stored schemas for this topic' })
+    count: number;
 
-    @ApiProperty({ description: 'Number of schema files extracted from the ZIP' })
-    schemaCount: number;
-
-    @ApiProperty({ type: [MethodologySchemaSyncItemDto] })
-    schemas: MethodologySchemaSyncItemDto[];
+    @ApiProperty({ type: [MethodologySchemaRecordDto] })
+    schemas: MethodologySchemaRecordDto[];
 }

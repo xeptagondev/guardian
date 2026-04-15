@@ -1,11 +1,11 @@
-import { Controller, Get, Param, Post, Query, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Param, Query, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { MethodologiesService } from '../services/methodologies.service';
 import {
     MethodologyQueryDto,
     MethodologyResponseDto,
     PaginatedMethodologiesDto,
-    MethodologySchemaSyncResponseDto,
+    MethodologySchemasResponseDto,
 } from '../dto/methodology.dto';
 
 @ApiTags('methodologies')
@@ -59,31 +59,24 @@ export class MethodologiesController {
         return methodology;
     }
 
-    @Post(':topicId/schemas/sync')
+    @Get(':id/schemas')
     @ApiOperation({
-        summary: 'Extract and store methodology schemas from IPFS ZIP',
+        summary: 'List stored schemas for a Methodology topic',
         description:
-            'Finds the publish-policy Instance-Policy for the provided methodology topic ID, ' +
-            'downloads the policy ZIP from IPFS, extracts schema files from schemas/, parses fields, ' +
-            'and stores them in methodology_schema.',
+            'Returns extracted schema records already stored in methodology_schema for the provided methodology topic ID.',
     })
     @ApiParam({
         name: 'network',
         enum: ['mainnet', 'testnet', 'previewnet'],
         description: 'Hedera network',
     })
-    @ApiParam({
-        name: 'topicId',
-        description: 'Published methodology policy topic ID',
-        example: '0.0.8356045',
-    })
-    @ApiResponse({ status: 201, type: MethodologySchemaSyncResponseDto })
-    @ApiResponse({ status: 404, description: 'Matching publish-policy row or CID not found' })
-    @ApiResponse({ status: 409, description: 'More than one publish-policy row found for topic' })
-    async syncSchemasByTopic(
+    @ApiParam({ name: 'id', description: 'Hedera policy topic ID of the methodology' })
+    @ApiResponse({ status: 200, type: MethodologySchemasResponseDto })
+    async findSchemasByTopic(
         @Param('network') network: string,
-        @Param('topicId') topicId: string,
-    ): Promise<MethodologySchemaSyncResponseDto> {
-        return this.methodologiesService.syncSchemasByTopic(network, topicId);
+        @Param('id') id: string,
+    ): Promise<MethodologySchemasResponseDto> {
+        return this.methodologiesService.findSchemasByTopic(network, id);
     }
+
 }

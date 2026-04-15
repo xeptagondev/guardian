@@ -40,4 +40,26 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_business_view_search_text_trgm
         ON business_view USING GIN ("searchText" gin_trgm_ops)
     `);
+
+    // Table storing extracted Guardian policy schemas from methodology ZIP files.
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS methodology_schema (
+            id BIGSERIAL PRIMARY KEY,
+            "topicId" varchar(30) NOT NULL,
+            cid varchar(100) NOT NULL,
+            "schemaUuid" varchar(255) NOT NULL,
+            iri text NOT NULL,
+            name text NOT NULL,
+            description text NULL,
+            fields jsonb NOT NULL,
+            "createdAt" timestamptz NOT NULL DEFAULT NOW(),
+            "updatedAt" timestamptz NOT NULL DEFAULT NOW(),
+            UNIQUE ("topicId", "schemaUuid")
+        )
+    `);
+
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_methodology_schema_topic_id
+        ON methodology_schema ("topicId")
+    `);
 }

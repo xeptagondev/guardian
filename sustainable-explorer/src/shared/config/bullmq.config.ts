@@ -9,6 +9,7 @@ export const BASE_QUEUE_NAMES = {
     MESSAGE_PARSE: 'mirror-node-messages',
     IPFS_FETCH: 'ipfs-files',
     TOKEN_SYNC: 'mirror-node-tokens',
+    METHODOLOGY_SCHEMA_SYNC: 'mirror-node-methodology-schema-sync',
     MV_REFRESH: 'maintenance-refresh-mvs',
     BUSINESS_VIEW_BUILD: 'maintenance-build-business-views',
 } as const;
@@ -39,6 +40,7 @@ export const QUEUE_NAMES = {
     MESSAGE_PARSE: qname(BASE_QUEUE_NAMES.MESSAGE_PARSE),
     IPFS_FETCH: qname(BASE_QUEUE_NAMES.IPFS_FETCH),
     TOKEN_SYNC: qname(BASE_QUEUE_NAMES.TOKEN_SYNC),
+    METHODOLOGY_SCHEMA_SYNC: qname(BASE_QUEUE_NAMES.METHODOLOGY_SCHEMA_SYNC),
     MV_REFRESH: qname(BASE_QUEUE_NAMES.MV_REFRESH),
     BUSINESS_VIEW_BUILD: qname(BASE_QUEUE_NAMES.BUSINESS_VIEW_BUILD),
 } as const;
@@ -108,6 +110,17 @@ export function getQueueConfigs(): QueueDefinition[] {
                 removeOnFail: 2000,
             },
             concurrency: parseInt(process.env.WORKER_TOKEN_CONCURRENCY || '2', 10),
+        },
+        {
+            name: QUEUE_NAMES.METHODOLOGY_SCHEMA_SYNC,
+            defaultJobOptions: {
+                attempts: 5,
+                backoff: { type: 'exponential', delay: 5000 },
+                timeout: parseInt(process.env.IPFS_FETCH_TIMEOUT || '180000', 10),
+                removeOnComplete: 500,
+                removeOnFail: 2000,
+            },
+            concurrency: parseInt(process.env.WORKER_METHODOLOGY_SCHEMA_CONCURRENCY || '2', 10),
         },
         {
             name: QUEUE_NAMES.MV_REFRESH,
