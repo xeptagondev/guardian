@@ -17,6 +17,7 @@ import { TopicSyncProcessor } from './processors/topic-sync.processor';
 import { MessageProcessProcessor } from './processors/message-process.processor';
 import { TokenSyncProcessor } from './processors/token-sync.processor';
 import { IpfsFetchProcessor } from './processors/ipfs-fetch.processor';
+import { PolicySchemaImportProcessor } from './processors/policy-schema-import.processor';
 import { MvRefreshProcessor } from './processors/mv-refresh.processor';
 import { BusinessViewBuilderProcessor } from './processors/business-view-builder.processor';
 import { PolicyIngestProcessor } from './processors/policy-ingest.processor';
