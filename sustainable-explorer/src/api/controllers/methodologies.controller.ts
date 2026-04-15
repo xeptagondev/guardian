@@ -1,10 +1,11 @@
-import { Controller, Get, Param, Query, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { MethodologiesService } from '../services/methodologies.service';
 import {
     MethodologyQueryDto,
     MethodologyResponseDto,
     PaginatedMethodologiesDto,
+    MethodologySchemaSyncResponseDto,
 } from '../dto/methodology.dto';
 
 @ApiTags('methodologies')
@@ -56,5 +57,33 @@ export class MethodologiesController {
             throw new NotFoundException(`Methodology with ID "${id}" not found on ${network}`);
         }
         return methodology;
+    }
+
+    @Post(':topicId/schemas/sync')
+    @ApiOperation({
+        summary: 'Extract and store methodology schemas from IPFS ZIP',
+        description:
+            'Finds the publish-policy Instance-Policy for the provided methodology topic ID, ' +
+            'downloads the policy ZIP from IPFS, extracts schema files from schemas/, parses fields, ' +
+            'and stores them in methodology_schema.',
+    })
+    @ApiParam({
+        name: 'network',
+        enum: ['mainnet', 'testnet', 'previewnet'],
+        description: 'Hedera network',
+    })
+    @ApiParam({
+        name: 'topicId',
+        description: 'Published methodology policy topic ID',
+        example: '0.0.8356045',
+    })
+    @ApiResponse({ status: 201, type: MethodologySchemaSyncResponseDto })
+    @ApiResponse({ status: 404, description: 'Matching publish-policy row or CID not found' })
+    @ApiResponse({ status: 409, description: 'More than one publish-policy row found for topic' })
+    async syncSchemasByTopic(
+        @Param('network') network: string,
+        @Param('topicId') topicId: string,
+    ): Promise<MethodologySchemaSyncResponseDto> {
+        return this.methodologiesService.syncSchemasByTopic(network, topicId);
     }
 }

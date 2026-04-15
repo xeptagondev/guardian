@@ -128,3 +128,63 @@ export class PaginatedMethodologiesDto {
     @ApiProperty()
     meta: { page: number; limit: number; total: number; totalPages: number };
 }
+
+export class MethodologySchemaFieldDto {
+    @ApiProperty({ description: 'Field tag/key in the schema document' })
+    tag: string;
+
+    @ApiProperty({ description: 'Display label for the field' })
+    fieldName: string;
+
+    @ApiProperty({ description: 'Whether the field is required' })
+    required: boolean;
+
+    @ApiProperty({
+        description: 'Normalized field data type',
+        enum: ['text', 'number', 'boolean', 'enum', 'array', 'object'],
+    })
+    dataType: 'text' | 'number' | 'boolean' | 'enum' | 'array' | 'object';
+
+    @ApiPropertyOptional({ description: 'Referenced schema IRI when dataType is object' })
+    selectedSchema?: string;
+
+    @ApiPropertyOptional({
+        type: [String],
+        description: 'Allowed enum options when dataType is enum',
+    })
+    options?: string[];
+}
+
+export class MethodologySchemaSyncItemDto {
+    @ApiProperty({ description: 'Schema UUID' })
+    uuid: string;
+
+    @ApiProperty({ description: 'Schema IRI (for example #uuid&version)' })
+    iri: string;
+
+    @ApiProperty({ description: 'Schema display name' })
+    name: string;
+
+    @ApiPropertyOptional({ description: 'Schema description' })
+    description?: string;
+
+    @ApiProperty({ type: [MethodologySchemaFieldDto] })
+    fields: MethodologySchemaFieldDto[];
+}
+
+export class MethodologySchemaSyncResponseDto {
+    @ApiProperty({ description: 'Hedera network this data belongs to' })
+    network: string;
+
+    @ApiProperty({ description: 'Methodology topic ID used for lookup' })
+    topicId: string;
+
+    @ApiProperty({ description: 'IPFS CID used to download policy ZIP' })
+    cid: string;
+
+    @ApiProperty({ description: 'Number of schema files extracted from the ZIP' })
+    schemaCount: number;
+
+    @ApiProperty({ type: [MethodologySchemaSyncItemDto] })
+    schemas: MethodologySchemaSyncItemDto[];
+}
