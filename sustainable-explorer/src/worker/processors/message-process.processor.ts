@@ -7,6 +7,7 @@ import {
     ParsedMessage,
     decodeBase64Message,
     parseMessageJson,
+    isPublishedPolicyMessage,
     extractDiscoverableTopics,
     extractTokenIds,
 } from '@shared/utils/message-parser';
@@ -128,9 +129,7 @@ export class MessageProcessProcessor extends WorkerHost {
             ],
         );
 
-        const isPublishedPolicy =
-            parsed.type === 'Instance-Policy' &&
-            (parsed.action || '').toLowerCase() === 'publish-policy';
+        const isPublishedPolicy = isPublishedPolicyMessage(parsed);
 
         if (isPublishedPolicy) {
             const optionTopicId = parsed.options['topicId'];

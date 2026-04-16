@@ -44,6 +44,15 @@ export function parseMessageJson(decoded: string): ParsedMessage | null {
 }
 
 /**
+ * Returns true when a message is the canonical published methodology record.
+ * Guardian emits this as an `Instance-Policy` with `action=publish-policy`.
+ */
+export function isPublishedPolicyMessage(message: Pick<ParsedMessage, 'type' | 'action'>): boolean {
+    const normalizedAction = (message.action || '').toLowerCase().replace(/-/g, '');
+    return message.type === 'Instance-Policy' && normalizedAction === 'publishpolicy';
+}
+
+/**
  * Extracts typed fields from a raw HCS message JSON object.
  * Handles all Guardian message types: Topic, Policy, Standard Registry,
  * Token, VC-Document, VP-Document, DID-Document, Module, Tool, Schema, etc.
@@ -91,7 +100,7 @@ export function extractFields(json: Record<string, unknown>): ParsedMessage {
 
         // Policy is the draft message; Instance-Policy is the published version.
         // They share the same field structure — the indexer treats Instance-Policy
-        // as the canonical methodology entity (filtered by action='PublishPolicy').
+        // as the canonical methodology entity (filtered by the publish-policy action).
         case 'Policy':
         case 'Instance-Policy':
             result.options = {

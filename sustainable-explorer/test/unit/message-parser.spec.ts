@@ -4,6 +4,7 @@ import {
     extractFields,
     extractDiscoverableTopics,
     extractTokenIds,
+    isPublishedPolicyMessage,
     ParsedMessage,
 } from '../../src/shared/utils/message-parser';
 import { describe, it, expect } from '@jest/globals';
@@ -57,6 +58,22 @@ describe('message-parser', () => {
 
         it('should return null for empty string', () => {
             expect(parseMessageJson('')).toBeNull();
+        });
+    });
+
+    // ── isPublishedPolicyMessage ───────────────────────────────────────
+
+    describe('isPublishedPolicyMessage', () => {
+        it('should accept canonical Instance-Policy messages with publish-policy action', () => {
+            expect(isPublishedPolicyMessage({ type: 'Instance-Policy', action: 'publish-policy' })).toBe(true);
+            expect(isPublishedPolicyMessage({ type: 'Instance-Policy', action: 'PublishPolicy' })).toBe(true);
+            expect(isPublishedPolicyMessage({ type: 'Instance-Policy', action: 'publishpolicy' })).toBe(true);
+        });
+
+        it('should reject non-published policy messages', () => {
+            expect(isPublishedPolicyMessage({ type: 'Policy', action: 'publish-policy' })).toBe(false);
+            expect(isPublishedPolicyMessage({ type: 'Instance-Policy', action: 'archive-policy' })).toBe(false);
+            expect(isPublishedPolicyMessage({ type: 'Instance-Policy', action: null })).toBe(false);
         });
     });
 
