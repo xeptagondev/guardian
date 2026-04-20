@@ -19,6 +19,7 @@ import { TokenSyncProcessor } from './processors/token-sync.processor';
 import { IpfsFetchProcessor } from './processors/ipfs-fetch.processor';
 import { MvRefreshProcessor } from './processors/mv-refresh.processor';
 import { BusinessViewBuilderProcessor } from './processors/business-view-builder.processor';
+import { PolicyIngestProcessor } from './processors/policy-ingest.processor';
 
 // Schedulers
 import { SyncSchedulerService } from './schedulers/sync-scheduler.service';
@@ -32,6 +33,7 @@ const PROCESSOR_MAP: Record<string, any> = {
     [QUEUE_NAMES.MESSAGE_PARSE]: MessageProcessProcessor,
     [QUEUE_NAMES.TOKEN_SYNC]: TokenSyncProcessor,
     [QUEUE_NAMES.IPFS_FETCH]: IpfsFetchProcessor,
+    [QUEUE_NAMES.POLICY_INGEST]: PolicyIngestProcessor,
     [QUEUE_NAMES.MV_REFRESH]: MvRefreshProcessor,
     [QUEUE_NAMES.BUSINESS_VIEW_BUILD]: BusinessViewBuilderProcessor,
 };
