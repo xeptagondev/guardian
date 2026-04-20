@@ -34,6 +34,17 @@ export class TopicSyncProcessor extends WorkerHost {
     async process(job: Job<TopicSyncJobData>): Promise<void> {
         const { topicId, fromSequenceNumber, isOrgTopic } = job.data;
 
+        // Skip STOPPED topics — they're waiting for their parent policy ZIP
+        // to be decoded. The policy-ingest processor will unblock them.
+        const statusRows = await this.dataSource.query(
+            `SELECT status FROM topic_cache WHERE "topicId" = $1 LIMIT 1`,
+            [topicId],
+        );
+        if (statusRows.length > 0 && statusRows[0].status === 'STOPPED') {
+            this.logger.debug(`Topic ${topicId} is STOPPED, skipping sync`);
+            return;
+        }
+
         this.logger.log(`Syncing topic ${topicId} from seq ${fromSequenceNumber}`);
 
         const { messages } = await this.hederaService.getMessages(topicId, fromSequenceNumber);
