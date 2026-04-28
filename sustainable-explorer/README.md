@@ -69,7 +69,16 @@ yarn dev:worker    # hot-reload mode
 
 The worker connects to Hedera Mirror Node (public, no auth needed) and starts syncing data into PostgreSQL.
 
-### 3. Start the frontend (separate terminal)
+### 3. Start the API (separate terminal)
+
+```bash
+yarn install
+yarn dev:api    # hot-reload mode, serves http://localhost:3030
+```
+
+The API serves the `/api/v1` endpoints and Swagger docs at `http://localhost:3030/api/docs`.
+
+### 4. Start the frontend (separate terminal)
 
 ```bash
 cd frontend
@@ -83,6 +92,7 @@ yarn dev
 | Service | URL | Notes |
 |---------|-----|-------|
 | Frontend | http://localhost:3000 | Nuxt 3 dev server |
+| API | http://localhost:3030 | NestJS API server |
 | PostgreSQL | localhost:5432 | User: `explorer` / Pass: `explorer_password` |
 | Redict | localhost:6379 | Redis-compatible, no password |
 
@@ -92,6 +102,7 @@ yarn dev
 yarn infra:up       # Start Postgres + Redict containers
 yarn infra:down     # Stop containers (keep data)
 yarn infra:reset    # Stop, delete volumes, restart fresh
+yarn dev:api        # API with hot-reload
 yarn dev:worker     # Worker with hot-reload
 yarn build          # Production build
 yarn start:worker   # Production worker (requires build first)
