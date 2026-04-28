@@ -2,7 +2,7 @@ import { MOCK_PROJECTS } from '~/data'; // kept aside — not used for live data
 import type { Project, ProjectIssuance } from '~/types/models';
 
 // country display name → ISO 3166-1 alpha-3 for CountryFlag component
-const COUNTRY_ALPHA3: Record<string, string> = {
+export const COUNTRY_ALPHA3: Record<string, string> = {
     'Afghanistan': 'AFG', 'Albania': 'ALB', 'Algeria': 'DZA', 'Angola': 'AGO',
     'Argentina': 'ARG', 'Australia': 'AUS', 'Austria': 'AUT', 'Bangladesh': 'BGD',
     'Bolivia': 'BOL', 'Brazil': 'BRA', 'Cambodia': 'KHM', 'Canada': 'CAN',
@@ -30,7 +30,7 @@ function parseSdgs(sdgs: unknown): number[] {
     return [];
 }
 
-function mapApiProject(raw: Record<string, any>): Project {
+export function mapApiProject(raw: Record<string, any>): Project {
     const countryCode = COUNTRY_ALPHA3[raw.country] || 'UNK';
     return {
         id: raw.sourceTimestamp || raw.id,
