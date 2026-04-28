@@ -23,6 +23,10 @@ import type {
   MethodologyDto,
   MethodologiesResponse,
 } from "~/composables/api/useMethodologiesApi";
+import { usePolicyDetailApi } from "~/composables/api/usePolicyDetailApi";
+import PolicyFlowDiagram from "~/components/policy/PolicyFlowDiagram.vue";
+import type { PolicyBlock } from "~/types/policy";
+import { X, RefreshCw, Workflow } from "lucide-vue-next";
 
 const route = useRoute();
 const { network } = useNetwork();
@@ -78,6 +82,22 @@ if (import.meta.client) {
 const activeTab = ref<
   "overview" | "versions" | "projects" | "policy" | "analytics" | "actions"
 >("overview");
+
+// Decoded policy (block tree) — fetched lazily when the policy tab opens.
+const {
+  data: policyDetail,
+  pending: policyPending,
+  notFound: policyNotFound,
+  refresh: refreshPolicy,
+} = usePolicyDetailApi({ id, network });
+
+const selectedBlock = ref<PolicyBlock | null>(null);
+function onSelectBlock(block: PolicyBlock) {
+  selectedBlock.value = block;
+}
+function clearSelectedBlock() {
+  selectedBlock.value = null;
+}
 
 const tabs = [
   { key: "overview", label: "Overview", icon: BookOpen },
@@ -509,114 +529,171 @@ const publishedAt = computed(() => {
       </div>
 
       <!-- Tab: Hedera Policy -->
-      <div v-else-if="activeTab === 'policy'" class="space-y-6">
+      <div v-else-if="activeTab === 'policy'" class="space-y-4">
+        <!-- Metadata strip -->
         <div class="rounded-xl border bg-card overflow-hidden">
-          <div class="px-5 py-3.5 border-b bg-muted/30">
-            <h2
-              class="text-sm font-semibold text-foreground flex items-center gap-2"
-            >
+          <div class="px-5 py-3 border-b bg-muted/30 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
               <Shield class="h-4 w-4 text-primary" />
               On-Chain Policy
             </h2>
+            <span
+              v-if="policyDetail"
+              class="text-xs px-2 py-0.5 rounded font-medium"
+              :class="policyDetail.status === 'DECODED'
+                ? 'bg-stat-green/10 text-stat-green'
+                : 'bg-stat-amber/10 text-stat-amber'"
+            >
+              {{ policyDetail.status }}
+            </span>
           </div>
-          <div class="px-5 py-5 space-y-4">
-            <div
-              class="flex items-center gap-3 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3"
-            >
-              <CheckCircle2 class="h-5 w-5 text-emerald-600 shrink-0" />
-              <div>
-                <div class="text-sm font-medium text-emerald-800">
-                  Verified on Hedera
-                </div>
-                <div class="text-xs text-emerald-700">
-                  This methodology is governed by an on-chain Guardian policy.
-                </div>
+          <div class="px-5 py-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                Instance Topic
+              </div>
+              <div class="group flex items-center gap-2">
+                <code class="text-sm font-mono text-foreground">{{ methodology.topicId ?? '—' }}</code>
+                <button
+                  v-if="methodology.topicId"
+                  class="opacity-0 group-hover:opacity-100 transition-opacity flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  @click="copyValue(methodology.topicId!)"
+                >
+                  <Check v-if="copiedValue === methodology.topicId" class="h-3.5 w-3.5 text-stat-green" />
+                  <Copy v-else class="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
-
-            <div
-              class="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border rounded-lg overflow-hidden border"
-            >
-              <div class="bg-card px-5 py-4">
-                <div
-                  class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1"
-                >
-                  Instance Policy Topic
-                </div>
-                <div class="group flex items-center gap-2">
-                  <code class="text-sm font-mono text-foreground">{{
-                    methodology.topicId ?? "—"
-                  }}</code>
-                  <button
-                    v-if="methodology.topicId"
-                    class="opacity-0 group-hover:opacity-100 transition-opacity flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    @click="copyValue(methodology.topicId!)"
-                  >
-                    <Check
-                      v-if="copiedValue === methodology.topicId"
-                      class="h-3.5 w-3.5 text-stat-green"
-                    />
-                    <Copy v-else class="h-3.5 w-3.5" />
-                  </button>
-                </div>
+            <div>
+              <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                Policy Topic
               </div>
-              <div class="bg-card px-5 py-4">
-                <div
-                  class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1"
+              <div class="group flex items-center gap-2">
+                <code class="text-sm font-mono text-foreground">
+                  {{ policyDetail?.policyTopicId ?? methodology.policyTopicId ?? '—' }}
+                </code>
+                <button
+                  v-if="policyDetail?.policyTopicId"
+                  class="opacity-0 group-hover:opacity-100 transition-opacity flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  @click="copyValue(policyDetail.policyTopicId)"
                 >
-                  Published At
-                </div>
-                <div class="text-sm text-foreground">
-                  {{ publishedAt ?? "—" }}
-                </div>
-              </div>
-              <div class="bg-card px-5 py-4">
-                <div
-                  class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1"
-                >
-                  Registry DID
-                </div>
-                <div class="group flex items-center gap-2">
-                  <code
-                    class="text-xs font-mono text-muted-foreground truncate max-w-[200px]"
-                    :title="methodology.registryDid ?? ''"
-                    >{{ methodology.registryDid ?? "—" }}</code
-                  >
-                  <button
-                    v-if="methodology.registryDid"
-                    class="opacity-0 group-hover:opacity-100 transition-opacity flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    @click="copyValue(methodology.registryDid!)"
-                  >
-                    <Check
-                      v-if="copiedValue === methodology.registryDid"
-                      class="h-3.5 w-3.5 text-stat-green"
-                    />
-                    <Copy v-else class="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-              <div class="bg-card px-5 py-4">
-                <div
-                  class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1"
-                >
-                  Network
-                </div>
-                <div class="text-sm text-foreground capitalize">
-                  {{ methodology.network }}
-                </div>
+                  <Check v-if="copiedValue === policyDetail.policyTopicId" class="h-3.5 w-3.5 text-stat-green" />
+                  <Copy v-else class="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
+            <div>
+              <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                Source CID
+              </div>
+              <div class="group flex items-center gap-2">
+                <code
+                  class="text-xs font-mono text-muted-foreground truncate max-w-[180px]"
+                  :title="policyDetail?.cid ?? ''"
+                >{{ policyDetail?.cid ?? '—' }}</code>
+                <button
+                  v-if="policyDetail?.cid"
+                  class="opacity-0 group-hover:opacity-100 transition-opacity flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  @click="copyValue(policyDetail.cid!)"
+                >
+                  <Check v-if="copiedValue === policyDetail.cid" class="h-3.5 w-3.5 text-stat-green" />
+                  <Copy v-else class="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div v-if="hashscanUrl" class="px-5 py-2 border-t bg-muted/10">
+            <a
+              :href="hashscanUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-2 text-xs text-primary hover:underline font-medium"
+            >
+              <ExternalLink class="h-3.5 w-3.5" />
+              View on HashScan
+            </a>
+          </div>
+        </div>
 
-            <div v-if="hashscanUrl">
-              <a
-                :href="hashscanUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex items-center gap-2 text-sm text-primary hover:underline font-medium"
+        <!-- Workflow diagram -->
+        <div class="rounded-xl border bg-card overflow-hidden">
+          <div class="px-5 py-3 border-b bg-muted/30 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Workflow class="h-4 w-4 text-primary" />
+              Policy Workflow
+            </h2>
+            <button
+              class="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+              :disabled="policyPending"
+              @click="refreshPolicy()"
+            >
+              <RefreshCw class="h-3.5 w-3.5" :class="policyPending ? 'animate-spin' : ''" />
+              Refresh
+            </button>
+          </div>
+          <div class="relative grid" :class="selectedBlock ? 'lg:grid-cols-[1fr_22rem]' : 'grid-cols-1'">
+            <!-- Diagram canvas -->
+            <div class="relative h-[640px] bg-gray-50/50">
+              <div
+                v-if="policyPending"
+                class="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground"
               >
-                <ExternalLink class="h-4 w-4" />
-                View on HashScan
-              </a>
+                Loading policy…
+              </div>
+              <div
+                v-else-if="policyNotFound || !policyDetail?.config"
+                class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6"
+              >
+                <AlertCircle class="h-8 w-8 text-muted-foreground/50" />
+                <div>
+                  <div class="text-sm font-medium text-foreground">
+                    Policy archive not yet decoded
+                  </div>
+                  <div class="text-xs text-muted-foreground mt-1 max-w-md">
+                    The Instance-Policy ZIP for this methodology hasn't been
+                    fetched and decoded yet. Once the worker processes it, the
+                    block tree will appear here.
+                  </div>
+                </div>
+                <button
+                  class="inline-flex items-center gap-2 text-sm text-primary hover:underline font-medium"
+                  @click="refreshPolicy()"
+                >
+                  <RefreshCw class="h-3.5 w-3.5" />
+                  Check again
+                </button>
+              </div>
+              <PolicyFlowDiagram
+                v-else
+                :config="policyDetail.config"
+                @select-block="onSelectBlock"
+              />
+            </div>
+
+            <!-- Side panel: selected block details -->
+            <div
+              v-if="selectedBlock"
+              class="border-l bg-card overflow-hidden flex flex-col h-[640px]"
+            >
+              <div class="px-4 py-3 border-b flex items-center justify-between bg-muted/30">
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold text-foreground truncate">
+                    {{ selectedBlock.tag || selectedBlock.blockType }}
+                  </div>
+                  <div class="text-[10px] font-mono text-muted-foreground truncate">
+                    {{ selectedBlock.blockType }}
+                  </div>
+                </div>
+                <button
+                  class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  @click="clearSelectedBlock"
+                >
+                  <X class="h-4 w-4" />
+                </button>
+              </div>
+              <div class="flex-1 overflow-auto px-4 py-3">
+                <pre class="text-[11px] font-mono text-foreground whitespace-pre-wrap break-words">{{ JSON.stringify(selectedBlock, null, 2) }}</pre>
+              </div>
             </div>
           </div>
         </div>
