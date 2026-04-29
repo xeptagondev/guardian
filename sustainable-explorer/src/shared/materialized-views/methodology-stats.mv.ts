@@ -5,11 +5,12 @@
  * Each network lives in its own database, so network is NOT part of the key.
  * Keyed by relatedTopicId (the methodology / policy topic ID).
  *
- * NOTE: project / issuance / schema counts can't be computed cleanly yet
- * because the linkage from policies → projects → credits → schemas isn't
- * fully tracked in `business_view`. The view currently returns 0 for all
- * counts but is structured so it can be populated later without changing
- * its shape (callers and joins remain stable).
+ * Counts:
+ *   - project_count   = DYNAMIC_TOPICs hanging off any DECODED policy version
+ *                       for this methodology's policy topic. Each project
+ *                       registration in Guardian creates one DYNAMIC_TOPIC.
+ *   - issuance_count  = Token messages emitted on the policy topic.
+ *   - schema_count    = distinct schemaIds extracted from policy_schema.
  *
  * Refreshed periodically by MvRefreshProcessor.
  */
@@ -29,7 +30,17 @@ export const MV_METHODOLOGY_STATS_CREATE_SQL = `
     )
     SELECT
         mb."relatedTopicId",
-        0::bigint AS project_count,
+        -- Authoritative source: the project table (one row per extracted
+        -- project VC). Aggregates across all DECODED versions of this policy
+        -- so a methodology's count covers its full publish history.
+        COALESCE((
+            SELECT COUNT(*)
+            FROM project pr
+            JOIN policy p
+              ON p."instanceTopicId" = pr."instanceTopicId"
+             AND p.status = 'DECODED'
+            WHERE p."policyTopicId" = mb.policy_topic_id
+        ), 0)::bigint AS project_count,
         COALESCE((
             SELECT COUNT(*)
             FROM message m

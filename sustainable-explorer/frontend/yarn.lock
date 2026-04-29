@@ -2452,7 +2452,7 @@
     "@types/d3-transition" "*"
     "@types/d3-zoom" "*"
 
-"@types/dagre@^0.7.50":
+"@types/dagre@^0.7.50", "@types/dagre@^0.7.54":
   version "0.7.54"
   resolved "https://registry.yarnpkg.com/@types/dagre/-/dagre-0.7.54.tgz#4f3be2a3f89938b0483013739362a477ec978a84"
   integrity sha512-QjcRY+adGbYvBFS7cwv5txhVIwX1XXIUswWl+kSQTbI6NjgZydrZkEKX/etzVd7i+bCsCb40Z/xlBY5eoFuvWQ==
@@ -2575,6 +2575,11 @@
     "@types/topojson-server" "*"
     "@types/topojson-simplify" "*"
     "@types/topojson-specification" "*"
+
+"@types/web-bluetooth@^0.0.20":
+  version "0.0.20"
+  resolved "https://registry.yarnpkg.com/@types/web-bluetooth/-/web-bluetooth-0.0.20.tgz#f066abfcd1cbe66267cdbbf0de010d8a41b41597"
+  integrity sha512-g9gZnnXVq7gM7v3tJCWV/qw7w+KeOlSHAhgF9RytFyifW6AF61hdT2ucrYhPq9hLs5JIryeupHV3qGk95dH9ow==
 
 "@types/web-bluetooth@^0.0.21":
   version "0.0.21"
@@ -2780,6 +2785,35 @@
   version "2.4.28"
   resolved "https://registry.yarnpkg.com/@volar/source-map/-/source-map-2.4.28.tgz#b40254e8c96199e5f1e0796777c593c617ad270e"
   integrity sha512-yX2BDBqJkRXfKw8my8VarTyjv48QwxdJtvRgUpNE5erCsgEUdI2DsLbpa+rOQVAJYshY99szEcRDmyHbF10ggQ==
+
+"@vue-flow/background@^1.3.2":
+  version "1.3.2"
+  resolved "https://registry.yarnpkg.com/@vue-flow/background/-/background-1.3.2.tgz#0c90cd05e5d60da017bbaf5a1c3eb6af7ed9b778"
+  integrity sha512-eJPhDcLj1wEo45bBoqTXw1uhl0yK2RaQGnEINqvvBsAFKh/camHJd5NPmOdS1w+M9lggc9igUewxaEd3iCQX2w==
+
+"@vue-flow/controls@^1.1.3":
+  version "1.1.3"
+  resolved "https://registry.yarnpkg.com/@vue-flow/controls/-/controls-1.1.3.tgz#40866b553101fbef22d2b9a043965ed76fca4b2c"
+  integrity sha512-XCf+G+jCvaWURdFlZmOjifZGw3XMhN5hHlfMGkWh9xot+9nH9gdTZtn+ldIJKtarg3B21iyHU8JjKDhYcB6JMw==
+
+"@vue-flow/core@^1.48.2":
+  version "1.48.2"
+  resolved "https://registry.yarnpkg.com/@vue-flow/core/-/core-1.48.2.tgz#cef8641b17f6220c257d4208bdb2082cee882225"
+  integrity sha512-raxhgKWE+G/mcEvXJjGFUDYW9rAI3GOtiHR3ZkNpwBWuIaCC1EYiBmKGwJOoNzVFgwO7COgErnK7i08i287AFA==
+  dependencies:
+    "@vueuse/core" "^10.5.0"
+    d3-drag "^3.0.0"
+    d3-interpolate "^3.0.1"
+    d3-selection "^3.0.0"
+    d3-zoom "^3.0.0"
+
+"@vue-flow/minimap@^1.5.4":
+  version "1.5.4"
+  resolved "https://registry.yarnpkg.com/@vue-flow/minimap/-/minimap-1.5.4.tgz#c9c3badea49d4166aa9cdc713017397d9df7574c"
+  integrity sha512-l4C+XTAXnRxsRpUdN7cAVFBennC1sVRzq4bDSpVK+ag7tdMczAnhFYGgbLkUw3v3sY6gokyWwMl8CDonp8eB2g==
+  dependencies:
+    d3-selection "^3.0.0"
+    d3-zoom "^3.0.0"
 
 "@vue-leaflet/vue-leaflet@^0.10":
   version "0.10.1"
@@ -3043,6 +3077,16 @@
   resolved "https://registry.yarnpkg.com/@vue/shared/-/shared-3.5.32.tgz#dd8ba0d709bf3f758c324a81c8897bad5e1540cf"
   integrity sha512-ksNyrmRQzWJJ8n3cRDuSF7zNNontuJg1YHnmWRJd2AMu8Ij2bqwiiri2lH5rHtYPZjj4STkNcgcmiQqlOjiYGg==
 
+"@vueuse/core@^10.5.0":
+  version "10.11.1"
+  resolved "https://registry.yarnpkg.com/@vueuse/core/-/core-10.11.1.tgz#15d2c0b6448d2212235b23a7ba29c27173e0c2c6"
+  integrity sha512-guoy26JQktXPcz+0n3GukWIy/JDNKti9v6VEMu6kV2sYBsWuGiTU8OWdg+ADfUbHg3/3DlqySDe7JmdHrktiww==
+  dependencies:
+    "@types/web-bluetooth" "^0.0.20"
+    "@vueuse/metadata" "10.11.1"
+    "@vueuse/shared" "10.11.1"
+    vue-demi ">=0.14.8"
+
 "@vueuse/core@^12":
   version "12.8.2"
   resolved "https://registry.yarnpkg.com/@vueuse/core/-/core-12.8.2.tgz#007c6dd29a7d1f6933e916e7a2f8ef3c3f968eaa"
@@ -3062,6 +3106,11 @@
     "@vueuse/metadata" "14.2.1"
     "@vueuse/shared" "14.2.1"
 
+"@vueuse/metadata@10.11.1":
+  version "10.11.1"
+  resolved "https://registry.yarnpkg.com/@vueuse/metadata/-/metadata-10.11.1.tgz#209db7bb5915aa172a87510b6de2ca01cadbd2a7"
+  integrity sha512-IGa5FXd003Ug1qAZmyE8wF3sJ81xGLSqTqtQ6jaVfkeZ4i5kS2mwQF61yhVqojRnenVew5PldLyRgvdl4YYuSw==
+
 "@vueuse/metadata@12.8.2":
   version "12.8.2"
   resolved "https://registry.yarnpkg.com/@vueuse/metadata/-/metadata-12.8.2.tgz#6cb3a4e97cdcf528329eebc1bda73cd7f64318d3"
@@ -3071,6 +3120,13 @@
   version "14.2.1"
   resolved "https://registry.yarnpkg.com/@vueuse/metadata/-/metadata-14.2.1.tgz#bd3338a565c2f651b9d18ac0f8825aa6077ee461"
   integrity sha512-1ButlVtj5Sb/HDtIy1HFr1VqCP4G6Ypqt5MAo0lCgjokrk2mvQKsK2uuy0vqu/Ks+sHfuHo0B9Y9jn9xKdjZsw==
+
+"@vueuse/shared@10.11.1":
+  version "10.11.1"
+  resolved "https://registry.yarnpkg.com/@vueuse/shared/-/shared-10.11.1.tgz#62b84e3118ae6e1f3ff38f4fbe71b0c5d0f10938"
+  integrity sha512-LHpC8711VFZlDaYUXEBbFBCQ7GS3dVU9mjOhhMhXP6txTV4EhYQg/KGnQuvt/sPAtoUKq7VVUnL6mVtFoL42sA==
+  dependencies:
+    vue-demi ">=0.14.8"
 
 "@vueuse/shared@12.8.2":
   version "12.8.2"
@@ -3829,7 +3885,7 @@ d3-delaunay@6:
   resolved "https://registry.yarnpkg.com/d3-dispatch/-/d3-dispatch-3.0.1.tgz#5fc75284e9c2375c36c839411a0cf550cbfc4d5e"
   integrity sha512-rzUyPU/S7rwUflMyLc1ETDeBj0NRuHKKAcvukozwhshr6g6c5d8zh4c2gQjY2bZ0dXeGLWc1PF174P2tVvKhfg==
 
-"d3-drag@2 - 3", d3-drag@3, d3-drag@~3:
+"d3-drag@2 - 3", d3-drag@3, d3-drag@^3.0.0, d3-drag@~3:
   version "3.0.0"
   resolved "https://registry.yarnpkg.com/d3-drag/-/d3-drag-3.0.0.tgz#994aae9cd23c719f53b5e10e3a0a6108c69607ba"
   integrity sha512-pWbUJLdETVA8lQNJecMxoXfH6x+mO2UQo8rSmZ+QqxcbyA3hfeprFgIT//HW2nlHChWeIIMwS2Fq+gEARkhTkg==
@@ -3898,7 +3954,7 @@ d3-interpolate-path@^2.2.3:
   resolved "https://registry.yarnpkg.com/d3-interpolate-path/-/d3-interpolate-path-2.3.0.tgz#ff919acb52968619f4b0dc5fa95653e581d5a0ca"
   integrity sha512-tZYtGXxBmbgHsIc9Wms6LS5u4w6KbP8C09a4/ZYc4KLMYYqub57rRBUgpUr2CIarIrJEpdAWWxWQvofgaMpbKQ==
 
-"d3-interpolate@1 - 3", "d3-interpolate@1.2.0 - 3", d3-interpolate@3, d3-interpolate@~3:
+"d3-interpolate@1 - 3", "d3-interpolate@1.2.0 - 3", d3-interpolate@3, d3-interpolate@^3.0.1, d3-interpolate@~3:
   version "3.0.1"
   resolved "https://registry.yarnpkg.com/d3-interpolate/-/d3-interpolate-3.0.1.tgz#3c47aa5b32c5b3dfb56ef3fd4342078a632b400d"
   integrity sha512-3bYs1rOD33uo8aqJfKP3JWPAibgw8Zm2+L9vBKEHJ2Rg+viTR7o5Mmv5mZcieN+FRYaAOWX5SJATX6k1PWz72g==
@@ -3957,7 +4013,7 @@ d3-scale@4, d3-scale@~4:
     d3-time "2.1.1 - 3"
     d3-time-format "2 - 4"
 
-"d3-selection@2 - 3", d3-selection@3, d3-selection@~3:
+"d3-selection@2 - 3", d3-selection@3, d3-selection@^3.0.0, d3-selection@~3:
   version "3.0.0"
   resolved "https://registry.yarnpkg.com/d3-selection/-/d3-selection-3.0.0.tgz#c25338207efa72cc5b9bd1458a1a41901f1e1b31"
   integrity sha512-fmTRWbNMmsmWq6xJV8D19U/gw/bwrHfNXxrIN+HfZgnzqTHp9jOmKMhsTUjXOJnZOdZY9Q28y4yebKzqDKlxlQ==
@@ -4006,7 +4062,7 @@ d3-shape@^1.2.0:
     d3-interpolate "1 - 3"
     d3-timer "1 - 3"
 
-d3-zoom@3, d3-zoom@~3:
+d3-zoom@3, d3-zoom@^3.0.0, d3-zoom@~3:
   version "3.0.0"
   resolved "https://registry.yarnpkg.com/d3-zoom/-/d3-zoom-3.0.0.tgz#d13f4165c73217ffeaa54295cd6969b3e7aee8f3"
   integrity sha512-b8AmV3kfQaqWAuacbPuNbL6vahnOJflOhexLzMMNLga62+/nh0JzvJ0aO/5a5MVgUFGS7Hu1P9P03o3fJkDCyw==
@@ -4052,6 +4108,14 @@ d3@^7.2.1:
     d3-timer "3"
     d3-transition "3"
     d3-zoom "3"
+
+dagre@^0.8.5:
+  version "0.8.5"
+  resolved "https://registry.yarnpkg.com/dagre/-/dagre-0.8.5.tgz#ba30b0055dac12b6c1fcc247817442777d06afee"
+  integrity sha512-/aTqmnRta7x7MCCpExk7HQL2O4owCT2h8NT//9I1OQ9vt29Pa0BzSAkR5lwFUcQ7491yVi/3CXU9jQ5o0Mn2Sw==
+  dependencies:
+    graphlib "^2.1.8"
+    lodash "^4.17.15"
 
 db0@^0.3.4:
   version "0.3.4"
@@ -4670,6 +4734,13 @@ graceful-fs@^4.2.0, graceful-fs@^4.2.4, graceful-fs@^4.2.9:
   version "4.2.11"
   resolved "https://registry.yarnpkg.com/graceful-fs/-/graceful-fs-4.2.11.tgz#4183e4e8bf08bb6e05bbb2f7d2e0c8f712ca40e3"
   integrity sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==
+
+graphlib@^2.1.8:
+  version "2.1.8"
+  resolved "https://registry.yarnpkg.com/graphlib/-/graphlib-2.1.8.tgz#5761d414737870084c92ec7b5dbcb0592c9d35da"
+  integrity sha512-jcLLfkpoVGmH7/InMC/1hIvOPSUh38oJtGhvrOFGzioE1DZ+0YW16RgmOJhHiuWTvGiJQ9Z1Ik43JvkRPRvE+A==
+  dependencies:
+    lodash "^4.17.15"
 
 gzip-size@^7.0.0:
   version "7.0.0"
@@ -7271,7 +7342,7 @@ vue-bundle-renderer@^2.2.0:
   dependencies:
     ufo "^1.6.1"
 
-vue-demi@>=0.13.0, vue-demi@^0.14.10:
+vue-demi@>=0.13.0, vue-demi@>=0.14.8, vue-demi@^0.14.10:
   version "0.14.10"
   resolved "https://registry.yarnpkg.com/vue-demi/-/vue-demi-0.14.10.tgz#afc78de3d6f9e11bf78c55e8510ee12814522f04"
   integrity sha512-nMZBOwuzabUO0nLgIcc6rycZEebF6eeUfaiQx9+WSk8e29IbLvPU9feI6tqW4kTo3hvoYAJkMh8n8D0fuISphg==
