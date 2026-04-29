@@ -29,7 +29,9 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
         @InjectQueue(QUEUE_NAMES.MV_REFRESH) private readonly mvRefreshQueue: Queue,
         @InjectQueue(QUEUE_NAMES.BUSINESS_VIEW_BUILD) private readonly businessViewQueue: Queue,
-        @InjectQueue(QUEUE_NAMES.POLICY_SCHEMA_IMPORT) private readonly policySchemaQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.POLICY_INGEST) private readonly policyIngestQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsFetchQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.PROJECT_EXTRACT) private readonly projectExtractQueue: Queue,
     ) {}
 
     async onModuleInit(): Promise<void> {
@@ -156,6 +158,9 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         try {
             await this.scheduleMvRefresh();
             await this.scheduleBusinessViewBuilder();
+            await this.scheduleStoppedPolicyRetry();
+            await this.scheduleIpfsBackfill();
+            await this.scheduleProjectExtractSweep();
             this.logger.log('All repeating jobs scheduled');
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
@@ -169,7 +174,7 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
      */
     private async scheduleTopicSyncs(): Promise<void> {
         const topics = await this.dataSource.query(
-            `SELECT "topicId", messages, "hasNext" FROM topic_cache WHERE status != 'DISABLED'`,
+            `SELECT "topicId", messages, "hasNext" FROM topic_cache WHERE status NOT IN ('DISABLED', 'STOPPED')`,
         );
 
         let enqueued = 0;
@@ -285,5 +290,79 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.logger.log('Scheduled business view builder every 5 minutes');
+    }
+
+    /**
+     * Periodically retries STOPPED topics whose parent policy ZIP failed to download.
+     * Finds FAILED policies and re-enqueues POLICY_INGEST jobs for them.
+     * Also handles Instance-Policy messages that were never ingested (no policy row).
+     */
+    private async scheduleStoppedPolicyRetry(): Promise<void> {
+        const interval = 10 * 60 * 1000; // every 10 minutes
+
+        const repeatableJobs = await this.policyIngestQueue.getRepeatableJobs();
+        for (const rJob of repeatableJobs) {
+            if (rJob.name === 'retry-stopped') {
+                await this.policyIngestQueue.removeRepeatableByKey(rJob.key);
+            }
+        }
+
+        await this.policyIngestQueue.add('retry-stopped', {}, {
+            repeat: { every: interval },
+            jobId: 'policy-retry-stopped',
+        });
+
+        this.logger.log('Scheduled STOPPED policy retry every 10 minutes');
+    }
+
+    /**
+     * Periodically re-enqueues IPFS fetch jobs for messages with CIDs
+     * but no cached content. Excludes Instance-Policy messages (those
+     * go through POLICY_INGEST). Caps batch size to avoid flooding.
+     */
+    private async scheduleIpfsBackfill(): Promise<void> {
+        const interval = 30 * 60 * 1000; // every 30 minutes
+
+        const repeatableJobs = await this.ipfsFetchQueue.getRepeatableJobs();
+        for (const rJob of repeatableJobs) {
+            if (rJob.name === 'backfill') {
+                await this.ipfsFetchQueue.removeRepeatableByKey(rJob.key);
+            }
+        }
+
+        await this.ipfsFetchQueue.add('backfill', {}, {
+            repeat: { every: interval },
+            jobId: 'ipfs-backfill',
+        });
+
+        this.logger.log('Scheduled IPFS backfill every 30 minutes');
+    }
+
+    /**
+     * Periodically resolves project schemas and extracts new project rows.
+     * Cheap sweep: skips already-resolved policies and already-extracted VCs.
+     */
+    private async scheduleProjectExtractSweep(): Promise<void> {
+        const interval = 5 * 60 * 1000; // every 5 minutes
+
+        const repeatableJobs = await this.projectExtractQueue.getRepeatableJobs();
+        for (const rJob of repeatableJobs) {
+            if (rJob.name === 'sweep') {
+                await this.projectExtractQueue.removeRepeatableByKey(rJob.key);
+            }
+        }
+
+        await this.projectExtractQueue.add('sweep', {}, {
+            repeat: { every: interval },
+            jobId: 'project-extract-sweep',
+        });
+
+        // Bootstrap: fire one immediate sweep so existing decoded policies
+        // and already-fetched VCs get picked up without waiting 5 minutes.
+        await this.projectExtractQueue.add('sweep', {}, {
+            jobId: `project-extract-bootstrap-${Date.now()}`,
+        });
+
+        this.logger.log('Scheduled project extract sweep every 5 minutes (with bootstrap)');
     }
 }

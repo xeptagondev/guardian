@@ -1,6 +1,6 @@
-import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import Redis from 'ioredis';
 import { QUEUE_NAMES } from '@shared/config/bullmq.config';
@@ -19,12 +19,24 @@ export class IpfsFetchProcessor extends WorkerHost {
         private readonly ipfsService: IpfsService,
         private readonly dataSource: DataSource,
         @Inject('REDICT_PUB') private readonly redis: Redis,
+        @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsFetchQueue: Queue,
     ) {
         super();
     }
 
     async process(job: Job<IpfsFetchJobData>): Promise<void> {
+        // Handle repeatable backfill jobs
+        if (job.name === 'backfill') {
+            await this.runBackfill();
+            return;
+        }
+
         const { cid, messageTimestamp } = job.data;
+
+        if (!cid) {
+            this.logger.warn('Skipping IPFS fetch job with missing CID');
+            return;
+        }
 
         this.logger.debug(`Fetching IPFS content for CID ${cid}`);
 
@@ -85,10 +97,44 @@ export class IpfsFetchProcessor extends WorkerHost {
         this.logger.log(`IPFS content fetched for CID ${cid} (${content.length} bytes)`);
     }
 
+    /**
+     * Periodic backfill: finds messages with CIDs but no cached IPFS content
+     * and re-enqueues fetch jobs. Excludes Instance-Policy messages (handled
+     * by POLICY_INGEST). Capped at 500 per run to avoid flooding.
+     */
+    private async runBackfill(): Promise<void> {
+        const missing: { consensusTimestamp: string; cid: string }[] = await this.dataSource.query(
+            `SELECT m."consensusTimestamp", unnest(m.files) AS cid
+             FROM message m
+             WHERE m.files IS NOT NULL
+               AND m.documents IS NULL
+               AND m.type != 'Instance-Policy'
+               AND NOT EXISTS (
+                   SELECT 1 FROM ipfs_files f WHERE f.cid = ANY(m.files)
+               )
+             LIMIT 500`,
+        );
+
+        let enqueued = 0;
+        for (const row of missing) {
+            await this.ipfsFetchQueue.add('fetch', {
+                cid: row.cid,
+                messageTimestamp: row.consensusTimestamp,
+            }, {
+                jobId: `ipfs-backfill-${row.cid}-${Date.now()}`,
+            });
+            enqueued++;
+        }
+
+        if (enqueued > 0) {
+            this.logger.log(`IPFS backfill: enqueued ${enqueued} missing CIDs`);
+        }
+    }
+
     @OnWorkerEvent('failed')
     onFailed(job: Job<IpfsFetchJobData>, error: Error): void {
         this.logger.error(
-            `IPFS fetch job ${job.id} failed for CID ${job.data.cid}: ${error.message}`,
+            `IPFS fetch job ${job.id} failed for CID ${job.data?.cid}: ${error.message}`,
             error.stack,
         );
     }

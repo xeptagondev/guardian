@@ -2,6 +2,7 @@ import {
     Entity,
     PrimaryGeneratedColumn,
     Column,
+    Index,
 } from 'typeorm';
 
 @Entity('topic_cache')
@@ -23,6 +24,17 @@ export class TopicCache {
 
     @Column({ type: 'boolean', default: false })
     hasNext: boolean;
+
+    @Index()
+    @Column({ type: 'varchar', length: 40, nullable: true })
+    topicType: string | null;
+
+    @Index()
+    @Column({ type: 'varchar', length: 20, nullable: true })
+    parentTopicId: string | null;
+
+    @Column({ type: 'varchar', length: 20, nullable: true })
+    policyTopicId: string | null;
 
     @Column({ type: 'timestamp', nullable: true })
     priorityDate: Date | null;

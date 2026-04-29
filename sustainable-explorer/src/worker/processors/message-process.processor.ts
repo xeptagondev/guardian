@@ -10,6 +10,7 @@ import { DataSource } from "typeorm";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
 import {
     ParsedMessage,
+    DiscoveredTopic,
     decodeBase64Message,
     parseMessageJson,
     extractDiscoverableTopics,
@@ -28,7 +29,7 @@ export class MessageProcessProcessor extends WorkerHost {
     constructor(
         private readonly dataSource: DataSource,
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
-        @InjectQueue(QUEUE_NAMES.POLICY_SCHEMA_IMPORT) private readonly policySchemaQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.POLICY_INGEST) private readonly policyIngestQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
     ) {
@@ -141,72 +142,83 @@ export class MessageProcessProcessor extends WorkerHost {
             ],
         );
 
-        const isPublishedPolicy =
-            parsed.type === 'Instance-Policy' &&
-            (parsed.action || '').toLowerCase() === 'publish-policy';
+        // Route IPFS fetch: Instance-Policy ZIPs go to POLICY_INGEST,
+        // everything else goes to IPFS_FETCH as before.
+        if (
+            parsed.type === 'Instance-Policy'
+            && parsed.action === 'publish-policy'
+            && parsed.files.length > 0
+        ) {
+            const instanceTopicId = (parsed.options.topicId as string)
+                || (parsed.options.instanceTopicId as string)
+                || null;
 
-        if (isPublishedPolicy) {
-            const optionTopicId = parsed.options['topicId'];
-            const policyTopicId = typeof optionTopicId === 'string' && optionTopicId.length > 0
-                ? optionTopicId
-                : topicId;
-
+            await this.policyIngestQueue.add('ingest', {
+                cid: parsed.files[0],
+                messageTimestamp: consensusTimestamp,
+                policyTopicId: topicId,
+                instanceTopicId,
+                owner: parsed.owner,
+                policyName: (parsed.options.name as string) || null,
+                policyVersion: (parsed.options.version as string) || null,
+                policyUuid: (parsed.options.uuid as string) || null,
+            }, {
+                jobId: `policy-ingest-${parsed.files[0]}`,
+            });
+        } else {
             for (const cid of parsed.files) {
-                await this.policySchemaQueue.add('import', {
+                await this.ipfsQueue.add('fetch', {
                     cid,
                     messageTimestamp: consensusTimestamp,
-                    policyTopicId,
                 }, {
-                    jobId: `policy-schema-${policyTopicId}-${cid}`,
+                    jobId: `ipfs-${cid}`,
                 });
             }
         }
 
-        // Enqueue IPFS fetch jobs for each CID in files
-        for (const cid of parsed.files) {
-            await this.ipfsQueue.add(
-                "fetch",
-                {
-                    cid,
-                    messageTimestamp: consensusTimestamp,
-                },
-                {
-                    jobId: `ipfs-${cid}`,
-                },
-            );
-        }
-
-        // Discover and enqueue child topics
+        // Discover and enqueue child topics, storing hierarchy metadata
         const discoveredTopics = extractDiscoverableTopics(parsed, topicId);
         for (const topic of discoveredTopics) {
-            await this.topicQueue.add(
-                "sync",
-                {
+            // Determine initial status: DYNAMIC_TOPICs are STOPPED until
+            // their parent policy is decoded. All other topic types start NEW.
+            const initialStatus = await this.resolveTopicInitialStatus(topic);
+
+            // Upsert topic_cache with hierarchy metadata
+            await this.dataSource.query(
+                `INSERT INTO topic_cache (
+                    "topicId", status, messages, "hasNext", "lastUpdate",
+                    "topicType", "parentTopicId", "policyTopicId"
+                ) VALUES ($1, $2, 0, true, $3, $4, $5, $6)
+                ON CONFLICT ("topicId") DO UPDATE SET
+                    "topicType" = COALESCE(EXCLUDED."topicType", topic_cache."topicType"),
+                    "parentTopicId" = COALESCE(EXCLUDED."parentTopicId", topic_cache."parentTopicId"),
+                    "policyTopicId" = COALESCE(EXCLUDED."policyTopicId", topic_cache."policyTopicId")`,
+                [
+                    topic.topicId,
+                    initialStatus,
+                    Date.now(),
+                    topic.topicType,
+                    topic.parentTopicId,
+                    // For DYNAMIC_TOPICs, policyTopicId is the parent (instance topic)
+                    topic.topicType === 'DYNAMIC_TOPIC' ? topic.parentTopicId : null,
+                ],
+            );
+
+            // Only enqueue sync if the topic is not STOPPED
+            if (initialStatus !== 'STOPPED') {
+                await this.topicQueue.add('sync', {
                     topicId: topic.topicId,
                     fromSequenceNumber: 0,
                     isOrgTopic: topic.isOrgTopic,
-                },
-                {
+                }, {
                     jobId: `topic-${topic.topicId}-0`,
                     priority: topic.isOrgTopic ? 1 : 10,
-                },
-            );
-        }
-
-        // // Enqueue token sync for discovered tokens
-        const tokenIds = extractTokenIds(parsed);
-        for (const tokenId of tokenIds) {
-            await this.tokenQueue.add(
-                "sync",
-                {
-                    tokenId,
-                    fetchNfts: true,
-                    fromSerial: 0,
-                },
-                {
-                    jobId: `token-${tokenId}`,
-                },
-            );
+                });
+            } else {
+                this.logger.debug(
+                    `Topic ${topic.topicId} (${topic.topicType}) STOPPED — waiting for parent policy decode`,
+                );
+            }
         }
 
         // Update cache status
@@ -217,10 +229,30 @@ export class MessageProcessProcessor extends WorkerHost {
         );
     }
 
-    private async updateCacheStatus(
-        consensusTimestamp: string,
-        status: string,
-    ): Promise<void> {
+    /**
+     * Determines the initial topic_cache status for a newly discovered topic.
+     * DYNAMIC_TOPICs are STOPPED until their parent Instance-Policy's ZIP is decoded.
+     * All other topic types start as NEW (ready to sync immediately).
+     */
+    private async resolveTopicInitialStatus(topic: DiscoveredTopic): Promise<string> {
+        if (topic.topicType !== 'DYNAMIC_TOPIC' || !topic.parentTopicId) {
+            return 'NEW';
+        }
+
+        // Check if the parent policy is already decoded
+        const rows = await this.dataSource.query(
+            `SELECT status FROM policy WHERE "instanceTopicId" = $1 LIMIT 1`,
+            [topic.parentTopicId],
+        );
+
+        if (rows.length > 0 && rows[0].status === 'DECODED') {
+            return 'NEW'; // Parent policy is ready, proceed immediately
+        }
+
+        return 'STOPPED';
+    }
+
+    private async updateCacheStatus(consensusTimestamp: string, status: string): Promise<void> {
         await this.dataSource.query(
             `UPDATE message_cache SET status = $1, "lastUpdate" = $2 WHERE "consensusTimestamp" = $3`,
             [status, Date.now().toString(), consensusTimestamp],

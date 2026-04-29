@@ -1,169 +1,159 @@
 <script setup lang="ts">
 import {
-    ArrowLeft, FileJson, MapPin, Calendar, Building2, Shield, Coins,
-    ChevronDown, ChevronUp, Copy, Check, Users, BookOpen, Target,
-    Globe, Leaf, FolderKanban, Layers, BarChart3, Clock, Activity,
-    GitBranch, ArrowRight, CheckCircle2, Circle, Zap, FileText, Network, Repeat, Flame,
-    TrendingUp, TrendingDown, AlertTriangle, Database, ExternalLink,
+    ArrowLeft, FileJson, MapPin, Building2, Coins, FolderKanban,
+    Globe, ExternalLink, Info, Database, Calendar, BookOpen, Layers,
 } from 'lucide-vue-next';
-import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_TRANSFERS, MOCK_RETIREMENTS } from '~/data';
-import { formatCredits, formatNumber } from '~/lib/format';
-import { getSDG } from '~/lib/sdgs';
-import { generateProjectVc, generateCreditVc } from '~/lib/mock-vc';
-import { REGISTRY_TERM_MAPPINGS } from '~/lib/registry-terms';
-import { getMethodologyName } from '~/lib/methodologies';
+import { useProjectApi } from '~/composables/api/useProjectApi';
 
 const route = useRoute();
-const projectId = computed(() => route.params.id as string);
-const project = computed(() => MOCK_PROJECTS.find(p => p.id === projectId.value));
-const linkedCredits = computed(() => MOCK_CREDITS.filter(c => c.projectId === projectId.value));
-const linkedTransfers = computed(() => MOCK_TRANSFERS.filter(t => t.projectId === projectId.value));
-const linkedRetirements = computed(() => MOCK_RETIREMENTS.filter(r => r.projectId === projectId.value));
-const projectVc = computed(() => project.value ? generateProjectVc(project.value) : null);
+const { network } = useNetwork();
+const id = computed(() => route.params.id as string);
 
-// Lifecycle summary
-const lifecycleSummary = computed(() => {
-    const totalIssued = linkedCredits.value.reduce((sum, c) => sum + c.supply, 0);
-    const totalTransferred = linkedTransfers.value.reduce((sum, t) => sum + t.quantity, 0);
-    const totalRetired = linkedRetirements.value.reduce((sum, r) => sum + r.quantity, 0);
-    const active = totalIssued - totalRetired;
-    return { totalIssued, totalTransferred, totalRetired, active };
+const { data: project, pending, notFound } = useProjectApi({ id, network });
+
+const vcViewerOpen = ref(false);
+
+function dash(v: unknown): string {
+    if (v === null || v === undefined || v === '') return '—';
+    return String(v);
+}
+
+const hasCoords = computed(() =>
+    !!project.value && project.value.latitude !== null && project.value.longitude !== null,
+);
+
+interface LatLng { lat: number; lng: number; }
+
+/**
+ * Try to extract a polygon (or multi-point trace) from the source VC.
+ * Looks at `coordinates` arrays at the top of credentialSubject and one
+ * level into common nested shapes (`location.coordinates`, `geometry.coordinates`).
+ */
+const polygon = computed<LatLng[] | null>(() => {
+    const vc = project.value?.rawVc as Record<string, unknown> | undefined;
+    if (!vc) return null;
+
+    const csRaw = vc.credentialSubject;
+    const cs: Record<string, unknown> | null = Array.isArray(csRaw)
+        ? (csRaw.find((x) => x && typeof x === 'object' && !Array.isArray(x)) as Record<string, unknown> | undefined) ?? null
+        : (csRaw && typeof csRaw === 'object' ? (csRaw as Record<string, unknown>) : null);
+    if (!cs) return null;
+
+    const candidates: unknown[] = [
+        cs.coordinates,
+        cs.geometry,
+        (cs.location as Record<string, unknown> | undefined)?.coordinates,
+        (cs.geometry as Record<string, unknown> | undefined)?.coordinates,
+    ];
+
+    for (const c of candidates) {
+        if (!Array.isArray(c) || c.length === 0) continue;
+        const points = c
+            .map((entry): LatLng | null => {
+                if (!entry || typeof entry !== 'object') return null;
+                const e = entry as Record<string, unknown>;
+                const lat = parseFloat(String(e.latitude ?? e.lat ?? ''));
+                const lng = parseFloat(String(e.longitude ?? e.lng ?? e.lon ?? ''));
+                return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+            })
+            .filter((p): p is LatLng => p !== null);
+        if (points.length > 0) return points;
+    }
+    return null;
 });
 
-const termMappingOpen = ref(false);
-const vcViewerOpen = ref(false);
-const vcViewerTitle = ref('');
-const vcViewerData = ref<Record<string, any> | null>(null);
+const hasMapData = computed(() => hasCoords.value || (polygon.value?.length ?? 0) >= 1);
 
-function viewProjectVc() {
-    if (!project.value || !projectVc.value) return;
-    vcViewerTitle.value = project.value.name;
-    vcViewerData.value = projectVc.value;
-    vcViewerOpen.value = true;
-}
-
-function viewCreditVc(c: typeof MOCK_CREDITS[number]) {
-    vcViewerTitle.value = c.name;
-    vcViewerData.value = generateCreditVc(c, project.value?.name);
-    vcViewerOpen.value = true;
-}
+const mapPointSummary = computed(() => {
+    const n = polygon.value?.length ?? 0;
+    if (n >= 3) return `${n} boundary points`;
+    if (n === 2) return '2 points';
+    if (n === 1) return '1 point';
+    if (hasCoords.value) return '1 point';
+    return null;
+});
 
 const statusColor: Record<string, { bg: string; text: string; dot: string }> = {
-    Registered: { bg: 'bg-slate-50', text: 'text-slate-600', dot: 'bg-slate-400' },
-    'Under Validation': { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
-    Verified: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
-    Issuing: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-    Completed: { bg: 'bg-purple-50', text: 'text-purple-600', dot: 'bg-purple-500' },
+    Registered:        { bg: 'bg-slate-50',   text: 'text-slate-600',   dot: 'bg-slate-400' },
+    'Under Validation':{ bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-500' },
+    Verified:          { bg: 'bg-blue-50',    text: 'text-blue-700',    dot: 'bg-blue-500'  },
+    Issuing:           { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+    Approved:          { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+    Completed:         { bg: 'bg-purple-50',  text: 'text-purple-600',  dot: 'bg-purple-500' },
 };
+const statusDotClass = (s: string | null) => statusColor[s ?? '']?.dot ?? 'bg-muted-foreground';
 
-const creditingPeriodStart = computed(() => {
-    if (!project.value) return '';
-    return `${parseInt(project.value.vintage) - 1}-01-01`;
-});
-
-const creditingPeriodEnd = computed(() => {
-    if (!project.value) return '';
-    return `${parseInt(project.value.vintage) + 9}-12-31`;
-});
-
-// Mock emission data derived from project credits
-const emissions = computed(() => {
-    if (!project.value) return null;
-    const baseline = project.value.credits * 0.0057;
-    const projectEmissions = baseline * 0.15;
-    const leakage = baseline * 0.005;
-    const baselineEmissionFactor = baseline / (project.value.credits * 0.0000612);
-    return {
-        baseline: baseline.toFixed(2),
-        project: projectEmissions.toFixed(2),
-        leakage: leakage.toFixed(2),
-        baselineEmissionFactor: baselineEmissionFactor.toFixed(5),
-        net: (baseline - projectEmissions - leakage).toFixed(2),
-    };
-});
-
-// Mock activity log
-const activityLog = computed(() => {
-    if (!project.value) return [];
-    const base = new Date(project.value.createdAt);
-    return [
-        { date: new Date(base.getTime() - 180 * 86400000).toISOString().split('T')[0], action: 'Project Design Document submitted', type: 'document' },
-        { date: new Date(base.getTime() - 120 * 86400000).toISOString().split('T')[0], action: 'Validation audit initiated', type: 'verification' },
-        { date: new Date(base.getTime() - 60 * 86400000).toISOString().split('T')[0], action: 'Validation report approved', type: 'verification' },
-        { date: project.value.createdAt, action: 'Project registered on Guardian', type: 'registry' },
-        { date: new Date(base.getTime() + 30 * 86400000).toISOString().split('T')[0], action: 'First monitoring period started', type: 'monitoring' },
-        { date: new Date(base.getTime() + 180 * 86400000).toISOString().split('T')[0], action: 'Verification report submitted', type: 'verification' },
-        { date: new Date(base.getTime() + 210 * 86400000).toISOString().split('T')[0], action: 'Tokens issued to Hedera', type: 'credit' },
-    ];
-});
-
-const activityTypeIcon: Record<string, { icon: any; color: string }> = {
-    document: { icon: FileText, color: 'text-muted-foreground bg-muted' },
-    verification: { icon: Shield, color: 'text-amber-600 bg-amber-50' },
-    registry: { icon: Database, color: 'text-primary bg-primary/10' },
-    monitoring: { icon: Activity, color: 'text-sky-600 bg-sky-50' },
-    credit: { icon: Coins, color: 'text-emerald-600 bg-emerald-50' },
-};
-
-// Methodology workflow steps
-const methodologySteps = computed(() => {
-    if (!project.value) return [];
-    return [
-        { label: 'Project Design', desc: 'PDD submission & stakeholder consultation', status: 'complete' },
-        { label: 'Validation', desc: 'Third-party validation audit', status: 'complete' },
-        { label: 'Registration', desc: 'Project registration on registry', status: 'complete' },
-        { label: 'Monitoring', desc: 'Data collection & MRV reporting', status: ['Verified', 'Issuing', 'Completed'].includes(project.value.status) ? 'complete' : (project.value.status === 'Under Validation' ? 'active' : 'pending') },
-        { label: 'Verification', desc: 'Emission reduction verification', status: ['Issuing', 'Completed'].includes(project.value.status) ? 'complete' : (project.value.status === 'Verified' ? 'active' : 'pending') },
-        { label: 'Issuance', desc: 'Token minting to Hedera', status: project.value.status === 'Completed' ? 'complete' : (project.value.status === 'Issuing' ? 'active' : 'pending') },
-    ];
-});
-
-// Generate a deterministic mock transaction timestamp from project creation date
 const hashscanUrl = computed(() => {
-    if (!project.value) return '';
-    const d = new Date(project.value.createdAt);
-    const seconds = Math.floor(d.getTime() / 1000);
-    const nanos = parseInt(project.value.id) * 32210979;
-    return `https://hashscan.io/mainnet/transaction/${seconds}.${String(nanos).padStart(9, '0')}`;
+    if (!project.value?.consensusTimestamp) return null;
+    return `https://hashscan.io/${network.value === 'mainnet' ? 'mainnet' : 'testnet'}/transaction/${project.value.consensusTimestamp}`;
 });
 
-const fullMethodologyName = computed(() => {
-    if (!project.value) return '';
-    return getMethodologyName(project.value.methodologyId) || project.value.methodology;
+// Backlink to the methodology this project belongs to
+const methodologyLink = computed(() => {
+    if (!project.value?.instanceTopicId) return null;
+    return `/methodologies/${project.value.instanceTopicId}`;
+});
+
+const extraEntries = computed(() => {
+    const e = project.value?.extras;
+    if (!e || typeof e !== 'object') return [] as Array<[string, unknown]>;
+    return Object.entries(e);
 });
 </script>
 
 <template>
-    <div v-if="!project" class="p-6">
-        <h1 class="text-xl font-bold text-foreground">{{ $t('projects.notFound') }}</h1>
+    <div v-if="pending" class="p-6 text-sm text-muted-foreground">Loading project…</div>
+
+    <div v-else-if="notFound || !project" class="p-6">
+        <div class="rounded-xl border bg-card p-6 text-center">
+            <h1 class="text-lg font-semibold text-foreground mb-2">Project not found</h1>
+            <p class="text-sm text-muted-foreground">
+                No project with ID <code class="font-mono">{{ id }}</code> on <span class="capitalize">{{ network }}</span>.
+            </p>
+            <NuxtLink to="/methodologies" class="inline-block mt-4 text-sm text-primary hover:underline">
+                <ArrowLeft class="h-4 w-4 inline -mt-0.5" /> Back to methodologies
+            </NuxtLink>
+        </div>
     </div>
 
     <div v-else class="space-y-6 p-6">
         <!-- Header -->
         <div>
+            <NuxtLink
+                v-if="methodologyLink"
+                :to="methodologyLink"
+                class="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-2"
+            >
+                <ArrowLeft class="h-3.5 w-3.5" />
+                Back to methodology
+            </NuxtLink>
             <div class="flex items-start justify-between gap-4">
                 <div class="min-w-0">
-                    <h1 class="text-2xl font-bold text-foreground">{{ project.name }}</h1>
-                    <p class="text-sm text-muted-foreground mt-1">
-                        <CountryFlag :code="project.countryCode" size="sm" class="mr-0.5" /> {{ project.country }} &middot; {{ project.registry }} &middot; {{ project.developer }}
+                    <h1 class="text-2xl font-bold text-foreground break-words">{{ project.name || project.projectId || `Project #${project.id}` }}</h1>
+                    <p class="text-sm text-muted-foreground mt-1 flex items-center flex-wrap gap-1">
+                        <CountryFlag v-if="project.countryCode" :code="project.countryCode" size="sm" class="mr-0.5" />
+                        <span>{{ dash(project.country) }}</span>
+                        <template v-if="project.proponentName"><span class="mx-1">·</span><span>{{ project.proponentName }}</span></template>
+                        <template v-if="project.methodologyTag"><span class="mx-1">·</span><span class="font-mono text-xs">{{ project.methodologyTag }}</span></template>
                     </p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     <a
+                        v-if="hashscanUrl"
                         :href="hashscanUrl"
                         target="_blank"
                         rel="noopener noreferrer"
                         class="inline-flex items-center gap-2 rounded-lg border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                     >
                         <ExternalLink class="h-4 w-4 text-primary" />
-                        {{ $t('common.viewOnExplorer') }}
+                        View on HashScan
                     </a>
                     <button
                         class="inline-flex items-center gap-2 rounded-lg border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
-                        @click="viewProjectVc"
+                        @click="vcViewerOpen = true"
                     >
                         <FileJson class="h-4 w-4 text-primary" />
-                        {{ $t('common.viewRawData') }}
+                        View Raw VC
                     </button>
                 </div>
             </div>
@@ -174,504 +164,184 @@ const fullMethodologyName = computed(() => {
             <div class="px-5 py-3.5 border-b bg-muted/30">
                 <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
                     <FolderKanban class="h-4 w-4 text-primary" />
-                    {{ $t('projects.details.projectDetails') }}
+                    Project Details
                 </h2>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border">
                 <div class="bg-card px-5 py-4">
-                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Project Name</div>
-                    <div class="text-sm font-medium text-foreground">{{ project.name }}</div>
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Project ID</div>
+                    <div class="text-sm font-medium text-foreground break-words">{{ dash(project.projectId) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Country</div>
-                    <div class="text-sm font-medium text-foreground flex items-center gap-1.5"><CountryFlag :code="project.countryCode" size="sm" /> {{ project.country }}</div>
+                    <div class="text-sm font-medium text-foreground flex items-center gap-1.5">
+                        <CountryFlag v-if="project.countryCode" :code="project.countryCode" size="sm" />
+                        <span>{{ dash(project.country) }}</span>
+                    </div>
+                </div>
+                <div class="bg-card px-5 py-4">
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Region</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.region) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Status</div>
                     <div class="flex items-center gap-2">
-                        <span :class="[statusColor[project.status]?.dot || 'bg-muted-foreground', 'h-2 w-2 rounded-full']" />
-                        <span class="text-sm font-medium text-foreground">{{ project.status }}</span>
+                        <span :class="[statusDotClass(project.status), 'h-2 w-2 rounded-full']" />
+                        <span class="text-sm font-medium text-foreground">{{ dash(project.status) }}</span>
                     </div>
-                </div>
-                <div class="bg-card px-5 py-4">
-                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Methodology</div>
-                    <div class="text-sm font-medium text-foreground">{{ fullMethodologyName }}</div>
-                </div>
-                <div class="bg-card px-5 py-4">
-                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Registry</div>
-                    <div class="text-sm font-medium text-foreground">{{ project.registry }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Developer</div>
-                    <div class="text-sm font-medium text-foreground">{{ project.developer }}</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.proponentName) }}</div>
+                </div>
+                <div class="bg-card px-5 py-4">
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Methodology</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.methodologyTag) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Sector</div>
-                    <div class="text-sm font-medium text-foreground">{{ project.sector }}</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.sector) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
-                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Sectoral Scope</div>
-                    <div class="text-sm font-medium text-foreground">{{ project.sectoralScope }}</div>
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Project Type</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.projectType) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Category</div>
-                    <div class="text-sm font-medium text-foreground">{{ project.category }}</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.category) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Crediting Period Start</div>
-                    <div class="text-sm font-medium text-foreground">{{ creditingPeriodStart }}</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.startDate) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Crediting Period End</div>
-                    <div class="text-sm font-medium text-foreground">{{ creditingPeriodEnd }}</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.endDate) }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
-                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Projected Emission Reductions</div>
-                    <div class="text-sm font-medium text-foreground">{{ formatNumber(project.credits) }}</div>
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Vintage</div>
+                    <div class="text-sm font-medium text-foreground">{{ dash(project.vintage) }}</div>
                 </div>
             </div>
 
-            <!-- Registry Term Mapping (collapsible) -->
-            <div class="border-t">
-                <button
-                    class="flex w-full items-center justify-between px-5 py-3 text-xs font-medium text-muted-foreground hover:bg-muted/30 transition-colors"
-                    @click="termMappingOpen = !termMappingOpen"
-                >
-                    <span class="flex items-center gap-2">
-                        <Layers class="h-3.5 w-3.5" />
-                        Registry Term Mapping — {{ project.registry }}
-                    </span>
-                    <ChevronDown class="h-3.5 w-3.5 transition-transform" :class="termMappingOpen ? 'rotate-180' : ''" />
-                </button>
-                <div v-if="termMappingOpen" class="border-t">
-                    <table class="w-full text-xs">
-                        <thead>
-                            <tr class="bg-muted/20">
-                                <th class="text-left py-2 px-5 font-medium text-muted-foreground uppercase tracking-wider">Standard Term</th>
-                                <th class="text-left py-2 px-4 font-medium text-muted-foreground uppercase tracking-wider">{{ project.registry }} Term</th>
-                                <th class="text-left py-2 px-4 font-medium text-muted-foreground uppercase tracking-wider">Description</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y">
-                            <tr v-for="m in REGISTRY_TERM_MAPPINGS" :key="m.canonical" class="hover:bg-muted/20">
-                                <td class="py-2 px-5 font-medium text-foreground">{{ m.canonical }}</td>
-                                <td class="py-2 px-4">
-                                    <span class="inline-flex items-center rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[11px] font-medium">
-                                        {{ m.terms[project.registry] || m.canonical }}
-                                    </span>
-                                </td>
-                                <td class="py-2 px-4 text-muted-foreground">{{ m.description }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            <div v-if="project.description" class="border-t px-5 py-4">
+                <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Description</div>
+                <p class="text-sm text-foreground break-words">{{ project.description }}</p>
             </div>
         </div>
 
-        <!-- Linked Issuances -->
-        <div class="rounded-xl border bg-card overflow-hidden">
-            <div class="px-5 py-3.5 border-b bg-muted/30 flex items-center justify-between">
-                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Coins class="h-4 w-4 text-primary" />
-                    Linked Issuances
-                </h2>
-                <span class="text-xs text-muted-foreground">{{ linkedCredits.length }} issuance(s)</span>
-            </div>
-            <div v-if="linkedCredits.length > 0">
-                <table class="w-full text-sm">
-                    <thead>
-                        <tr class="border-b bg-muted/20">
-                            <th class="text-left py-2.5 px-5 text-xs font-medium text-muted-foreground uppercase tracking-wider">Token</th>
-                            <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Token ID</th>
-                            <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Type</th>
-                            <th class="text-right py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Supply</th>
-                            <th class="text-left py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Mint Date</th>
-                            <th class="text-center py-2.5 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider"><span class="inline-flex items-center gap-1">Raw Data <InfoTooltip text="Raw Data on the blockchain" /></span></th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y">
-                        <tr v-for="c in linkedCredits" :key="c.id" class="hover:bg-muted/30 transition-colors">
-                            <td class="py-3 px-5">
-                                <div class="font-medium text-foreground">{{ c.name }}</div>
-                                <div class="text-[11px] text-muted-foreground">{{ c.symbol }}</div>
-                            </td>
-                            <td class="py-3 px-4">
-                                <code class="text-xs bg-muted rounded px-1.5 py-0.5 font-mono">{{ c.tokenId }}</code>
-                            </td>
-                            <td class="py-3 px-4">
-                                <span :class="[c.type === 'Fungible' ? 'bg-primary/10 text-primary' : 'bg-chart-4/10 text-chart-4', 'text-xs font-medium rounded-full px-2 py-0.5']">
-                                    {{ c.type }}
-                                </span>
-                            </td>
-                            <td class="py-3 px-4 text-right tabular-nums font-medium">{{ formatNumber(c.supply) }}</td>
-                            <td class="py-3 px-4 text-muted-foreground">{{ c.mintDate }}</td>
-                            <td class="py-3 px-4 text-center">
-                                <button
-                                    class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                                    title="View Raw Data"
-                                    @click="viewCreditVc(c)"
-                                >
-                                    <FileJson class="h-3.5 w-3.5" />
-                                </button>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div v-else class="px-5 py-8 text-center text-sm text-muted-foreground">
-                No issuances have been made for this project yet.
-            </div>
-        </div>
-
-        <!-- Credit Lifecycle -->
-        <div class="rounded-xl border bg-card overflow-hidden">
-            <div class="px-5 py-3.5 border-b bg-muted/30">
-                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <GitBranch class="h-4 w-4 text-primary" />
-                    Credit Lifecycle
-                </h2>
-                <p class="text-[11px] text-muted-foreground mt-0.5">Issuance → Transfers → Retirements</p>
-            </div>
-
-            <!-- Lifecycle Summary Bar -->
-            <div class="grid grid-cols-4 gap-px bg-border">
-                <div class="bg-card px-5 py-4 text-center">
-                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ formatNumber(lifecycleSummary.totalIssued) }}</div>
-                    <div class="text-[11px] text-muted-foreground">Total Issued</div>
-                </div>
-                <div class="bg-card px-5 py-4 text-center">
-                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ formatNumber(lifecycleSummary.totalTransferred) }}</div>
-                    <div class="text-[11px] text-muted-foreground">Transferred</div>
-                </div>
-                <div class="bg-card px-5 py-4 text-center">
-                    <div class="text-lg font-semibold text-stat-rose tabular-nums">{{ formatNumber(lifecycleSummary.totalRetired) }}</div>
-                    <div class="text-[11px] text-muted-foreground">Retired</div>
-                </div>
-                <div class="bg-card px-5 py-4 text-center">
-                    <div class="text-lg font-semibold text-stat-green tabular-nums">{{ formatNumber(lifecycleSummary.active) }}</div>
-                    <div class="text-[11px] text-muted-foreground">Active</div>
-                </div>
-            </div>
-
-            <!-- Lifecycle progress bar -->
-            <div class="px-5 py-3 border-t">
-                <div class="flex h-2.5 rounded-full overflow-hidden bg-muted">
-                    <div
-                        v-if="lifecycleSummary.totalIssued > 0"
-                        class="bg-stat-rose transition-all"
-                        :style="{ width: `${(lifecycleSummary.totalRetired / lifecycleSummary.totalIssued) * 100}%` }"
-                        title="Retired"
-                    />
-                    <div
-                        v-if="lifecycleSummary.totalIssued > 0"
-                        class="bg-stat-green transition-all"
-                        :style="{ width: `${(lifecycleSummary.active / lifecycleSummary.totalIssued) * 100}%` }"
-                        title="Active"
-                    />
-                </div>
-                <div class="flex items-center justify-between mt-1.5">
-                    <div class="flex items-center gap-3">
-                        <span class="flex items-center gap-1 text-[10px] text-muted-foreground"><span class="h-2 w-2 rounded-full bg-stat-rose" /> Retired</span>
-                        <span class="flex items-center gap-1 text-[10px] text-muted-foreground"><span class="h-2 w-2 rounded-full bg-stat-green" /> Active</span>
-                    </div>
-                    <span v-if="lifecycleSummary.totalIssued > 0" class="text-[10px] text-muted-foreground">
-                        {{ ((lifecycleSummary.totalRetired / lifecycleSummary.totalIssued) * 100).toFixed(1) }}% retired
-                    </span>
-                </div>
-            </div>
-
-            <!-- Transfers -->
-            <div v-if="linkedTransfers.length > 0" class="border-t">
-                <div class="px-5 py-2.5 bg-muted/20 flex items-center gap-2">
-                    <Repeat class="h-3.5 w-3.5 text-stat-blue" />
-                    <span class="text-xs font-semibold text-foreground">Transfers</span>
-                    <span class="text-[11px] text-muted-foreground">({{ linkedTransfers.length }})</span>
-                </div>
-                <table class="w-full text-sm">
-                    <thead>
-                        <tr class="border-b bg-muted/10">
-                            <th class="text-left py-2 px-5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">From</th>
-                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">To</th>
-                            <th class="text-right py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Quantity</th>
-                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Date</th>
-                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y">
-                        <tr v-for="t in linkedTransfers" :key="t.id" class="hover:bg-muted/30 transition-colors">
-                            <td class="py-2.5 px-5 text-foreground">{{ t.from }}</td>
-                            <td class="py-2.5 px-4">
-                                <span class="flex items-center gap-1.5">
-                                    <ArrowRight class="h-3 w-3 text-stat-blue" />
-                                    <span class="text-foreground">{{ t.to }}</span>
-                                </span>
-                            </td>
-                            <td class="py-2.5 px-4 text-right tabular-nums font-medium">{{ formatNumber(t.quantity) }}</td>
-                            <td class="py-2.5 px-4 text-muted-foreground">{{ t.date }}</td>
-                            <td class="py-2.5 px-4">
-                                <span :class="[t.status === 'Completed' ? 'bg-stat-green/10 text-stat-green' : 'bg-stat-amber/10 text-stat-amber', 'text-[11px] font-medium rounded-full px-2 py-0.5']">
-                                    {{ t.status }}
-                                </span>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Retirements -->
-            <div v-if="linkedRetirements.length > 0" class="border-t">
-                <div class="px-5 py-2.5 bg-muted/20 flex items-center gap-2">
-                    <Flame class="h-3.5 w-3.5 text-stat-rose" />
-                    <span class="text-xs font-semibold text-foreground">Retirements</span>
-                    <span class="text-[11px] text-muted-foreground">({{ linkedRetirements.length }})</span>
-                </div>
-                <table class="w-full text-sm">
-                    <thead>
-                        <tr class="border-b bg-muted/10">
-                            <th class="text-left py-2 px-5 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Beneficiary</th>
-                            <th class="text-right py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Quantity</th>
-                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Reason</th>
-                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Date</th>
-                            <th class="text-left py-2 px-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y">
-                        <tr v-for="r in linkedRetirements" :key="r.id" class="hover:bg-muted/30 transition-colors">
-                            <td class="py-2.5 px-5 text-foreground font-medium">{{ r.beneficiary }}</td>
-                            <td class="py-2.5 px-4 text-right tabular-nums font-medium">{{ formatNumber(r.quantity) }}</td>
-                            <td class="py-2.5 px-4 text-muted-foreground text-xs">{{ r.reason }}</td>
-                            <td class="py-2.5 px-4 text-muted-foreground">{{ r.date }}</td>
-                            <td class="py-2.5 px-4">
-                                <span class="text-[11px] font-medium rounded-full px-2 py-0.5 bg-stat-green/10 text-stat-green">
-                                    {{ r.status }}
-                                </span>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div v-if="linkedTransfers.length === 0 && linkedRetirements.length === 0" class="border-t px-5 py-6 text-center text-sm text-muted-foreground">
-                No transfers or retirements recorded for this project yet.
-            </div>
-        </div>
-
-        <!-- Emission Parameters Card -->
-        <div class="rounded-xl border bg-card overflow-hidden">
-            <div class="px-5 py-3.5 border-b bg-muted/30">
-                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <BarChart3 class="h-4 w-4 text-primary" />
-                    Emission Parameters
-                </h2>
-            </div>
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-border" v-if="emissions">
-                <div class="bg-card px-5 py-5">
-                    <div class="flex items-center gap-2 mb-2">
-                        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50">
-                            <TrendingUp class="h-4 w-4 text-amber-600" />
-                        </div>
-                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Baseline Emissions</div>
-                    </div>
-                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.baseline }}</div>
-                </div>
-                <div class="bg-card px-5 py-5">
-                    <div class="flex items-center gap-2 mb-2">
-                        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50">
-                            <TrendingDown class="h-4 w-4 text-sky-600" />
-                        </div>
-                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Project Emissions</div>
-                    </div>
-                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.project }}</div>
-                </div>
-                <div class="bg-card px-5 py-5">
-                    <div class="flex items-center gap-2 mb-2">
-                        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50">
-                            <AlertTriangle class="h-4 w-4 text-rose-500" />
-                        </div>
-                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Leakage Emissions</div>
-                    </div>
-                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.leakage }}</div>
-                </div>
-                <div class="bg-card px-5 py-5">
-                    <div class="flex items-center gap-2 mb-2">
-                        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50">
-                            <Target class="h-4 w-4 text-emerald-600" />
-                        </div>
-                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Baseline Emission Factor</div>
-                    </div>
-                    <div class="text-lg font-semibold text-foreground tabular-nums">{{ emissions.baselineEmissionFactor }}</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Location Map -->
-        <div class="rounded-xl border bg-card overflow-hidden">
+        <!-- Location Map (when we have any geo data) -->
+        <div v-if="hasMapData" class="rounded-xl border bg-card overflow-hidden">
             <div class="px-5 py-3.5 border-b bg-muted/30">
                 <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
                     <MapPin class="h-4 w-4 text-primary" />
                     Project Location
                 </h2>
                 <p class="text-[11px] text-muted-foreground mt-0.5">
-                    {{ project.lat.toFixed(4) }}, {{ project.lng.toFixed(4) }} &middot; {{ project.country }}
+                    <template v-if="mapPointSummary">{{ mapPointSummary }}</template>
+                    <template v-if="hasCoords"> · {{ project.latitude!.toFixed(4) }}, {{ project.longitude!.toFixed(4) }}</template>
+                    <template v-if="project.country"> · {{ project.country }}</template>
+                    <template v-if="project.region"> · {{ project.region }}</template>
                 </p>
             </div>
-            <div class="h-[320px]">
+            <div class="h-[420px]">
                 <ClientOnly>
-                    <ProjectLocationMap :lat="project.lat" :lng="project.lng" :name="project.name" />
-                </ClientOnly>
-            </div>
-        </div>
-
-        <!-- SDG Icons -->
-        <div class="rounded-xl border bg-card overflow-hidden">
-            <div class="px-5 py-3.5 border-b bg-muted/30">
-                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Globe class="h-4 w-4 text-primary" />
-                    Sustainable Development Goals
-                </h2>
-            </div>
-            <div class="px-5 py-5">
-                <div class="flex flex-wrap gap-3">
-                    <div
-                        v-for="sdgId in project.sdgs"
-                        :key="sdgId"
-                        class="group relative flex items-center gap-3 rounded-lg border px-4 py-3 hover:bg-muted/30 transition-colors"
-                    >
-                        <img
-                            :src="`/sdgs/E-WEB-Goal-${String(sdgId).padStart(2, '0')}.png`"
-                            :alt="`SDG ${sdgId}`"
-                            class="h-10 w-10 rounded"
-                        />
-                        <div>
-                            <div class="text-xs font-semibold text-foreground">SDG {{ sdgId }}</div>
-                            <div class="text-[11px] text-muted-foreground">{{ getSDG(sdgId)?.name }}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Relationships Diagram -->
-        <div class="rounded-xl border bg-card overflow-hidden">
-            <div class="px-5 py-3.5 border-b bg-muted/30">
-                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Network class="h-4 w-4 text-primary" />
-                    Relationships
-                </h2>
-                <p class="text-[11px] text-muted-foreground mt-0.5">Entity relationships between Registry, Policy, Schema, Role, Raw Data, VP, and Token</p>
-            </div>
-            <div class="px-5 py-5">
-                <ClientOnly>
-                    <RelationshipDiagram
-                        :project-name="project.name"
-                        :methodology="project.methodology"
-                        :methodology-id="project.methodologyId"
-                        :registry="project.registry"
-                        :developer="project.developer"
-                        :project-id="project.id"
-                        :vintage="project.vintage"
-                        :country="project.country"
-                        :sector="project.sector"
-                        :token-symbol="linkedCredits[0]?.symbol"
-                        :token-name="linkedCredits[0]?.name"
-                        :token-id="linkedCredits[0]?.tokenId"
-                        @view-vc="({ title, vc }) => { vcViewerTitle = title; vcViewerData = vc; vcViewerOpen = true; }"
+                    <ProjectLocationMap
+                        :lat="project.latitude"
+                        :lng="project.longitude"
+                        :polygon="polygon"
+                        :name="project.name || project.projectId || 'Project'"
                     />
                 </ClientOnly>
             </div>
         </div>
 
-        <!-- Activity Log -->
-        <div class="rounded-xl border bg-card overflow-hidden">
+        <div v-else class="rounded-xl border bg-card overflow-hidden">
             <div class="px-5 py-3.5 border-b bg-muted/30">
                 <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Clock class="h-4 w-4 text-primary" />
-                    Activity Log
+                    <MapPin class="h-4 w-4 text-primary" />
+                    Project Location
                 </h2>
             </div>
-            <div class="px-5 py-5">
-                <div class="relative">
-                    <!-- Timeline line -->
-                    <div class="absolute left-[15px] top-3 bottom-3 w-px bg-border" />
-
-                    <div
-                        v-for="(event, idx) in activityLog"
-                        :key="idx"
-                        class="relative flex items-start gap-4 pb-5 last:pb-0"
-                    >
-                        <div :class="[activityTypeIcon[event.type]?.color || 'text-muted-foreground bg-muted', 'relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full']">
-                            <component :is="activityTypeIcon[event.type]?.icon || Circle" class="h-3.5 w-3.5" />
-                        </div>
-                        <div class="pt-1">
-                            <div class="text-sm text-foreground">{{ event.action }}</div>
-                            <div class="text-[11px] text-muted-foreground mt-0.5">{{ event.date }}</div>
-                        </div>
-                    </div>
-                </div>
+            <div class="px-5 py-8 text-center text-sm text-muted-foreground">
+                No coordinates extracted for this project.
             </div>
         </div>
 
-        <!-- Methodology -->
+        <!-- Extras (everything we couldn't map cleanly) -->
+        <div v-if="extraEntries.length > 0" class="rounded-xl border bg-card overflow-hidden">
+            <details>
+                <summary class="px-5 py-3.5 border-b bg-muted/30 cursor-pointer">
+                    <h2 class="text-sm font-semibold text-foreground inline-flex items-center gap-2">
+                        <Layers class="h-4 w-4 text-primary" />
+                        Additional Fields ({{ extraEntries.length }})
+                    </h2>
+                    <p class="text-[11px] text-muted-foreground mt-0.5">
+                        VC fields not covered by the canonical schema, and language variants.
+                    </p>
+                </summary>
+                <pre class="px-5 py-4 text-[11px] font-mono whitespace-pre-wrap break-words bg-muted/10 max-h-[400px] overflow-auto">{{ JSON.stringify(project.extras, null, 2) }}</pre>
+            </details>
+        </div>
+
+        <!-- Provenance -->
         <div class="rounded-xl border bg-card overflow-hidden">
-            <div class="px-5 py-3.5 border-b bg-muted/30">
+            <div class="px-5 py-3 border-b bg-muted/30">
                 <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <BookOpen class="h-4 w-4 text-primary" />
-                    Methodology
+                    <Database class="h-4 w-4 text-primary" />
+                    On-Chain Provenance
                 </h2>
-                <p class="text-[11px] text-muted-foreground mt-0.5">{{ fullMethodologyName }}</p>
             </div>
-            <div class="px-5 py-5">
-                <!-- Workflow Diagram -->
-                <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-4">Workflow</div>
-                <div class="flex items-center gap-0 overflow-x-auto pb-2">
-                    <template v-for="(step, idx) in methodologySteps" :key="idx">
-                        <div class="flex flex-col items-center min-w-[120px]">
-                            <div
-                                :class="[
-                                    step.status === 'complete' ? 'bg-emerald-50 border-emerald-200' :
-                                    step.status === 'active' ? 'bg-primary/10 border-primary/30 ring-2 ring-primary/20' :
-                                    'bg-muted/50 border-border',
-                                    'flex h-10 w-10 items-center justify-center rounded-full border transition-colors',
-                                ]"
-                            >
-                                <CheckCircle2
-                                    v-if="step.status === 'complete'"
-                                    class="h-5 w-5 text-emerald-600"
-                                />
-                                <Zap
-                                    v-else-if="step.status === 'active'"
-                                    class="h-5 w-5 text-primary"
-                                />
-                                <Circle
-                                    v-else
-                                    class="h-5 w-5 text-muted-foreground/40"
-                                />
-                            </div>
-                            <div class="mt-2 text-center">
-                                <div
-                                    :class="[
-                                        step.status === 'active' ? 'text-primary font-semibold' :
-                                        step.status === 'complete' ? 'text-foreground font-medium' :
-                                        'text-muted-foreground',
-                                        'text-xs',
-                                    ]"
-                                >
-                                    {{ step.label }}
-                                </div>
-                                <div class="text-[10px] text-muted-foreground mt-0.5 max-w-[110px] leading-tight">{{ step.desc }}</div>
-                            </div>
-                        </div>
-                        <div
-                            v-if="idx < methodologySteps.length - 1"
-                            class="flex-1 min-w-[24px] h-px mt-[-24px]"
-                            :class="step.status === 'complete' ? 'bg-emerald-300' : 'bg-border'"
-                        />
-                    </template>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border">
+                <div class="bg-card px-5 py-4">
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Consensus Timestamp</div>
+                    <code class="text-xs font-mono text-foreground">{{ project.consensusTimestamp }}</code>
                 </div>
+                <div class="bg-card px-5 py-4">
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Schema</div>
+                    <code class="text-xs font-mono text-muted-foreground break-all">{{ project.schemaIri }}</code>
+                </div>
+                <div class="bg-card px-5 py-4">
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Owning Topic</div>
+                    <code class="text-xs font-mono text-foreground">{{ project.dynamicTopicId }}</code>
+                </div>
+                <div class="bg-card px-5 py-4">
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Methodology Topic</div>
+                    <code class="text-xs font-mono text-foreground">{{ project.methodologyTopicId }}</code>
+                </div>
+            </div>
+            <div v-if="project.extractionMeta && Object.keys(project.extractionMeta).length > 0" class="border-t px-5 py-3 text-[11px] text-muted-foreground flex items-start gap-2">
+                <Info class="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>
+                    Extracted via
+                    <span class="font-mono">{{ (project.extractionMeta as any).identifierName ?? '?' }}</span>
+                    identifier and
+                    <span class="font-mono">{{ (project.extractionMeta as any).matcherName ?? '?' }}</span>
+                    matcher · confidence
+                    <span class="font-mono">{{ (project.extractionMeta as any).identifierConfidence ?? '?' }}</span>
+                </span>
             </div>
         </div>
 
-        <!-- Raw Data Viewer Modal -->
-        <VcJsonViewer :open="vcViewerOpen" :title="vcViewerTitle" :data="vcViewerData" @close="vcViewerOpen = false" />
+        <!-- Linked issuances / lifecycle / SDGs not yet extracted from on-chain VCs -->
+        <div class="rounded-xl border border-dashed bg-muted/20 px-5 py-6 text-sm text-muted-foreground space-y-1">
+            <div class="font-medium text-foreground flex items-center gap-2">
+                <Coins class="h-4 w-4" />
+                Issuances, transfers, retirements, SDGs
+            </div>
+            <p>
+                Not yet wired up — these come from issuance / MRV VCs which the indexer doesn't classify
+                yet. Phase 2: cross-VC enrichment via <code class="font-mono">presetSchema</code>.
+            </p>
+        </div>
+
+        <!-- Raw VC viewer modal -->
+        <VcJsonViewer
+            v-if="vcViewerOpen"
+            :open="vcViewerOpen"
+            :title="project.name || project.projectId || 'Project VC'"
+            :data="project.rawVc ?? null"
+            @close="vcViewerOpen = false"
+        />
     </div>
 </template>
