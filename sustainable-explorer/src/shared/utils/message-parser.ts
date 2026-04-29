@@ -191,17 +191,32 @@ export function extractFields(json: Record<string, unknown>): ParsedMessage {
     return result;
 }
 
+export interface DiscoveredTopic {
+    topicId: string;
+    isOrgTopic: boolean;
+    topicType: string | null;
+    parentTopicId: string | null;
+}
+
 /**
  * Extracts all discoverable topic IDs from a parsed message's options.
  * Returns a deduplicated array of topic IDs (excluding the source topic).
+ *
+ * For Topic messages, also extracts `messageType` (e.g. POLICY_TOPIC,
+ * INSTANCE_POLICY_TOPIC, DYNAMIC_TOPIC) and `parentId` so callers can
+ * populate topic_cache with hierarchy metadata.
  */
 export function extractDiscoverableTopics(
     parsed: ParsedMessage,
     sourceTopicId: string,
-): { topicId: string; isOrgTopic: boolean }[] {
+): DiscoveredTopic[] {
     const topicFields = ['childId', 'instanceTopicId', 'registrantTopicId', 'topicId'];
     const seen = new Set<string>();
-    const result: { topicId: string; isOrgTopic: boolean }[] = [];
+    const result: DiscoveredTopic[] = [];
+
+    // For Topic messages, the childId topic inherits the message's metadata
+    const messageType = (parsed.options.messageType as string) || null;
+    const parentId = (parsed.options.parentId as string) || null;
 
     for (const field of topicFields) {
         const value = parsed.options[field] as string | undefined;
@@ -210,6 +225,10 @@ export function extractDiscoverableTopics(
             result.push({
                 topicId: value,
                 isOrgTopic: field === 'registrantTopicId',
+                // childId inherits the Topic message's messageType and has
+                // sourceTopicId as its parent. Other fields are less certain.
+                topicType: field === 'childId' ? messageType : null,
+                parentTopicId: field === 'childId' ? sourceTopicId : null,
             });
         }
     }
