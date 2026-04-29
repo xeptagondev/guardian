@@ -36,8 +36,17 @@ watch(project, async (p) => {
     } catch { /* ignore — fallback stays UNK */ }
 }, { immediate: true });
 
+const INVALID_COUNTRY = new Set([
+    'not applicable', 'not specified', 'n/a', 'na', 'none', 'not stated',
+    'not available', 'not provided', 'unknown',
+    'point', 'multipoint', 'linestring', 'multilinestring',
+    'polygon', 'multipolygon', 'geometrycollection',
+]);
 const displayCountryCode = computed(() => geocodedCountry.value?.code ?? project.value?.countryCode ?? 'UNK');
-const displayCountry = computed(() => geocodedCountry.value?.name ?? project.value?.country ?? '');
+const displayCountry = computed(() => {
+    const raw = geocodedCountry.value?.name ?? project.value?.country ?? '';
+    return INVALID_COUNTRY.has(raw.toLowerCase().trim()) ? '' : raw;
+});
 
 const linkedCredits = computed<Credit[]>(() => {
     if (!project.value?.issuances?.length) return [];
@@ -81,7 +90,8 @@ function viewProjectVc() {
 
 function viewCreditVc(c: Credit) {
     vcViewerTitle.value = c.name;
-    vcViewerData.value = generateCreditVc(c, project.value?.name);
+    const issuance = project.value?.issuances?.find(i => i.tokenId === c.tokenId);
+    vcViewerData.value = issuance?.rawVc ?? generateCreditVc(c, project.value?.name);
     vcViewerOpen.value = true;
 }
 
@@ -94,12 +104,14 @@ const statusColor: Record<string, { bg: string; text: string; dot: string }> = {
 };
 
 const creditingPeriodStart = computed(() => {
+    if (project.value?.createdAt) return project.value.createdAt.slice(0, 10);
     if (!project.value?.vintage) return '-';
     const yr = parseInt(project.value.vintage);
     return isNaN(yr) ? '-' : `${yr - 1}-01-01`;
 });
 
 const creditingPeriodEnd = computed(() => {
+    if (project.value?.creditingPeriodEnd) return project.value.creditingPeriodEnd.slice(0, 10);
     if (!project.value?.vintage) return '-';
     const yr = parseInt(project.value.vintage);
     return isNaN(yr) ? '-' : `${yr + 9}-12-31`;
@@ -627,7 +639,7 @@ const fullMethodologyName = computed(() => {
                     Project Location
                 </h2>
                 <p class="text-[11px] text-muted-foreground mt-0.5">
-                    {{ project.lat.toFixed(4) }}, {{ project.lng.toFixed(4) }} &middot; {{ project.country }}
+                    {{ project.lat.toFixed(4) }}, {{ project.lng.toFixed(4) }}<span v-if="displayCountry"> &middot; {{ displayCountry }}</span>
                 </p>
             </div>
             <div class="h-[320px]">
@@ -685,7 +697,7 @@ const fullMethodologyName = computed(() => {
                         :developer="project.developer"
                         :project-id="project.id"
                         :vintage="project.vintage"
-                        :country="project.country"
+                        :country="displayCountry || undefined"
                         :sector="project.sector"
                         :token-symbol="linkedCredits[0]?.symbol"
                         :token-name="linkedCredits[0]?.name"
