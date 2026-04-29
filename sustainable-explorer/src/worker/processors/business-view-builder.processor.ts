@@ -199,6 +199,7 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
 
             const projectFieldMap = await buildProjectFieldMapFromMethodology(
                 row.businessData,
+                this.dataSource,
             );
 
             if (!projectFieldMap) continue;
