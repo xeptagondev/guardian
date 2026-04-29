@@ -18,6 +18,7 @@ export class IpfsService {
         }
         this.timeout = this.configService.get<number>('app.ipfs.fetchTimeout')!;
     }
+    
 
     /**
      * Converts a CID to CIDv1 base32 format for gateway compatibility.
