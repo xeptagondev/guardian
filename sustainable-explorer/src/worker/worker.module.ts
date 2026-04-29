@@ -21,6 +21,11 @@ import { PolicySchemaImportProcessor } from './processors/policy-schema-import.p
 import { MvRefreshProcessor } from './processors/mv-refresh.processor';
 import { BusinessViewBuilderProcessor } from './processors/business-view-builder.processor';
 import { PolicyIngestProcessor } from './processors/policy-ingest.processor';
+import { ProjectExtractProcessor } from './processors/project-extract.processor';
+
+// Project extraction services
+import { ProjectSchemaResolverService } from './services/project-extraction/project-schema-resolver.service';
+import { ProjectExtractorService } from './services/project-extraction/project-extractor.service';
 
 // Schedulers
 import { SyncSchedulerService } from './schedulers/sync-scheduler.service';
@@ -35,6 +40,7 @@ const PROCESSOR_MAP: Record<string, any> = {
     [QUEUE_NAMES.TOKEN_SYNC]: TokenSyncProcessor,
     [QUEUE_NAMES.IPFS_FETCH]: IpfsFetchProcessor,
     [QUEUE_NAMES.POLICY_INGEST]: PolicyIngestProcessor,
+    [QUEUE_NAMES.PROJECT_EXTRACT]: ProjectExtractProcessor,
     [QUEUE_NAMES.MV_REFRESH]: MvRefreshProcessor,
     [QUEUE_NAMES.BUSINESS_VIEW_BUILD]: BusinessViewBuilderProcessor,
 };
@@ -101,6 +107,8 @@ export class WorkerModule {
                 // Services (always available for processors)
                 HederaService,
                 IpfsService,
+                ProjectSchemaResolverService,
+                ProjectExtractorService,
 
                 // Only processors for active queues
                 ...activeProcessors,

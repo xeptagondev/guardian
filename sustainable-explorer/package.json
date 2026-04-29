@@ -14,6 +14,8 @@
         "infra:down": "docker compose -f docker-compose-dev.yml down",
         "infra:reset": "docker compose -f docker-compose-dev.yml down -v && docker compose -f docker-compose-dev.yml up -d",
         "lint": "eslint \"{src,test}/**/*.ts\"",
+        "test:project-identifier": "ts-node scripts/test-project-schema-identifier.ts",
+        "test:project-extraction": "ts-node scripts/test-project-extraction.ts",
         "test": "jest",
         "test:watch": "jest --watch",
         "test:cov": "jest --coverage"

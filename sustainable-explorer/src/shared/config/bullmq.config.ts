@@ -9,6 +9,7 @@ export const BASE_QUEUE_NAMES = {
     MESSAGE_PARSE: 'mirror-node-messages',
     IPFS_FETCH: 'ipfs-files',
     POLICY_INGEST: 'policy-ingest',
+    PROJECT_EXTRACT: 'project-extract',
     TOKEN_SYNC: 'mirror-node-tokens',
     MV_REFRESH: 'maintenance-refresh-mvs',
     BUSINESS_VIEW_BUILD: 'maintenance-build-business-views',
@@ -40,6 +41,7 @@ export const QUEUE_NAMES = {
     MESSAGE_PARSE: qname(BASE_QUEUE_NAMES.MESSAGE_PARSE),
     IPFS_FETCH: qname(BASE_QUEUE_NAMES.IPFS_FETCH),
     POLICY_INGEST: qname(BASE_QUEUE_NAMES.POLICY_INGEST),
+    PROJECT_EXTRACT: qname(BASE_QUEUE_NAMES.PROJECT_EXTRACT),
     TOKEN_SYNC: qname(BASE_QUEUE_NAMES.TOKEN_SYNC),
     MV_REFRESH: qname(BASE_QUEUE_NAMES.MV_REFRESH),
     BUSINESS_VIEW_BUILD: qname(BASE_QUEUE_NAMES.BUSINESS_VIEW_BUILD),
@@ -110,6 +112,17 @@ export function getQueueConfigs(): QueueDefinition[] {
                 removeOnFail: 5000,
             },
             concurrency: 2,
+        },
+        {
+            name: QUEUE_NAMES.PROJECT_EXTRACT,
+            defaultJobOptions: {
+                attempts: 3,
+                backoff: { type: 'fixed', delay: 5000 },
+                timeout: parseInt(process.env.PROJECT_EXTRACT_TIMEOUT || '180000', 10),
+                removeOnComplete: 200,
+                removeOnFail: 500,
+            },
+            concurrency: parseInt(process.env.WORKER_PROJECT_EXTRACT_CONCURRENCY || '1', 10),
         },
         {
             name: QUEUE_NAMES.TOKEN_SYNC,

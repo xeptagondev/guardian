@@ -47,6 +47,7 @@ export class PolicyIngestProcessor extends WorkerHost {
         @Inject('REDICT_PUB') private readonly redis: Redis,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
         @InjectQueue(QUEUE_NAMES.POLICY_INGEST) private readonly policyIngestQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.PROJECT_EXTRACT) private readonly projectExtractQueue: Queue,
     ) {
         super();
     }
@@ -174,6 +175,13 @@ export class PolicyIngestProcessor extends WorkerHost {
 
         // Unblock STOPPED child topics
         await this.unblockChildTopics(instanceTopicId);
+
+        // Enqueue project-schema resolution for this policy. The processor
+        // is idempotent so re-runs are cheap, and the trigger here keeps
+        // us responsive — we don't have to wait for the next maintenance sweep.
+        await this.projectExtractQueue.add('resolve-one', { instanceTopicId }, {
+            jobId: `project-resolve-${instanceTopicId}-${Date.now()}`,
+        });
 
         await this.redis.publish('se:events', JSON.stringify({
             type: 'policy-decoded',

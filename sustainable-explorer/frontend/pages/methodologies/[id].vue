@@ -24,9 +24,10 @@ import type {
   MethodologiesResponse,
 } from "~/composables/api/useMethodologiesApi";
 import { usePolicyDetailApi } from "~/composables/api/usePolicyDetailApi";
+import { usePolicyProjectsApi } from "~/composables/api/usePolicyProjectsApi";
 import PolicyFlowDiagram from "~/components/policy/PolicyFlowDiagram.vue";
 import type { PolicyBlock } from "~/types/policy";
-import { X, RefreshCw, Workflow } from "lucide-vue-next";
+import { X, RefreshCw, Workflow, MapPin, Calendar, Search } from "lucide-vue-next";
 
 const route = useRoute();
 const { network } = useNetwork();
@@ -98,6 +99,26 @@ function onSelectBlock(block: PolicyBlock) {
 function clearSelectedBlock() {
   selectedBlock.value = null;
 }
+
+// Linked projects (canonical rows extracted from project VCs)
+const projectsPage = ref(1);
+const projectsLimit = ref(20);
+const projectsSearch = ref('');
+const {
+  data: projectsResponse,
+  pending: projectsPending,
+  refresh: refreshProjects,
+} = usePolicyProjectsApi({
+  methodologyId: id,
+  network,
+  page: projectsPage,
+  limit: projectsLimit,
+  search: projectsSearch,
+});
+
+const projectRows = computed(() => projectsResponse.value?.data ?? []);
+const projectsMeta = computed(() => projectsResponse.value?.meta ?? { page: 1, limit: 20, total: 0, totalPages: 1 });
+
 
 const tabs = [
   { key: "overview", label: "Overview", icon: BookOpen },
@@ -507,25 +528,147 @@ const publishedAt = computed(() => {
       </div>
 
       <!-- Tab: Linked Projects -->
-      <div v-else-if="activeTab === 'projects'" class="space-y-6">
+      <div v-else-if="activeTab === 'projects'" class="space-y-4">
         <div class="rounded-xl border bg-card overflow-hidden">
-          <div class="px-5 py-3.5 border-b bg-muted/30">
-            <h2
-              class="text-sm font-semibold text-foreground flex items-center gap-2"
-            >
+          <div class="px-5 py-3 border-b bg-muted/30 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
               <Layers class="h-4 w-4 text-primary" />
               Linked Projects
+              <span class="text-xs text-muted-foreground font-normal">
+                ({{ projectsMeta.total }} total)
+              </span>
             </h2>
+            <div class="flex items-center gap-2">
+              <div class="relative">
+                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <input
+                  v-model="projectsSearch"
+                  type="text"
+                  placeholder="Search name, id, description…"
+                  class="pl-8 pr-3 py-1.5 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary w-64"
+                  @input="projectsPage = 1"
+                />
+              </div>
+              <button
+                class="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                :disabled="projectsPending"
+                @click="refreshProjects()"
+              >
+                <RefreshCw class="h-3.5 w-3.5" :class="projectsPending ? 'animate-spin' : ''" />
+                Refresh
+              </button>
+            </div>
           </div>
-          <div class="px-5 py-8 text-center text-sm text-muted-foreground">
-            <Layers class="h-8 w-8 mx-auto mb-3 opacity-30" />
-            <p class="font-medium text-foreground mb-1">Coming Soon</p>
-            <p>
-              Projects will be linked once VC-Document classification by schema
-              type is implemented.
+
+          <div v-if="projectsPending && projectRows.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
+            Loading projects…
+          </div>
+
+          <div v-else-if="projectRows.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground space-y-1">
+            <Layers class="h-8 w-8 mx-auto mb-2 opacity-30" />
+            <p class="font-medium text-foreground">No projects yet</p>
+            <p class="max-w-md mx-auto">
+              The project extractor hasn't found any project VCs for this
+              methodology. This could mean: no projects have been registered yet,
+              VCs haven't been fetched from IPFS, or the project schema hasn't
+              been resolved. Check the worker logs.
             </p>
           </div>
+
+          <div v-else class="overflow-x-auto">
+            <table class="w-full min-w-[900px] text-sm">
+              <thead>
+                <tr class="border-b bg-muted/20 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  <th class="text-left py-2.5 px-4">Project</th>
+                  <th class="text-left py-2.5 px-4">Country / Region</th>
+                  <th class="text-left py-2.5 px-4">Vintage</th>
+                  <th class="text-left py-2.5 px-4">Status</th>
+                  <th class="text-left py-2.5 px-4">Period</th>
+                  <th class="text-right py-2.5 px-4">Submitted</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="p in projectRows"
+                  :key="p.id"
+                  class="border-b last:border-b-0 hover:bg-muted/30 cursor-pointer transition-colors"
+                  @click="navigateTo(`/projects/${p.id}`)"
+                >
+                  <td class="py-3 px-4">
+                    <div class="font-medium text-foreground break-words max-w-[280px]">
+                      {{ p.name || '—' }}
+                    </div>
+                    <div v-if="p.projectId" class="text-[11px] font-mono text-muted-foreground truncate max-w-[280px]">
+                      {{ p.projectId }}
+                    </div>
+                    <div
+                      v-if="p.projectType || p.sector"
+                      class="text-[11px] text-muted-foreground truncate max-w-[280px]"
+                    >
+                      <template v-if="p.projectType">{{ p.projectType }}</template>
+                      <template v-if="p.projectType && p.sector"> · </template>
+                      <template v-if="p.sector">{{ p.sector }}</template>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-foreground">
+                    <div v-if="p.country || p.region" class="flex items-center gap-1.5">
+                      <MapPin class="h-3 w-3 text-muted-foreground" />
+                      <span>{{ p.country ?? '—' }}<template v-if="p.region">, {{ p.region }}</template></span>
+                    </div>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </td>
+                  <td class="py-3 px-4 text-foreground">{{ p.vintage ?? '—' }}</td>
+                  <td class="py-3 px-4">
+                    <span
+                      v-if="p.status"
+                      class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-muted text-muted-foreground"
+                    >
+                      {{ p.status }}
+                    </span>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </td>
+                  <td class="py-3 px-4 text-xs text-muted-foreground">
+                    <div v-if="p.startDate || p.endDate" class="flex items-center gap-1">
+                      <Calendar class="h-3 w-3" />
+                      <span>{{ p.startDate ?? '?' }} → {{ p.endDate ?? '?' }}</span>
+                    </div>
+                    <span v-else>—</span>
+                  </td>
+                  <td class="py-3 px-4 text-right text-xs text-muted-foreground tabular-nums">
+                    {{ new Date(p.createdAt).toLocaleDateString() }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div
+            v-if="projectsMeta.totalPages > 1"
+            class="px-5 py-3 border-t bg-muted/10 flex items-center justify-between text-xs text-muted-foreground"
+          >
+            <span>
+              Page {{ projectsMeta.page }} of {{ projectsMeta.totalPages }} —
+              {{ projectsMeta.total }} project{{ projectsMeta.total === 1 ? '' : 's' }}
+            </span>
+            <div class="flex items-center gap-1">
+              <button
+                class="px-2 py-1 rounded hover:bg-muted disabled:opacity-50"
+                :disabled="projectsPage <= 1"
+                @click="projectsPage = Math.max(1, projectsPage - 1)"
+              >
+                Prev
+              </button>
+              <button
+                class="px-2 py-1 rounded hover:bg-muted disabled:opacity-50"
+                :disabled="projectsPage >= projectsMeta.totalPages"
+                @click="projectsPage = Math.min(projectsMeta.totalPages, projectsPage + 1)"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
+
       </div>
 
       <!-- Tab: Hedera Policy -->

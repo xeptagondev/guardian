@@ -31,6 +31,7 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         @InjectQueue(QUEUE_NAMES.BUSINESS_VIEW_BUILD) private readonly businessViewQueue: Queue,
         @InjectQueue(QUEUE_NAMES.POLICY_INGEST) private readonly policyIngestQueue: Queue,
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsFetchQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.PROJECT_EXTRACT) private readonly projectExtractQueue: Queue,
     ) {}
 
     async onModuleInit(): Promise<void> {
@@ -159,6 +160,7 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
             await this.scheduleBusinessViewBuilder();
             await this.scheduleStoppedPolicyRetry();
             await this.scheduleIpfsBackfill();
+            await this.scheduleProjectExtractSweep();
             this.logger.log('All repeating jobs scheduled');
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
@@ -334,5 +336,33 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.logger.log('Scheduled IPFS backfill every 30 minutes');
+    }
+
+    /**
+     * Periodically resolves project schemas and extracts new project rows.
+     * Cheap sweep: skips already-resolved policies and already-extracted VCs.
+     */
+    private async scheduleProjectExtractSweep(): Promise<void> {
+        const interval = 5 * 60 * 1000; // every 5 minutes
+
+        const repeatableJobs = await this.projectExtractQueue.getRepeatableJobs();
+        for (const rJob of repeatableJobs) {
+            if (rJob.name === 'sweep') {
+                await this.projectExtractQueue.removeRepeatableByKey(rJob.key);
+            }
+        }
+
+        await this.projectExtractQueue.add('sweep', {}, {
+            repeat: { every: interval },
+            jobId: 'project-extract-sweep',
+        });
+
+        // Bootstrap: fire one immediate sweep so existing decoded policies
+        // and already-fetched VCs get picked up without waiting 5 minutes.
+        await this.projectExtractQueue.add('sweep', {}, {
+            jobId: `project-extract-bootstrap-${Date.now()}`,
+        });
+
+        this.logger.log('Scheduled project extract sweep every 5 minutes (with bootstrap)');
     }
 }

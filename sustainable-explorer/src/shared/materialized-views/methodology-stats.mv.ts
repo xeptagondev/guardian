@@ -30,17 +30,16 @@ export const MV_METHODOLOGY_STATS_CREATE_SQL = `
     )
     SELECT
         mb."relatedTopicId",
-        -- Each project registration creates a DYNAMIC_TOPIC under the
-        -- policy's instance topic. Walk: methodology → policy versions →
-        -- their instance topics → DYNAMIC_TOPIC children.
+        -- Authoritative source: the project table (one row per extracted
+        -- project VC). Aggregates across all DECODED versions of this policy
+        -- so a methodology's count covers its full publish history.
         COALESCE((
-            SELECT COUNT(DISTINCT tc."topicId")
-            FROM policy p
-            JOIN topic_cache tc
-              ON tc."policyTopicId" = p."instanceTopicId"
-             AND tc."topicType" = 'DYNAMIC_TOPIC'
+            SELECT COUNT(*)
+            FROM project pr
+            JOIN policy p
+              ON p."instanceTopicId" = pr."instanceTopicId"
+             AND p.status = 'DECODED'
             WHERE p."policyTopicId" = mb.policy_topic_id
-              AND p.status = 'DECODED'
         ), 0)::bigint AS project_count,
         COALESCE((
             SELECT COUNT(*)
