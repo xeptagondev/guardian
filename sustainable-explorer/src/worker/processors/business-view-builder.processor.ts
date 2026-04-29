@@ -4,6 +4,7 @@ import { Job } from "bullmq";
 import { DataSource } from "typeorm";
 import Redis from "ioredis";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
+import { buildProjectFieldMapFromMethodology } from "../project-mapper/llm-based-mapper";
 import { buildProjectViewsGeojson } from "../project-mapper/geojson-heuristic.mapper";
 import { buildProjectViewsPolicyBased } from "../project-mapper/policy-based.mapper";
 
@@ -121,11 +122,21 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
                 "displayName"    = COALESCE(EXCLUDED."displayName", business_view."displayName"),
                 "registryDid"    = EXCLUDED."registryDid",
                 "relatedTopicId" = EXCLUDED."relatedTopicId",
+                "businessData"   = CASE
+                    WHEN business_view."businessData" ? 'project_field_map'
+                        THEN EXCLUDED."businessData" || jsonb_build_object(
+                            'project_field_map',
+                            business_view."businessData"->'project_field_map'
+                        )
+                    ELSE EXCLUDED."businessData"
+                END,
                 "lastUpdate"     = EXCLUDED."lastUpdate",
                 "updatedAt"      = NOW()
         `);
 
         const totalUpserted = result?.rowCount ?? result?.length ?? 0;
+
+        await this.enrichMethodologyProjectFieldMaps();
 
         // ── PROJECT MAPPING STRATEGY ───────────────────────────────────────────────
         // Switch between two project-mapping approaches by changing PROJECT_STRATEGY.
@@ -170,5 +181,43 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
             `Business view builder job ${job.id} failed: ${error.message}`,
             error.stack,
         );
+    }
+
+    private async enrichMethodologyProjectFieldMaps(): Promise<void> {
+        const methodologyRows: Array<{
+            id: string;
+            businessData: Record<string, unknown> | null;
+        }> = await this.dataSource.query(`
+            SELECT id, "businessData"
+            FROM business_view
+            WHERE "viewType" = 'METHODOLOGY'
+              AND ("businessData"->'project_field_map' IS NULL)
+        `);
+
+        for (const row of methodologyRows) {
+            if (!row.businessData) continue;
+
+            const projectFieldMap = await buildProjectFieldMapFromMethodology(
+                row.businessData,
+            );
+
+            if (!projectFieldMap) continue;
+
+            await this.dataSource.query(
+                `
+                UPDATE business_view
+                SET "businessData" = jsonb_set(
+                        COALESCE("businessData", '{}'::jsonb),
+                        '{project_field_map}',
+                        $1::jsonb,
+                        true
+                    ),
+                    "lastUpdate" = EXTRACT(EPOCH FROM NOW())::bigint,
+                    "updatedAt" = NOW()
+                WHERE id = $2
+                `,
+                [JSON.stringify(projectFieldMap), row.id],
+            );
+        }
     }
 }
