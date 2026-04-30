@@ -10,7 +10,9 @@ import {
     extractLatLng,
     loadResolutionMaps,
     upsertProjectRows,
+    extractFieldsUsingLlmMap,
 } from './helpers';
+import { USE_LLM_MAPPING } from './llm-based-mapper';
 import { FieldDef, SchemaEntry, ProjectRecord } from './types';
 
 // ---------------------------------------------------------------------------
@@ -365,32 +367,106 @@ export async function buildProjectViewsPolicyBased(
         const lat = lngLat[1];
 
         const fm = schemaEntry.fieldMap;
+        const resolved = resolveMethod(vc.topicId, '', maps);
 
-        const name = findFieldByTitleOrDescExcluding(subject, fm,
-            ['project name', 'project title', 'name', 'title'],
-            ['methodology', 'reference', 'pdd', 'section', 'table', 'site', 'document'],
-        );
-        if (!name) continue;
-
-        const country = findFieldByTitleOrDescExcluding(subject, fm, ['country'], ['participant', 'applicant']);
-        const developer = findFieldByTitleOrDesc(subject, fm,
-            'developer', 'proponent', 'organization', 'project developer', 'applicant');
-        const category = findFieldByTitleOrDesc(subject, fm, 'category', 'project type');
-        const scale = findFieldByTitleOrDesc(subject, fm, 'scale', 'project scale');
-        const rawSector = findFieldByTitleOrDesc(subject, fm, 'sector', 'activity');
-        const vintageRaw = findFieldByTitleOrDesc(subject, fm, 'start date', 'commencement');
-
-        // Crediting period — find field whose title contains "crediting period"
+        // Try LLM-based field extraction if enabled
+        let name = '';
+        let country = '';
+        let developer = '';
+        let category = '';
+        let scale = '';
+        let rawSector = '';
+        let vintageRaw = '';
         let createdAt: string | null = null;
         let creditingPeriodEnd: string | null = null;
-        for (const [fk, fd] of Object.entries(fm)) {
-            if (fd.title.toLowerCase().includes('crediting period')) {
-                const f = subject[fk];
-                if (f && typeof f === 'object') {
-                    createdAt = typeof f['from'] === 'string' ? f['from'] : null;
-                    creditingPeriodEnd = typeof f['to'] === 'string' ? f['to'] : null;
+
+        if (USE_LLM_MAPPING && resolved.policyTopicId) {
+            // Create a fallback extractor function for the LLM extraction
+            const fallbackExtractor = async (subj: Record<string, any>) => {
+                return {
+                    'Project Title': findFieldByTitleOrDescExcluding(subj, fm,
+                        ['project name', 'project title', 'name', 'title'],
+                        ['methodology', 'reference', 'pdd', 'section', 'table', 'site', 'document'],
+                    ),
+                    'Country': findFieldByTitleOrDescExcluding(subj, fm, ['country'], ['participant', 'applicant']),
+                    'Project Developer': findFieldByTitleOrDesc(subj, fm,
+                        'developer', 'proponent', 'organization', 'project developer', 'applicant'),
+                    'Sector': findFieldByTitleOrDesc(subj, fm, 'sector', 'activity'),
+                    'Status': '',
+                    'SDGs': '',
+                    'Registry': '',
+                };
+            };
+
+            try {
+                const llmExtracted = await extractFieldsUsingLlmMap(
+                    cs,
+                    resolved.policyTopicId,
+                    dataSource,
+                    fallbackExtractor,
+                    logger,
+                );
+
+                if (llmExtracted) {
+                    name = llmExtracted['Project Title'] || '';
+                    country = llmExtracted['Country'] || '';
+                    developer = llmExtracted['Project Developer'] || '';
+                    rawSector = llmExtracted['Sector'] || '';
+                } else {
+                    // LLM mapping not available yet, skip this VC for now (will retry next iteration)
+                    logger.debug(
+                        `Skipping project VC (topic=${vc.topicId}) due to missing project_field_map ` +
+                        `for methodology (policyTopicId=${resolved.policyTopicId}); will retry in next iteration`
+                    );
+                    continue;
                 }
-                break;
+            } catch (err) {
+                logger.warn(`LLM field extraction failed: ${(err as Error).message}; falling back to heuristic`);
+                // Fall through to heuristic extraction
+            }
+        }
+
+        // If not using LLM or if LLM extraction failed, use heuristic methods
+        if (!name) {
+            name = findFieldByTitleOrDescExcluding(subject, fm,
+                ['project name', 'project title', 'name', 'title'],
+                ['methodology', 'reference', 'pdd', 'section', 'table', 'site', 'document'],
+            );
+        }
+
+        if (!name) continue;
+
+        if (!country) {
+            country = findFieldByTitleOrDescExcluding(subject, fm, ['country'], ['participant', 'applicant']);
+        }
+        if (!developer) {
+            developer = findFieldByTitleOrDesc(subject, fm,
+                'developer', 'proponent', 'organization', 'project developer', 'applicant');
+        }
+        if (!category) {
+            category = findFieldByTitleOrDesc(subject, fm, 'category', 'project type');
+        }
+        if (!scale) {
+            scale = findFieldByTitleOrDesc(subject, fm, 'scale', 'project scale');
+        }
+        if (!rawSector) {
+            rawSector = findFieldByTitleOrDesc(subject, fm, 'sector', 'activity');
+        }
+        if (!vintageRaw) {
+            vintageRaw = findFieldByTitleOrDesc(subject, fm, 'start date', 'commencement');
+        }
+
+        // Crediting period — find field whose title contains "crediting period"
+        if (!createdAt) {
+            for (const [fk, fd] of Object.entries(fm)) {
+                if (fd.title.toLowerCase().includes('crediting period')) {
+                    const f = subject[fk];
+                    if (f && typeof f === 'object') {
+                        createdAt = typeof f['from'] === 'string' ? f['from'] : null;
+                        creditingPeriodEnd = typeof f['to'] === 'string' ? f['to'] : null;
+                    }
+                    break;
+                }
             }
         }
         if (!createdAt) createdAt = vintageRaw || null;
@@ -416,8 +492,6 @@ export async function buildProjectViewsPolicyBased(
             ? parseFloat(String(emissionReduction['ER_y'] ?? '0'))
             : 0;
         const creditsToAdd = erY > 0 ? erY : 0;
-
-        const resolved = resolveMethod(vc.topicId, developer, maps);
 
         const methScopes = resolved.policyTopicId
             ? (methodScopeMap[resolved.policyTopicId] ?? [])

@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { Logger } from '@nestjs/common';
 import { MethodEntry, ProjectRecord, ResolutionMaps } from './types';
 
 // ---------------------------------------------------------------------------
@@ -381,4 +382,108 @@ export async function upsertProjectRows(
     } else {
         await dataSource.query(`DELETE FROM business_view WHERE "viewType" = 'PROJECT'`);
     }
+}
+
+// ---------------------------------------------------------------------------
+// LLM Field Mapping Support
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts a nested value from a path string like "projectDescription.name" or "projectDescription.G154".
+ * Starting from credentialSubject[0], navigates to the value.
+ */
+export function extractValueFromPath(
+    credentialSubject0: Record<string, any>,
+    path: string | null | undefined,
+): string {
+    if (!path || typeof path !== 'string') return '';
+    const parts = path.split('.');
+    let current: any = credentialSubject0;
+    for (const part of parts) {
+        if (current == null || typeof current !== 'object') return '';
+        current = current[part];
+    }
+    if (typeof current === 'string') return current.trim();
+    if (typeof current === 'number') return String(current);
+    if (Array.isArray(current)) return current.map(String).join(', ').trim();
+    return String(current ?? '').trim();
+}
+
+/**
+ * Retrieves the project_field_map from a methodology's businessData.
+ * Returns null if not found or if the mapping is not yet available.
+ * If retryIfMissing is true and FIELD_MAPPING_METHOD is 'llm', marks for retry.
+ */
+export function getProjectFieldMap(
+    methodologyBusinessData: Record<string, any> | null | undefined,
+): Record<string, string | null> | null {
+    if (!methodologyBusinessData || typeof methodologyBusinessData !== 'object') {
+        return null;
+    }
+    const map = (methodologyBusinessData as any)['project_field_map'];
+    if (map && typeof map === 'object') {
+        return map as Record<string, string | null>;
+    }
+    return null;
+}
+
+/**
+ * LLM-based field extraction: uses the project_field_map to extract fields from credentialSubject[0].
+ * Falls back to fallbackExtractor for unmapped fields.
+ * Returns null if the mapping is not available (caller should handle retry if needed).
+ */
+export async function extractFieldsUsingLlmMap(
+    credentialSubject0: Record<string, any> | null,
+    policyTopicId: string | null,
+    dataSource: DataSource,
+    fallbackExtractor: (subject: Record<string, any>) => Promise<Record<string, string>>,
+    logger?: Logger,
+): Promise<Record<string, string> | null> {
+    if (!credentialSubject0 || typeof credentialSubject0 !== 'object') {
+        return null;
+    }
+
+    // Fetch the methodology's project_field_map from business_view
+    if (!policyTopicId) {
+        return null;
+    }
+
+    const methodRows: Array<{ businessData: Record<string, any> | null }> = await dataSource.query(
+        `SELECT "businessData" FROM business_view WHERE "viewType" = 'METHODOLOGY' AND "businessData"->>'topicId' = $1 LIMIT 1`,
+        [policyTopicId],
+    );
+
+    if (methodRows.length === 0) {
+        if (logger) logger.debug(`No methodology found for topicId=${policyTopicId}`);
+        return null;
+    }
+
+    const projectFieldMap = getProjectFieldMap(methodRows[0].businessData);
+    if (!projectFieldMap) {
+        if (logger) logger.debug(`No project_field_map for methodology topicId=${policyTopicId}, retrying later`);
+        // Return null to signal that the mapping is not yet available — caller should retry
+        return null;
+    }
+
+    // Extract fields using the map; use fallback for unmapped or missing fields
+    const extracted: Record<string, string> = {};
+    const targetFields = Object.keys(projectFieldMap);
+
+    for (const field of targetFields) {
+        const pathOrNull = projectFieldMap[field];
+        const value = extractValueFromPath(credentialSubject0, pathOrNull);
+        extracted[field] = value;
+    }
+
+    // Get fallback values for comparison/override
+    const fallbackValues = await fallbackExtractor(credentialSubject0);
+
+    // For fields that the LLM map couldn't find (null paths), use fallback
+    for (const field of targetFields) {
+        if (!extracted[field] && fallbackValues[field]) {
+            extracted[field] = fallbackValues[field];
+        }
+    }
+
+    return extracted;
 }

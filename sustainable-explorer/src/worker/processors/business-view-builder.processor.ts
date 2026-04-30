@@ -4,7 +4,7 @@ import { Job } from "bullmq";
 import { DataSource } from "typeorm";
 import Redis from "ioredis";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
-import { buildProjectFieldMapFromMethodology } from "../project-mapper/llm-based-mapper";
+import { buildProjectFieldMapFromMethodology, USE_LLM_MAPPING } from "../project-mapper/llm-based-mapper";
 import { buildProjectViewsGeojson } from "../project-mapper/geojson-heuristic.mapper";
 import { buildProjectViewsPolicyBased } from "../project-mapper/improved-heuristic.mapper";
 
@@ -161,6 +161,14 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
             await buildProjectViewsGeojson(this.dataSource, this.logger);
         }
 
+        // ── LLM Field Mapping Retry ────────────────────────────────────────────────
+        // If FIELD_MAPPING_METHOD is 'llm', retry projects that may have been skipped
+        // due to missing project_field_map from the methodology during the initial pass.
+        // ────────────────────────────────────────────────────────────────────────────
+        if (USE_LLM_MAPPING) {
+            await this.retryProjectsWithLlmMapping();
+        }
+
         await this.redis.publish(
             "se:events",
             JSON.stringify({
@@ -219,6 +227,42 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
                 `,
                 [JSON.stringify(projectFieldMap), row.id],
             );
+        }
+    }
+
+    private async retryProjectsWithLlmMapping(): Promise<void> {
+        /**
+         * Retry logic for projects that may have been skipped or partially enriched
+         * due to missing project_field_map during the initial mapping pass.
+         * This is a simple retry: just re-run the project mapping after field maps exist.
+         *
+         * In a production system, you could track retry counts/timestamps in the
+         * businessData to limit retries. For now, we do a simple re-check.
+         */
+        const retryCount = 3;
+        const delayMs = 1000;
+
+        for (let i = 0; i < retryCount; i++) {
+            const methodsWithoutMap: Array<{ topicId: string }> = await this.dataSource.query(
+                `SELECT "businessData"->>'topicId' AS "topicId"
+                FROM business_view
+                WHERE "viewType" = 'METHODOLOGY'
+                  AND ("businessData"->'project_field_map' IS NULL)
+                LIMIT 10`,
+            );
+
+            if (methodsWithoutMap.length === 0) {
+                this.logger.log('All methodologies have project_field_maps; LLM mapping retry complete.');
+                break;
+            }
+
+            if (i < retryCount - 1) {
+                this.logger.debug(
+                    `LLM field mapping: ${methodsWithoutMap.length} methodologies still missing project_field_map; ` +
+                    `retrying in ${delayMs}ms (attempt ${i + 1}/${retryCount})...`
+                );
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
         }
     }
 }

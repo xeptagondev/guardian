@@ -47,6 +47,8 @@ const RETRY_INVALID_JSON_WITH_LLM = true;
 const FIELD_MAPPING_METHOD = (process.env.FIELD_MAPPING_METHOD || 'heuristic').toLowerCase();
 const USE_LLM_MAPPING = FIELD_MAPPING_METHOD === 'llm';
 
+export { USE_LLM_MAPPING };
+
 const MAPPING_SYSTEM_PROMPT = `You are given:
 1) A list of target business fields.
 2) A dictionary of schema leaf descriptions keyed by numeric index.
