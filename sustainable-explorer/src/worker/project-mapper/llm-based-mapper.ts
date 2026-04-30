@@ -12,6 +12,13 @@ type MappingResult = {
     matchedIndex: string | null;
 };
 
+type ProjectFieldMap = Record<string, string | null>;
+
+type SchemaLeafDescriptions = {
+    descriptions: Record<string, string>;
+    paths: Record<string, string>;
+};
+
 type PolicySchemaRow = {
     name: string | null;
     description: string | null;
@@ -271,12 +278,16 @@ function extractLeafNodes(tree: SchemaNode | null): SchemaNode[] {
     return leaves;
 }
 
-function compressLeafDescriptions(leaves: SchemaNode[]): Record<string, string> {
-    const result: Record<string, string> = {};
+function compressLeafDescriptions(leaves: SchemaNode[]): SchemaLeafDescriptions {
+    const descriptions: Record<string, string> = {};
+    const paths: Record<string, string> = {};
+
     leaves.forEach((leaf, index) => {
-        result[index] = leaf.description || '';
+        descriptions[index] = leaf.description || '';
+        paths[index] = leaf.title?.trim() || leaf.key;
     });
-    return result;
+
+    return { descriptions, paths };
 }
 
 async function getModelResponse({ systemPrompt, userMessage }: { systemPrompt: string; userMessage: string }): Promise<string> {
@@ -357,7 +368,7 @@ async function getModelResponse({ systemPrompt, userMessage }: { systemPrompt: s
     });
 }
 
-async function buildSchemaLeafDescriptions(schema: Record<string, unknown>, fieldsData: MappingField[]): Promise<Record<string, string>> {
+async function buildSchemaLeafDescriptions(schema: Record<string, unknown>, fieldsData: MappingField[]): Promise<SchemaLeafDescriptions> {
     const schemaTree = transformSchema(schema);
     const keywordFilteredSchemaTree = filterLeavesByKeywords(schemaTree, fieldsData) ?? schemaTree;
     return compressLeafDescriptions(extractLeafNodes(keywordFilteredSchemaTree));
@@ -448,7 +459,7 @@ async function getJsonMappingResponse(userMessage: string): Promise<MappingResul
 export async function buildProjectFieldMapFromMethodology(
     methodologyBusinessData: unknown,
     dataSource: DataSource,
-): Promise<MappingResult[] | null> {
+): Promise<ProjectFieldMap | null> {
     const projectSchema = await getProjectSchemaRow(methodologyBusinessData, dataSource);
     if (!projectSchema) {
         return null;
@@ -461,9 +472,24 @@ export async function buildProjectFieldMapFromMethodology(
     }
 
     const fieldsData = buildFallbackTargetFields(methodologyBusinessData);
-    const leafDescriptions = await buildSchemaLeafDescriptions(schemaDocument, fieldsData);
+    const { descriptions: leafDescriptions, paths: leafPaths } = await buildSchemaLeafDescriptions(schemaDocument, fieldsData);
 
     const userMessage = `Here is the input for matching:\n\nFields:\n${JSON.stringify(fieldsData, null, 2)}\n\nLeaf descriptions by index:\n${JSON.stringify(leafDescriptions, null, 2)}\n\nReturn strict JSON only following the required output format.`;
 
-    return getJsonMappingResponse(userMessage);
+    const mappedFields = await getJsonMappingResponse(userMessage);
+    const projectFieldMap: ProjectFieldMap = Object.fromEntries(
+        fieldsData.map((field) => [field.fieldName, null]),
+    );
+
+    mappedFields.forEach((result) => {
+        if (!result.fieldName) {
+            return;
+        }
+
+        projectFieldMap[result.fieldName] = result.matchedIndex === null
+            ? null
+            : (leafPaths[result.matchedIndex] ?? null);
+    });
+
+    return projectFieldMap;
 }
