@@ -418,6 +418,42 @@ function parseSchemaDocument(row: PolicySchemaRow): Record<string, unknown> | nu
     return null;
 }
 
+async function askLlmForProjectSchema(schemaNames: (string | null)[]): Promise<string | null> {
+    const validNames = schemaNames.filter((name): name is string => name !== null && name.trim().length > 0);
+
+    if (validNames.length === 0) {
+        logger.warn('No valid schema names provided to LLM.');
+        return null;
+    }
+
+    if (validNames.length === 1) {
+        logger.debug(`Only one schema found: ${validNames[0]}`);
+        return validNames[0];
+    }
+
+    const schemaListText = validNames.map((name, idx) => `${idx + 1}. ${name}`).join('\n');
+    const userMessage = `Given the following schema names from the policy_schema table:\n\n${schemaListText}\n\nWhich one is most likely to be the project initialization form or main project data structure? Reply with ONLY the name from the list above, nothing else.`;
+
+    try {
+        const response = await getModelResponse({
+            systemPrompt: 'You are a data schema expert. Identify which schema name represents the main project form or initialization data.',
+            userMessage,
+        });
+
+        const selectedName = response.trim();
+        if (validNames.includes(selectedName)) {
+            logger.log(`LLM selected schema: ${selectedName}`);
+            return selectedName;
+        }
+
+        logger.error(`LLM selected "${selectedName}" which is not in the available schemas. Available: ${validNames.join(', ')}`);
+        return null;
+    } catch (error) {
+        logger.error(`Failed to get LLM selection for project schema: ${(error as Error).message}`);
+        return null;
+    }
+}
+
 async function getProjectSchemaRow(methodologyBusinessData: unknown, dataSource: DataSource): Promise<PolicySchemaRow | null> {
     const policyTopicId = parsePolicyTopicId(methodologyBusinessData);
     if (!policyTopicId) {
@@ -438,9 +474,18 @@ async function getProjectSchemaRow(methodologyBusinessData: unknown, dataSource:
         return null;
     }
 
-    const projectSchema = rows.find((row) => row.name === 'Project');
+    const schemaNames = rows.map((row) => row.name);
+    const selectedSchemaName = await askLlmForProjectSchema(schemaNames);
+
+    if (!selectedSchemaName) {
+        logger.warn(`LLM unable to determine project schema for policyTopicId=${policyTopicId}.`);
+        return null;
+    }
+
+    const projectSchema = rows.find((row) => row.name === selectedSchemaName);
     if (!projectSchema) {
-        throw new Error(`No policy_schema row named "Project" found for policyTopicId=${policyTopicId}.`);
+        logger.error(`Selected schema "${selectedSchemaName}" not found in policy_schema rows for policyTopicId=${policyTopicId}.`);
+        return null;
     }
 
     return projectSchema;
