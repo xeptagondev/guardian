@@ -52,19 +52,13 @@ Output format (STRICT JSON):
 ]`;
 
 const PROJECT_TARGET_FIELDS: MappingField[] = [
-    { fieldName: 'name', description: 'Project name or title.', keywords: ['project name', 'project title', 'name', 'title'] },
-    { fieldName: 'country', description: 'Country where the project is located.', keywords: ['country', 'host country', 'location country'] },
-    { fieldName: 'developer', description: 'Project developer, proponent, applicant, or organization.', keywords: ['developer', 'proponent', 'applicant', 'organization', 'organisation'] },
-    { fieldName: 'category', description: 'Project category or type.', keywords: ['category', 'project type'] },
-    { fieldName: 'scale', description: 'Project scale.', keywords: ['scale', 'project scale'] },
-    { fieldName: 'sector', description: 'Sector or activity the project belongs to.', keywords: ['sector', 'activity'] },
-    { fieldName: 'vintage', description: 'Project start year or vintage.', keywords: ['start date', 'commencement', 'vintage'] },
-    { fieldName: 'createdAt', description: 'Crediting period start date or project creation date.', keywords: ['crediting period', 'from', 'start', 'created at'] },
-    { fieldName: 'creditingPeriodEnd', description: 'Crediting period end date.', keywords: ['crediting period', 'to', 'end'] },
-    { fieldName: 'sdgs', description: 'Sustainable development goals or co-benefits.', keywords: ['sdg', 'sustainable development', 'co-benefit', 'co benefit'] },
-    { fieldName: 'latitude', description: 'Latitude coordinate.', keywords: ['latitude', 'lat'] },
-    { fieldName: 'longitude', description: 'Longitude coordinate.', keywords: ['longitude', 'lng', 'lon'] },
-    { fieldName: 'description', description: 'Project description or summary.', keywords: ['description', 'project description', 'summary'] },
+    { fieldName: 'Project Title', description: 'Official name or title of the project', keywords: ['title', 'project', 'name'] },
+    { fieldName: 'Country', description: 'Country where the project is implemented or located', keywords: ['country', 'location', 'host'] },
+    { fieldName: 'Registry', description: 'Carbon or environmental registry system where the project is registered (e.g., Verra, Gold Standard)', keywords: ['registry', 'standard', 'program'] },
+    { fieldName: 'Project Developer', description: 'Organization, company, or entity responsible for developing or implementing the project', keywords: ['developer', 'proponent', 'entity'] },
+    { fieldName: 'Sector', description: 'Industry or sector classification of the project (e.g., energy, forestry, agriculture)', keywords: ['sector', 'type', 'category'] },
+    { fieldName: 'Status', description: 'Current lifecycle status of the project such as proposed, registered, active, or retired', keywords: ['status', 'stage', 'state'] },
+    { fieldName: 'SDGs', description: 'List of United Nations Sustainable Development Goals (SDGs) that the project contributes to or supports', keywords: ['sdg', 'goals', 'sustainable'] },
 ];
 
 function isRetryableHighDemandError(error: unknown): boolean {
@@ -420,10 +414,9 @@ async function getProjectSchemaRow(methodologyBusinessData: unknown, dataSource:
         return null;
     }
 
-    const projectSchema = rows.find((row) => typeof row.name === 'string' && /project/i.test(row.name));
+    const projectSchema = rows.find((row) => row.name === 'Project');
     if (!projectSchema) {
-        logger.warn(`No project schema found for policyTopicId=${policyTopicId}.`);
-        return null;
+        throw new Error(`No policy_schema row named "Project" found for policyTopicId=${policyTopicId}.`);
     }
 
     return projectSchema;
