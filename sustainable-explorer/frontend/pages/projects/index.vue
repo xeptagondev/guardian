@@ -179,7 +179,7 @@ const statusColor: Record<string, string> = {
 
         <div class="px-6 pb-6">
             <div class="rounded-xl border bg-card overflow-x-auto">
-                <table class="w-full text-sm min-w-[900px]">
+                <table class="projects-table w-full text-sm min-w-[900px]">
                     <thead>
                         <tr class="border-b bg-muted/30">
                             <SortableHeader :label="$t('projects.columns.project')" sort-key="name" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
@@ -207,7 +207,7 @@ const statusColor: Record<string, string> = {
                             class="hover:bg-muted/30 transition-colors cursor-pointer"
                         >
                             <td class="py-3 px-4">
-                                <NuxtLink :to="`/projects/${p.id}`" class="font-medium text-foreground hover:text-primary transition-colors">{{ p.name }}</NuxtLink>
+                                <NuxtLink :to="`/projects/${p.id}`" class="block min-w-0 font-medium text-foreground hover:text-primary transition-colors truncate" :title="p.name">{{ p.name }}</NuxtLink>
                             </td>
                             <td class="py-3 px-4 text-muted-foreground">
                                 <div class="group relative inline-flex items-center gap-1.5">
@@ -221,7 +221,9 @@ const statusColor: Record<string, string> = {
                                     </div>
                                 </div>
                             </td>
-                            <td class="py-3 px-4 text-muted-foreground text-xs">{{ p.registry }}</td>
+                            <td class="py-3 px-4 text-muted-foreground text-xs">
+                                <span class="block truncate" :title="p.registry">{{ p.registry }}</span>
+                            </td>
                             <td class="py-3 px-4">
                                 <div class="group relative inline-block">
                                     <span class="text-xs bg-muted rounded px-1.5 py-0.5 cursor-default">{{ p.methodology }}</span>
@@ -283,3 +285,16 @@ const statusColor: Record<string, string> = {
         <VcJsonViewer :open="vcViewerOpen" :title="vcViewerTitle" :data="vcViewerData" @close="vcViewerOpen = false" />
     </div>
 </template>
+
+<style scoped>
+.projects-table th:nth-child(1),
+.projects-table td:nth-child(1) {
+    min-width: 220px;
+}
+
+.projects-table th:nth-child(3),
+.projects-table td:nth-child(3) {
+    width: 110px;
+    max-width: 110px;
+}
+</style>
