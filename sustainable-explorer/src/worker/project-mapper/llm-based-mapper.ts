@@ -36,6 +36,17 @@ type SchemaNode = {
 const logger = new Logger('LlmBasedMapper');
 const RETRY_INVALID_JSON_WITH_LLM = true;
 
+/**
+ * Field mapping method configuration.
+ * Environment variable: FIELD_MAPPING_METHOD
+ * Options:
+ *   - 'llm' (requires API keys: GEMINI_API_KEY or OPENAI_API_KEY)
+ *   - 'heuristic' (simple keyword-based fallback, no API keys needed)
+ * Default: 'heuristic'
+ */
+const FIELD_MAPPING_METHOD = (process.env.FIELD_MAPPING_METHOD || 'heuristic').toLowerCase();
+const USE_LLM_MAPPING = FIELD_MAPPING_METHOD === 'llm';
+
 const MAPPING_SYSTEM_PROMPT = `You are given:
 1) A list of target business fields.
 2) A dictionary of schema leaf descriptions keyed by numeric index.
@@ -460,6 +471,31 @@ export async function buildProjectFieldMapFromMethodology(
     methodologyBusinessData: unknown,
     dataSource: DataSource,
 ): Promise<ProjectFieldMap | null> {
+    if (!USE_LLM_MAPPING) {
+        logger.log('Using heuristic-based field mapping (FIELD_MAPPING_METHOD=heuristic)');
+        return buildProjectFieldMapHeuristic(methodologyBusinessData, dataSource);
+    }
+
+    // Verify API keys are available for LLM mode
+    const hasGeminiKey = !!process.env.GEMINI_API_KEY;
+    const hasOpenAiKey = !!process.env.OPENAI_API_KEY;
+
+    if (!hasGeminiKey && !hasOpenAiKey) {
+        logger.warn(
+            'FIELD_MAPPING_METHOD is set to "llm" but no API keys found (GEMINI_API_KEY or OPENAI_API_KEY). ' +
+            'Falling back to heuristic-based mapping.'
+        );
+        return buildProjectFieldMapHeuristic(methodologyBusinessData, dataSource);
+    }
+
+    logger.log('Using LLM-based field mapping (FIELD_MAPPING_METHOD=llm)');
+    return buildProjectFieldMapLlm(methodologyBusinessData, dataSource);
+}
+
+async function buildProjectFieldMapLlm(
+    methodologyBusinessData: unknown,
+    dataSource: DataSource,
+): Promise<ProjectFieldMap | null> {
     const projectSchema = await getProjectSchemaRow(methodologyBusinessData, dataSource);
     if (!projectSchema) {
         return null;
@@ -491,5 +527,20 @@ export async function buildProjectFieldMapFromMethodology(
             : (leafPaths[result.matchedIndex] ?? null);
     });
 
+    return projectFieldMap;
+}
+
+function buildProjectFieldMapHeuristic(
+    methodologyBusinessData: unknown,
+    _dataSource: DataSource,
+): ProjectFieldMap | null {
+    const fieldsData = buildFallbackTargetFields(methodologyBusinessData);
+    const projectFieldMap: ProjectFieldMap = Object.fromEntries(
+        fieldsData.map((field) => [field.fieldName, null]),
+    );
+
+    // Simple heuristic: return null for all fields (no mapping)
+    // This allows the system to function without LLM dependencies
+    logger.debug('Heuristic field mapping: no automatic field mapping performed');
     return projectFieldMap;
 }
