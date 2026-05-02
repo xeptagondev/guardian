@@ -4,7 +4,6 @@ import { Job } from "bullmq";
 import { DataSource } from "typeorm";
 import Redis from "ioredis";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
-import { buildProjectViewsGeojson } from "../project-mapper/geojson-heuristic.mapper";
 import { buildProjectViewsPolicyBased } from "../project-mapper/improved-heuristic.mapper";
 
 /**
@@ -128,26 +127,20 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
         const totalUpserted = result?.rowCount ?? result?.length ?? 0;
 
         // ── PROJECT MAPPING STRATEGY ───────────────────────────────────────────────
-        // Switch between two project-mapping approaches by changing PROJECT_STRATEGY.
+        // To add a new strategy: extend the union type and add a case below.
         //
-        //  'geojson-heuristic'   — original approach: confirms the project schema by
-        //                          finding the ONLY schema per methodology with a direct
-        //                          GeoJSON field AND a name/title field (title only).
-        //                          Stable; misses policies with opaque field titles
-        //                          (e.g. VM0047) or array-type geo fields.
+        //  'improved-heuristic'  — confirms the project schema via geo+name heuristics
+        //                          on the policy_schema table. Checks title + description,
+        //                          handles array-of-GeoJSON, nested dict proponent values,
+        //                          and Shape-D lat/lng string fallback (ISO14064).
         //
-        //  'improved-heuristic'  — same pipeline but with better field detection:
-        //                          checks title + description, handles array-of-GeoJSON,
-        //                          nested dict proponent values, and Shape-D lat/lng
-        //                          string fallback (ISO14064).
-        //
-        const PROJECT_STRATEGY: 'geojson-heuristic' | 'improved-heuristic' = 'improved-heuristic';
+        const PROJECT_STRATEGY: 'improved-heuristic' = 'improved-heuristic';
         // ──────────────────────────────────────────────────────────────────────────
 
-        if (PROJECT_STRATEGY === 'improved-heuristic') {
-            await buildProjectViewsPolicyBased(this.dataSource, this.logger);
-        } else {
-            await buildProjectViewsGeojson(this.dataSource, this.logger);
+        switch (PROJECT_STRATEGY) {
+            case 'improved-heuristic':
+            default:
+                await buildProjectViewsPolicyBased(this.dataSource, this.logger);
         }
 
         await this.redis.publish(
