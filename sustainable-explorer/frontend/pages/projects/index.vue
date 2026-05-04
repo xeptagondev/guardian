@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { FolderKanban, FileJson, Sparkles } from 'lucide-vue-next';
+import { FileJson, Sparkles } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
+import type { ProjectSortKey, ProjectSortDir } from '~/composables/api/useProjectsApi';
 import { formatCredits } from '~/lib/format';
 import { SDG_LIST } from '~/lib/sdgs';
 import { generateProjectVc } from '~/lib/mock-vc';
@@ -9,20 +10,90 @@ import { getMethodologyLongName } from '~/lib/methodologies';
 import type { Project } from '~/types/models';
 
 const { t } = useI18n();
-const { projects, total, filterOptions } = useProjects();
-const { resolvedCode } = useGeocodedCountries(projects);
+const { network } = useNetwork();
+const route = useRoute();
+const router = useRouter();
 
-const INVALID_COUNTRY = new Set([
-    'not applicable', 'not specified', 'n/a', 'na', 'none', 'not stated',
-    'not available', 'not provided', 'unknown',
-    'point', 'multipoint', 'linestring', 'multilinestring',
-    'polygon', 'multipolygon', 'geometrycollection',
-]);
-function displayCountry(p: Project): string | null {
-    if (!p.country) return null;
-    return INVALID_COUNTRY.has(p.country.toLowerCase().trim()) ? null : p.country;
+const PAGE_SIZE = 10;
+
+// Server-side pagination state — initialised from URL query params
+const currentPage = ref(route.query.page ? parseInt(route.query.page as string) : 1);
+const searchQuery = ref((route.query.q as string) || '');
+const sortKey = ref<ProjectSortKey | null>((route.query.sort as ProjectSortKey) || 'createdAt');
+const sortDir = ref<ProjectSortDir | null>((route.query.dir as ProjectSortDir) || 'desc');
+
+const RESERVED = new Set(['q', 'page', 'sort', 'dir']);
+const initialFilters: Record<string, string> = {};
+for (const [k, v] of Object.entries(route.query)) {
+    if (!RESERVED.has(k) && typeof v === 'string' && v) initialFilters[k] = v;
+}
+const activeFilters = ref<Record<string, string>>(initialFilters);
+
+function syncUrl() {
+    const query: Record<string, string> = {};
+    if (searchQuery.value) query.q = searchQuery.value;
+    if (currentPage.value > 1) query.page = String(currentPage.value);
+    if (sortKey.value && sortDir.value && !(sortKey.value === 'createdAt' && sortDir.value === 'desc')) {
+        query.sort = sortKey.value;
+        query.dir = sortDir.value;
+    }
+    for (const [k, v] of Object.entries(activeFilters.value)) {
+        if (v) query[k] = v;
+    }
+    router.replace({ query });
 }
 
+function toggleSort(key: ProjectSortKey) {
+    if (sortKey.value === key) {
+        if (sortDir.value === 'asc') sortDir.value = 'desc';
+        else if (sortDir.value === 'desc') { sortKey.value = null; sortDir.value = null; }
+        else sortDir.value = 'asc';
+    } else {
+        sortKey.value = key;
+        sortDir.value = 'asc';
+    }
+    currentPage.value = 1;
+    syncUrl();
+}
+
+function setFilter(key: string, value: string) {
+    activeFilters.value = { ...activeFilters.value, [key]: value };
+    currentPage.value = 1;
+    syncUrl();
+}
+
+function clearFilters() {
+    activeFilters.value = {};
+    searchQuery.value = '';
+    currentPage.value = 1;
+    syncUrl();
+}
+
+function applyPreset(preset: { search?: string; filters?: Record<string, string> }) {
+    searchQuery.value = preset.search || '';
+    activeFilters.value = preset.filters ? { ...preset.filters } : {};
+    currentPage.value = 1;
+    syncUrl();
+}
+
+watch(searchQuery, () => { currentPage.value = 1; syncUrl(); });
+watch(currentPage, syncUrl);
+
+const { projects, meta, pending } = useProjectsApi({
+    page: currentPage,
+    limit: ref(PAGE_SIZE),
+    search: searchQuery,
+    network,
+    sortBy: sortKey,
+    sortDir,
+    filters: activeFilters,
+});
+
+const { resolvedCode } = useGeocodedCountries(projects);
+
+function displayCountry(p: Project): string | null {
+    return p.countryCode !== 'UNK' ? p.country : null;
+}
 
 // Aggregate transferred/retired per project
 const transferredByProject = computed(() => {
@@ -46,7 +117,7 @@ function viewVc(p: Project) {
     vcViewerOpen.value = true;
 }
 
-const allProjects = computed(() => projects.value.map(p => ({
+const displayProjects = computed(() => projects.value.map(p => ({
     ...p,
     creditsFormatted: formatCredits(p.credits),
     transferred: transferredByProject.value[p.id] || 0,
@@ -55,14 +126,6 @@ const allProjects = computed(() => projects.value.map(p => ({
     retiredFormatted: formatCredits(retiredByProject.value[p.id] || 0),
     methodologyLong: getMethodologyLongName(p.methodologyId, p.methodology),
 })));
-
-const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters, applyPreset } =
-    useFilteredPagination(allProjects, {
-        searchFields: ['name', 'country', 'methodology', 'registry', 'sector', 'sectoralScope'],
-        pageSize: 8,
-        defaultSort: { key: 'createdAt', dir: 'desc' },
-        arrayFields: ['sdgs'],
-    });
 
 const presets = computed(() => [
     { label: t('projects.presets.issuingForestry'), filters: { status: 'Issuing', sector: 'Forestry and Land Use' } },
@@ -73,40 +136,18 @@ const presets = computed(() => [
     { label: t('projects.presets.blueCarbon'), search: 'Blue Carbon' },
 ]);
 
-// Summary statistics for filtered results
-const summaryStats = computed(() => {
-    const f = filtered.value;
-    const totalIssuances = f.reduce((sum, p) => sum + (p.issuanceCount ?? 0), 0);
-    const uniqueCountries = new Set(f.map(p => p.country)).size;
-    const uniqueRegistries = new Set(f.map(p => p.registry)).size;
-    return { totalIssuances, uniqueCountries, uniqueRegistries };
-});
-
+// Static filter options — status and sector are known system-level values.
+// Registry and vintage are passed as text via the search box.
 const filters = computed<FilterOption[]>(() => [
     {
         key: 'status',
         label: t('projects.filters.status'),
-        options: filterOptions.value.statuses.map(s => ({ value: s, label: s })),
-    },
-    {
-        key: 'registry',
-        label: t('projects.filters.registry'),
-        options: filterOptions.value.registries.map(r => ({ value: r, label: r })),
-    },
-    {
-        key: 'vintage',
-        label: t('projects.filters.vintage'),
-        options: filterOptions.value.vintages.map(v => ({ value: v, label: v })),
+        options: ['Issuing', 'Under Validation', 'Registered', 'Verified', 'Completed'].map(s => ({ value: s, label: s })),
     },
     {
         key: 'sector',
         label: t('projects.filters.sector'),
-        options: filterOptions.value.sectors.map(s => ({ value: s, label: s })),
-    },
-    {
-        key: 'sectoralScope',
-        label: t('projects.filters.sectoralScope'),
-        options: filterOptions.value.sectoralScopes.map(s => ({ value: s, label: s })),
+        options: ['Energy', 'Transport', 'Waste', 'Nature Based Solutions', 'Industrial Process'].map(s => ({ value: s, label: s })),
     },
     {
         key: 'sdgs',
@@ -141,8 +182,8 @@ const statusColor: Record<string, string> = {
                 v-model="searchQuery"
                 :filters="filters"
                 :active-filters="activeFilters"
-                :result-count="filtered.length"
-                :total-count="total"
+                :result-count="meta.total"
+                :total-count="meta.total"
                 :search-placeholder="$t('projects.searchPlaceholder')"
                 @filter="setFilter"
                 @clear="clearFilters"
@@ -161,19 +202,6 @@ const statusColor: Record<string, string> = {
                 >
                     {{ preset.label }}
                 </button>
-            </div>
-        </div>
-
-        <!-- Summary Stats -->
-        <div v-if="filtered.length !== total" class="px-6 pb-3">
-            <div class="flex items-center gap-4 rounded-lg bg-muted/50 px-4 py-2.5 text-xs">
-                <span class="font-medium text-foreground">{{ $t('projects.projectsFound', { count: filtered.length }) }}</span>
-                <span class="text-muted-foreground">&middot;</span>
-                <span class="text-muted-foreground">{{ $t('projects.totalIssuances') }} <strong class="text-foreground">{{ formatCredits(summaryStats.totalIssuances) }}</strong></span>
-                <span class="text-muted-foreground">&middot;</span>
-                <span class="text-muted-foreground">{{ $t('projects.countries') }} <strong class="text-foreground">{{ summaryStats.uniqueCountries }}</strong></span>
-                <span class="text-muted-foreground">&middot;</span>
-                <span class="text-muted-foreground">{{ $t('projects.registries') }} <strong class="text-foreground">{{ summaryStats.uniqueRegistries }}</strong></span>
             </div>
         </div>
 
@@ -202,7 +230,7 @@ const statusColor: Record<string, string> = {
                     </thead>
                     <tbody class="divide-y">
                         <tr
-                            v-for="p in paginated"
+                            v-for="p in displayProjects"
                             :key="p.id"
                             class="hover:bg-muted/30 transition-colors cursor-pointer"
                         >
@@ -265,7 +293,7 @@ const statusColor: Record<string, string> = {
                                 </button>
                             </td>
                         </tr>
-                        <tr v-if="paginated.length === 0">
+                        <tr v-if="!pending && displayProjects.length === 0">
                             <td colspan="11" class="py-12 text-center text-sm text-muted-foreground">{{ $t('projects.noMatch') }}</td>
                         </tr>
                     </tbody>
@@ -274,9 +302,9 @@ const statusColor: Record<string, string> = {
 
             <Pagination
                 v-model:current-page="currentPage"
-                :total-pages="totalPages"
-                :total-items="filtered.length"
-                :page-size="pageSize"
+                :total-pages="meta.totalPages"
+                :total-items="meta.total"
+                :page-size="PAGE_SIZE"
             />
         </div>
 

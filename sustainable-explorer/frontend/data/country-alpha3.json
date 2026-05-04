@@ -1,0 +1,19 @@
+{
+    "Afghanistan": "AFG", "Albania": "ALB", "Algeria": "DZA", "Angola": "AGO",
+    "Argentina": "ARG", "Australia": "AUS", "Austria": "AUT", "Bangladesh": "BGD",
+    "Bolivia": "BOL", "Brazil": "BRA", "Cambodia": "KHM", "Canada": "CAN",
+    "Chile": "CHL", "China": "CHN", "Colombia": "COL", "Congo": "COD",
+    "Costa Rica": "CRI", "Cuba": "CUB", "DR Congo": "COD", "Ecuador": "ECU",
+    "El Salvador": "SLV", "Ethiopia": "ETH", "France": "FRA", "Germany": "DEU",
+    "Ghana": "GHA", "Guatemala": "GTM", "Haiti": "HTI", "Honduras": "HND",
+    "Iceland": "ISL", "India": "IND", "Indonesia": "IDN", "Jamaica": "JAM",
+    "Japan": "JPN", "Kenya": "KEN", "Malawi": "MWI", "Malaysia": "MYS",
+    "Mexico": "MEX", "Mozambique": "MOZ", "Myanmar": "MMR", "Nepal": "NPL",
+    "Nicaragua": "NIC", "Nigeria": "NGA", "Pakistan": "PAK", "Panama": "PAN",
+    "Paraguay": "PRY", "Peru": "PER", "Philippines": "PHL", "Rwanda": "RWA",
+    "Singapore": "SGP", "South Africa": "ZAF", "South Korea": "KOR",
+    "Sri Lanka": "LKA", "Switzerland": "CHE", "Taiwan": "TWN", "Tanzania": "TZA",
+    "Thailand": "THA", "Trinidad and Tobago": "TTO", "Uganda": "UGA",
+    "United Kingdom": "GBR", "United States": "USA", "Uruguay": "URY",
+    "Venezuela": "VEN", "Vietnam": "VNM"
+}

@@ -1,5 +1,6 @@
 import { DataSource } from 'typeorm';
 import { MV_METHODOLOGY_STATS_NAME } from '@shared/materialized-views';
+import { TokenType } from '@shared/enums/guardian.enums';
 import {
     MethodologyRepository,
     MethodologyListQuery,
@@ -242,7 +243,7 @@ export class PgMethodologyRepository extends MethodologyRepository {
         // total retired (serials marked deleted by Mirror Node).
         // Fungible tokens don't have per-serial tracking so their supply is used as-is.
         const nftTokenIds = issuances
-            .filter(i => i.type === 'NON_FUNGIBLE_UNIQUE')
+            .filter(i => i.type === TokenType.NonFungibleUnique)
             .map(i => i.tokenId)
             .filter((id): id is string => !!id);
 
@@ -270,7 +271,7 @@ export class PgMethodologyRepository extends MethodologyRepository {
 
         // Add fungible token supply to totalIssued (retirement not tracked for fungible)
         for (const i of issuances) {
-            if (i.type !== 'NON_FUNGIBLE_UNIQUE') {
+            if (i.type !== TokenType.NonFungibleUnique) {
                 totalIssued += i.supply;
             }
         }

@@ -8,6 +8,7 @@ import {
     ActivityEventRow,
 } from './project.repository';
 import { QueryBuilder } from './query-builder';
+import { TokenType } from '@shared/enums/guardian.enums';
 import { PROJECT_FIELD_SCHEMA } from './schemas/project.schema';
 
 interface RawRow {
@@ -262,7 +263,7 @@ export class PgProjectRepository extends ProjectRepository {
 
             // totalRetired = NFT serials marked deleted for tokens this project minted
             const nftTokenIds = issuances
-                .filter(i => i.type === 'NON_FUNGIBLE_UNIQUE')
+                .filter(i => i.type === TokenType.NonFungibleUnique)
                 .map(i => i.tokenId)
                 .filter((tid): tid is string => !!tid);
 
@@ -319,7 +320,7 @@ export class PgProjectRepository extends ProjectRepository {
             }));
 
             const nftTokenIds = issuances
-                .filter(i => i.type === 'NON_FUNGIBLE_UNIQUE')
+                .filter(i => i.type === TokenType.NonFungibleUnique)
                 .map(i => i.tokenId)
                 .filter((tid): tid is string => !!tid);
 
@@ -340,7 +341,7 @@ export class PgProjectRepository extends ProjectRepository {
                 }
             }
             for (const i of issuances) {
-                if (i.type !== 'NON_FUNGIBLE_UNIQUE') totalIssued += i.supply;
+                if (i.type !== TokenType.NonFungibleUnique) totalIssued += i.supply;
             }
         }
 

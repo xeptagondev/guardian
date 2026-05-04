@@ -7,15 +7,16 @@ const cacheRef = shallowRef(0); // bump to trigger reactive updates
 
 let queueRunning = false;
 const queue: Array<{ id: string; lat: number; lng: number }> = [];
+let _geocoderUrl = '';
 
 async function drainQueue() {
-    if (queueRunning) return;
+    if (queueRunning || !_geocoderUrl) return;
     queueRunning = true;
     while (queue.length > 0) {
         const item = queue.shift()!;
         if (cache.has(item.id)) continue;
         try {
-            const res = await $fetch<any>('https://nominatim.openstreetmap.org/reverse', {
+            const res = await $fetch<any>(_geocoderUrl, {
                 params: { lat: item.lat, lon: item.lng, format: 'json', zoom: 3 },
                 headers: { 'Accept-Language': 'en' },
             });
@@ -32,6 +33,9 @@ async function drainQueue() {
 }
 
 export function useGeocodedCountries(projects: Ref<Project[]>) {
+    const config = useRuntimeConfig();
+    _geocoderUrl = config.public.geocoderUrl;
+
     watch(projects, (list) => {
         let added = false;
         for (const p of list) {

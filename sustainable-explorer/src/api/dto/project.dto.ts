@@ -2,6 +2,7 @@ import { IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationQueryDto } from './pagination.dto';
 import { ProjectRow, ActivityEventRow } from '../repositories/project.repository';
+import { MessageType } from '@shared/enums/guardian.enums';
 
 export class ActivityEventDto {
     @ApiProperty({ description: 'Date of the activity (YYYY-MM-DD)' })
@@ -18,7 +19,7 @@ export class ActivityEventDto {
         const date = new Date(seconds * 1000).toISOString().split('T')[0];
 
         const name = (row.schemaName ?? '').toLowerCase();
-        const isVP = row.messageType === 'VP-Document';
+        const isVP = row.messageType === MessageType.VpDocument;
 
         let type: string;
         let action: string;

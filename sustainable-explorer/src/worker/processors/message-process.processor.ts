@@ -8,6 +8,7 @@ import { Logger } from "@nestjs/common";
 import { Job, Queue } from "bullmq";
 import { DataSource } from "typeorm";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
+import { MessageType } from "@shared/enums/guardian.enums";
 import {
     ParsedMessage,
     decodeBase64Message,
@@ -142,7 +143,7 @@ export class MessageProcessProcessor extends WorkerHost {
         );
 
         const isPublishedPolicy =
-            parsed.type === 'Instance-Policy' &&
+            parsed.type === MessageType.InstancePolicy &&
             (parsed.action || '').toLowerCase() === 'publish-policy';
 
         if (isPublishedPolicy) {

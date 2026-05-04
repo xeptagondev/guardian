@@ -4,6 +4,7 @@ import { Job, Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { QUEUE_NAMES } from '@shared/config/bullmq.config';
 import { HederaService } from '../services/hedera.service';
+import { TokenType } from '@shared/enums/guardian.enums';
 
 export interface TokenSyncJobData {
     tokenId: string;
@@ -73,7 +74,7 @@ export class TokenSyncProcessor extends WorkerHost {
         );
 
         // If NFT type and fetchNfts is enabled, fetch serials
-        if (token.type === 'NON_FUNGIBLE_UNIQUE' && fetchNfts) {
+        if (token.type === TokenType.NonFungibleUnique && fetchNfts) {
             await this.syncNftSerials(tokenId, fromSerial, now);
         }
 
