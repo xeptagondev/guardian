@@ -377,13 +377,20 @@ export async function persistSchemaClassification(
 }
 
 /**
- * Upserts all project rows from projectMap into business_view and removes any
- * stale PROJECT rows that are no longer in the current result set.
+ * Upserts all project rows from projectMap into business_view and removes stale
+ * PROJECT rows for topics that ran a full rebuild this cycle.
+ *
+ * Stable topics (not in fullRebuildPolicyTopicIds) are processed incrementally:
+ * their existing PROJECT rows are never deleted here — only new/updated rows are
+ * upserted via ON CONFLICT. Deletion is scoped to fresh topics only, preventing
+ * rows from previous incremental passes from being wiped.
+ *
  * Corresponds to Step G of the project-building pipeline.
  */
 export async function upsertProjectRows(
     dataSource: DataSource,
     projectMap: Map<string, ProjectRecord>,
+    fullRebuildPolicyTopicIds: string[] = [],
 ): Promise<void> {
     const validTimestamps: string[] = [];
 
@@ -460,13 +467,30 @@ export async function upsertProjectRows(
         validTimestamps.push(proj.sourceTimestamp);
     }
 
-    if (validTimestamps.length > 0) {
-        const placeholders = validTimestamps.map((_, i) => `$${i + 1}`).join(', ');
-        await dataSource.query(
-            `DELETE FROM business_view WHERE "viewType" = 'PROJECT' AND "sourceTimestamp" NOT IN (${placeholders})`,
-            validTimestamps,
-        );
-    } else {
-        await dataSource.query(`DELETE FROM business_view WHERE "viewType" = 'PROJECT'`);
+    // Scope stale deletion to full-rebuild topics only.
+    // Stable topics are processed incrementally — their existing PROJECT rows must not be deleted.
+    if (fullRebuildPolicyTopicIds.length > 0) {
+        const freshTimestamps = [...projectMap.values()]
+            .filter(p => p.policyTopicId && fullRebuildPolicyTopicIds.includes(p.policyTopicId))
+            .map(p => p.sourceTimestamp);
+
+        if (freshTimestamps.length > 0) {
+            const placeholders = freshTimestamps.map((_, i) => `$${i + 2}`).join(', ');
+            await dataSource.query(
+                `DELETE FROM business_view
+                 WHERE "viewType" = 'PROJECT'
+                   AND "businessData"->>'policyTopicId' = ANY($1)
+                   AND "sourceTimestamp" NOT IN (${placeholders})`,
+                [fullRebuildPolicyTopicIds, ...freshTimestamps],
+            );
+        } else {
+            await dataSource.query(
+                `DELETE FROM business_view
+                 WHERE "viewType" = 'PROJECT'
+                   AND "businessData"->>'policyTopicId' = ANY($1)`,
+                [fullRebuildPolicyTopicIds],
+            );
+        }
     }
+    // No deletion for stable topics — they are being updated incrementally.
 }

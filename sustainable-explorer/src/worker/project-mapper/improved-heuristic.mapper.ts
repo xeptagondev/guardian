@@ -443,25 +443,98 @@ export async function buildProjectViewsPolicyBased(
         list.push(uuid);
         policySchemaUuids.set(entry.policyTopicId, list);
     }
-    const projectVcs: Array<{
-        consensusTimestamp: string;
-        topicId: string;
-        documents: Record<string, any>;
-    }> = await dataSource.query(`
-        SELECT "consensusTimestamp", "topicId", documents
-        FROM message
-        WHERE type = 'VC-Document'
-          AND documents IS NOT NULL
-          AND split_part(
-                documents -> 'credentialSubject' -> 0 ->> 'type',
-                '&', 1
-              ) = ANY($1)
-        ORDER BY "consensusTimestamp"
-    `, [acceptableUuids]);
 
-    if (projectVcs.length === 0) {
-        await dataSource.query(`DELETE FROM business_view WHERE "viewType" = 'PROJECT'`);
-        logger.log('No project VCs found matching confirmed schemas; cleared stale PROJECT rows.');
+    // Load lastVcTimestamp per UUID for all schemas in siblingSchemaMap.
+    // Each schema UUID gets its own precise cutoff — Shape C siblings get their own
+    // timestamp instead of sharing the TRUE schema's per-topic value.
+    const siblingUuids = Array.from(siblingSchemaMap.keys());
+    const siblingConfigRows: Array<{ schemaId: string; projectSchemaConfig: Record<string, unknown> | null }> =
+        await dataSource.query(`
+            SELECT "schemaId", "projectSchemaConfig"
+            FROM policy_schema
+            WHERE "schemaId" = ANY($1)
+        `, [siblingUuids]);
+
+    const lastVcTimestampByUuid = new Map<string, string>();
+    for (const row of siblingConfigRows) {
+        const ts = (row.projectSchemaConfig as any)?.lastVcTimestamp as string | undefined;
+        if (ts) lastVcTimestampByUuid.set(row.schemaId, ts);
+    }
+
+    // Compute freshPolicyTopicIds early — needed by both the early-return guards
+    // and the upsert call below.
+    const freshPolicyTopicIds = Array.from(topicsNeedingEval).filter(t => confirmedByTopic.has(t));
+
+    // Split schema UUIDs into two groups:
+    //   freshUuids        — topics that just ran through heuristic evaluation (full rebuild)
+    //   stableUuidCutoffs — topics confirmed in a prior run (incremental, cutoff applied)
+    const freshUuids: string[] = [];
+    const stableUuidCutoffs: Array<{ uuid: string; cutoff: string }> = [];
+
+    for (const [uuid, entry] of siblingSchemaMap) {
+        if (topicsNeedingEval.has(entry.policyTopicId)) {
+            freshUuids.push(uuid);
+        } else {
+            const cutoff = lastVcTimestampByUuid.get(uuid) ?? '0';
+            stableUuidCutoffs.push({ uuid, cutoff });
+        }
+    }
+
+    // Fetch VCs for fresh topics (full rebuild — no timestamp filter)
+    const freshVcs: Array<{ consensusTimestamp: string; topicId: string; documents: Record<string, any> }> =
+        freshUuids.length > 0
+            ? await dataSource.query(`
+                SELECT "consensusTimestamp", "topicId", documents
+                FROM message
+                WHERE type = 'VC-Document'
+                  AND documents IS NOT NULL
+                  AND split_part(
+                        documents -> 'credentialSubject' -> 0 ->> 'type',
+                        '&', 1
+                      ) = ANY($1)
+                ORDER BY "consensusTimestamp"
+              `, [freshUuids])
+            : [];
+
+    // Fetch VCs for stable topics (incremental — only VCs newer than last run).
+    // Uses a VALUES JOIN so each schema UUID gets its own per-topic cutoff.
+    let stableVcs: Array<{ consensusTimestamp: string; topicId: string; documents: Record<string, any> }> = [];
+    if (stableUuidCutoffs.length > 0) {
+        const valuesClause = stableUuidCutoffs
+            .map((_, i) => `($${i * 2 + 1}::text, $${i * 2 + 2}::text)`)
+            .join(', ');
+        const params = stableUuidCutoffs.flatMap(({ uuid, cutoff }) => [uuid, cutoff]);
+        stableVcs = await dataSource.query(`
+            SELECT m."consensusTimestamp", m."topicId", m.documents
+            FROM message m
+            JOIN (VALUES ${valuesClause}) AS t(uuid, cutoff)
+              ON split_part(
+                   m.documents -> 'credentialSubject' -> 0 ->> 'type',
+                   '&', 1
+                 ) = t.uuid
+              AND m."consensusTimestamp" > t.cutoff
+            WHERE m.type = 'VC-Document'
+              AND m.documents IS NOT NULL
+            ORDER BY m."consensusTimestamp"
+        `, params);
+    }
+
+    const projectVcs = [...freshVcs, ...stableVcs].sort(
+        (a, b) => a.consensusTimestamp.localeCompare(b.consensusTimestamp),
+    );
+
+    if (projectVcs.length === 0 && freshPolicyTopicIds.length === 0) {
+        // No new VCs and no fresh topics — nothing to do. Existing PROJECT rows are preserved.
+        logger.log('No new VCs found for stable topics; skipping rebuild.');
+        return;
+    }
+    if (projectVcs.length === 0 && freshPolicyTopicIds.length > 0) {
+        // Fresh topics confirmed but produced no VCs yet — clear their stale rows only.
+        await dataSource.query(
+            `DELETE FROM business_view WHERE "viewType" = 'PROJECT' AND "businessData"->>'policyTopicId' = ANY($1)`,
+            [freshPolicyTopicIds],
+        );
+        logger.log('No project VCs found for fresh topics; cleared their stale PROJECT rows.');
         return;
     }
 
@@ -632,10 +705,37 @@ export async function buildProjectViewsPolicyBased(
         }
     }
 
-    // Step G — upsert each project row and delete stale PROJECT rows (shared)
-    await upsertProjectRows(dataSource, projectMap);
+    // Step G — upsert each project row; scoped stale deletion for fresh topics only.
+    await upsertProjectRows(dataSource, projectMap, freshPolicyTopicIds);
+
+    // Persist lastVcTimestamp for stable schemas so the next run only fetches new VCs.
+    // Also set it for freshly confirmed schemas (so they use the incremental path next time).
+    const allProcessedVcs = projectVcs;
+    if (allProcessedVcs.length > 0) {
+        // Find max consensusTimestamp per schema UUID across all processed VCs.
+        const maxTsByUuid = new Map<string, string>();
+        for (const vc of allProcessedVcs) {
+            const docs = vc.documents as Record<string, any>;
+            const rawType: string = (docs.credentialSubject?.[0] as any)?.['type'] ?? '';
+            const uuid = rawType.split('&')[0].trim().replace(/^#/, '');
+            const current = maxTsByUuid.get(uuid) ?? '0';
+            if (vc.consensusTimestamp > current) maxTsByUuid.set(uuid, vc.consensusTimestamp);
+        }
+
+        // Update projectSchemaConfig for each schema UUID with the new lastVcTimestamp.
+        for (const [uuid, maxTs] of maxTsByUuid) {
+            await dataSource.query(
+                `UPDATE policy_schema
+                 SET "projectSchemaConfig" = COALESCE("projectSchemaConfig", '{}'::jsonb) || jsonb_build_object('lastVcTimestamp', $1::text)
+                 WHERE "schemaId" = $2`,
+                [maxTs, uuid],
+            );
+        }
+        logger.log(`Updated lastVcTimestamp for ${maxTsByUuid.size} schema(s).`);
+    }
 
     logger.log(
-        `Project views built: ${projectMap.size} project(s) upserted from ${projectVcs.length} VC(s).`,
+        `Project views built: ${projectMap.size} project(s) upserted ` +
+        `(${freshVcs.length} full-rebuild VCs, ${stableVcs.length} incremental VCs).`,
     );
 }
