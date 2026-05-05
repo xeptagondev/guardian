@@ -2,6 +2,7 @@ import { IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationQueryDto } from './pagination.dto';
 import { MethodologyRow, MethodologyStatsRow } from '../repositories/methodology.repository';
+import { IssuanceDto } from './project.dto';
 
 export class MethodologyQueryDto extends PaginationQueryDto {
     @ApiPropertyOptional({ description: 'Filter by methodology name (partial match)' })
@@ -93,6 +94,12 @@ export class MethodologyResponseDto {
     })
     policyTopicId: string | null;
 
+    @ApiProperty({ nullable: true, type: [String], description: 'Sectoral scopes extracted from policy categoriesExport' })
+    sectoralScopes: string[] | null;
+
+    @ApiProperty({ nullable: true, description: 'Emission reduction approach: Avoidance, Removal, or Avoidance & Removal' })
+    emissionReductionApproach: string | null;
+
     @ApiProperty({ description: 'HCS consensus timestamp of the source message' })
     sourceTimestamp: string;
 
@@ -104,6 +111,18 @@ export class MethodologyResponseDto {
 
     @ApiProperty({ type: MethodologyStats })
     stats: MethodologyStats;
+
+    @ApiProperty({ type: [IssuanceDto], description: 'Linked token issuances for this methodology' })
+    issuances: IssuanceDto[];
+
+    @ApiProperty({ description: 'Total credits ever minted (NFT serials + fungible supply)' })
+    totalIssued: number;
+
+    @ApiProperty({ description: 'Total credits retired (NFT serials marked deleted by Mirror Node)' })
+    totalRetired: number;
+
+    @ApiProperty({ description: 'Credits currently in circulation (totalIssued - totalRetired)' })
+    totalActive: number;
 
     static fromRow(
         row: MethodologyRow,
@@ -127,10 +146,24 @@ export class MethodologyResponseDto {
             registryName: row.registryName,
             version,
             policyTopicId,
+            sectoralScopes: row.sectoralScopes,
+            emissionReductionApproach: row.emissionReductionApproach,
             sourceTimestamp: row.sourceTimestamp,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             stats,
+            issuances: (row.issuances ?? []).map(i => ({
+                tokenId: i.tokenId,
+                name: i.name,
+                symbol: i.symbol,
+                type: i.type,
+                supply: i.supply,
+                mintDate: i.mintDate,
+                rawVc: i.rawVc ?? null,
+            })),
+            totalIssued: row.totalIssued ?? 0,
+            totalRetired: row.totalRetired ?? 0,
+            totalActive: row.totalActive ?? 0,
         };
     }
 }

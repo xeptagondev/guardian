@@ -4,6 +4,7 @@ import { Job, Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { QUEUE_NAMES } from '@shared/config/bullmq.config';
 import { HederaService } from '../services/hedera.service';
+import { TokenType } from '@shared/enums/guardian.enums';
 
 export interface TokenSyncJobData {
     tokenId: string;
@@ -73,7 +74,7 @@ export class TokenSyncProcessor extends WorkerHost {
         );
 
         // If NFT type and fetchNfts is enabled, fetch serials
-        if (token.type === 'NON_FUNGIBLE_UNIQUE' && fetchNfts) {
+        if (token.type === TokenType.NonFungibleUnique && fetchNfts) {
             await this.syncNftSerials(tokenId, fromSerial, now);
         }
 
@@ -87,12 +88,13 @@ export class TokenSyncProcessor extends WorkerHost {
 
         for (const nft of nfts) {
             await this.dataSource.query(
-                `INSERT INTO nft_cache ("tokenId", "serialNumber", "lastUpdate", metadata)
-                 VALUES ($1, $2, $3, $4)
+                `INSERT INTO nft_cache ("tokenId", "serialNumber", "lastUpdate", metadata, deleted)
+                 VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT ("tokenId", "serialNumber") DO UPDATE SET
                     "lastUpdate" = EXCLUDED."lastUpdate",
-                    metadata = EXCLUDED.metadata`,
-                [tokenId, nft.serial_number, now, nft.metadata || null],
+                    metadata = EXCLUDED.metadata,
+                    deleted = EXCLUDED.deleted`,
+                [tokenId, nft.serial_number, now, nft.metadata || null, nft.deleted ?? false],
             );
 
             if (nft.serial_number > maxSerial) {

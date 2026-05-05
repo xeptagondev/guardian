@@ -6,6 +6,9 @@
  * so swapping to a different storage backend only requires a new implementation.
  */
 
+import { IssuanceRow } from './project.repository';
+export { IssuanceRow };
+
 export interface MethodologyListQuery {
     page: number;
     limit: number;
@@ -41,11 +44,18 @@ export interface MethodologyRow {
     // Named `statusValue` to avoid colliding with the HTTP-level `status` concept.
     statusValue: string | null;
     businessData: Record<string, unknown> | null;
+    sectoralScopes: string[] | null;
+    emissionReductionApproach: string | null;
     searchText: string | null;
     lastUpdate: string;
     createdAt: Date;
     updatedAt: Date;
     stats: MethodologyStatsRow;
+    /** Token issuances linked to this methodology's policy topic. Only populated by findById. */
+    issuances?: IssuanceRow[];
+    totalIssued?: number;
+    totalRetired?: number;
+    totalActive?: number;
 }
 
 export interface MethodologyListResult {

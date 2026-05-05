@@ -57,6 +57,8 @@ export default defineNuxtConfig({
             //   (e.g., `http://<host>:3030`) via NUXT_PUBLIC_API_BASE_URL.
             //   Nuxt automatically overrides public.* from NUXT_PUBLIC_* env vars.
             apiBaseUrl: '',
+            // Reverse-geocoding endpoint. Override via NUXT_PUBLIC_GEOCODER_URL.
+            geocoderUrl: 'https://nominatim.openstreetmap.org/reverse',
         },
     },
 

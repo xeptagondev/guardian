@@ -191,15 +191,17 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * Reads token_cache where hasNext=true and creates token-sync jobs.
-     * Safe to run on multiple instances — jobId prevents duplicates.
+     * Reads token_cache and creates token-sync jobs.
+     *
+     * - Tokens with hasNext=true are synced from their watermark to pick up new serials.
+     * - All NFT tokens are also re-synced from serial 0 so that any retirements
+     *   (deleted=true in nft_cache) that occurred since the last sync are detected.
      */
     private async scheduleTokenSyncs(): Promise<void> {
-        const tokens = await this.dataSource.query(
+        const pendingTokens = await this.dataSource.query(
             `SELECT "tokenId", "serialNumber" FROM token_cache WHERE "hasNext" = true`,
         );
-
-        for (const token of tokens) {
+        for (const token of pendingTokens) {
             await this.tokenQueue.add('sync', {
                 tokenId: token.tokenId,
                 fetchNfts: true,
@@ -209,7 +211,24 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
             });
         }
 
-        this.logger.log(`Enqueued ${tokens.length} token sync jobs from cache`);
+        // Re-sync all NFT tokens from serial 0 to detect retirements.
+        const nftTokens = await this.dataSource.query(
+            `SELECT "tokenId" FROM token_cache WHERE type = 'NON_FUNGIBLE_UNIQUE'`,
+        );
+        for (const token of nftTokens) {
+            await this.tokenQueue.add('sync', {
+                tokenId: token.tokenId,
+                fetchNfts: true,
+                fromSerial: 0,
+            }, {
+                jobId: `token-${token.tokenId}-retirement-${Date.now()}`,
+            });
+        }
+
+        this.logger.log(
+            `Enqueued ${pendingTokens.length} incremental token sync(s), ` +
+            `${nftTokens.length} NFT retirement check(s)`,
+        );
     }
 
     /**
@@ -232,10 +251,19 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
                   AND m.action ILIKE 'publish-policy'
                   AND m.files IS NOT NULL
                   AND array_length(m.files, 1) > 0
-                  AND NOT EXISTS (
-                      SELECT 1 FROM policy_schema ps
-                      WHERE ps."policyTopicId" = m."topicId"
-                        AND ps."sourceCid" = f.cid
+                  AND (
+                      NOT EXISTS (
+                          SELECT 1 FROM policy_schema ps
+                          WHERE ps."policyTopicId" = m."topicId"
+                            AND ps."sourceCid" = f.cid
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM business_view bv
+                          WHERE bv."viewType" = 'METHODOLOGY'
+                            AND bv."businessData"->>'topicId' = m."topicId"
+                            AND bv."businessData"->'sectoralScopes' IS NULL
+                            AND bv."businessData"->'emissionReductionApproach' IS NULL
+                      )
                   )
             `);
 

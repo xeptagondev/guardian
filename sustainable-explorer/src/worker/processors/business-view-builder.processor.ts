@@ -4,6 +4,7 @@ import { Job } from "bullmq";
 import { DataSource } from "typeorm";
 import Redis from "ioredis";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
+import { buildProjectViewsPolicyBased } from "../project-mapper/improved-heuristic.mapper";
 
 /**
  * Mapping from HCS message types to business domain view types.
@@ -13,12 +14,16 @@ import { QUEUE_NAMES } from "@shared/config/bullmq.config";
  * existing Guardian indexer treats Instance-Policy as the canonical
  * methodology entity. We mirror that here by mapping ONLY Instance-Policy
  * messages to METHODOLOGY view rows.
+ *
+ * Note on projects: VC-Document messages are NOT handled here. Project rows
+ * are built separately in the project mapper because they require
+ * multi-message aggregation, geo-coordinate deduplication, and methodology
+ * resolution that cannot be expressed in a single INSERT … SELECT.
  */
 const TYPE_MAPPINGS: Record<string, string> = {
     'Instance-Policy': 'METHODOLOGY',
     'Standard Registry': 'REGISTRY',
     'Token': 'CREDIT',
-    'VC-Document': 'PROJECT',
 };
 
 @Processor(QUEUE_NAMES.BUSINESS_VIEW_BUILD)
@@ -61,10 +66,23 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
             SELECT
                 m."consensusTimestamp",
                 CASE ${caseClauses} END,
-                COALESCE(m.options->>'name', m.options->>'tokenName'),
+                COALESCE(
+                    m.options->>'name',
+                    m.options->>'tokenName',
+                    CASE WHEN m.type = 'Standard Registry' THEN (
+                        SELECT vc.documents -> 'credentialSubject' -> 0 ->> 'OrganizationName'
+                        FROM message vc
+                        WHERE vc."topicId" = m.options->>'topicId'
+                          AND vc.type = 'VC-Document'
+                          AND vc.documents -> 'credentialSubject' -> 0 ->> 'OrganizationName' IS NOT NULL
+                        ORDER BY vc."consensusTimestamp" DESC
+                        LIMIT 1
+                    ) END
+                ),
                 COALESCE(m.owner, m.options->>'did'),
                 CASE
                     WHEN m.type = 'Instance-Policy' THEN m.options->>'instanceTopicId'
+                    WHEN m.type = 'Token'           THEN m."topicId"
                     ELSE m.options->>'topicId'
                 END,
                 jsonb_build_object(
@@ -99,13 +117,31 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
               -- count as a real methodology. Other types pass through.
               AND (m.type != 'Instance-Policy' OR m.action = 'publish-policy')
             ON CONFLICT ("sourceTimestamp", "viewType") DO UPDATE SET
-                "registryDid" = EXCLUDED."registryDid",
+                "displayName"    = COALESCE(EXCLUDED."displayName", business_view."displayName"),
+                "registryDid"    = EXCLUDED."registryDid",
                 "relatedTopicId" = EXCLUDED."relatedTopicId",
-                "lastUpdate" = EXCLUDED."lastUpdate",
-                "updatedAt" = NOW()
+                "lastUpdate"     = EXCLUDED."lastUpdate",
+                "updatedAt"      = NOW()
         `);
 
         const totalUpserted = result?.rowCount ?? result?.length ?? 0;
+
+        // ── PROJECT MAPPING STRATEGY ───────────────────────────────────────────────
+        // To add a new strategy: extend the union type and add a case below.
+        //
+        //  'improved-heuristic'  — confirms the project schema via geo+name heuristics
+        //                          on the policy_schema table. Checks title + description,
+        //                          handles array-of-GeoJSON, nested dict proponent values,
+        //                          and Shape-D lat/lng string fallback (ISO14064).
+        //
+        const PROJECT_STRATEGY: 'improved-heuristic' = 'improved-heuristic';
+        // ──────────────────────────────────────────────────────────────────────────
+
+        switch (PROJECT_STRATEGY) {
+            case 'improved-heuristic':
+            default:
+                await buildProjectViewsPolicyBased(this.dataSource, this.logger);
+        }
 
         await this.redis.publish(
             "se:events",

@@ -6,28 +6,74 @@ import {
     GitBranch, ArrowRight, CheckCircle2, Circle, Zap, FileText, Network, Repeat, Flame,
     TrendingUp, TrendingDown, AlertTriangle, Database, ExternalLink,
 } from 'lucide-vue-next';
-import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_TRANSFERS, MOCK_RETIREMENTS } from '~/data';
+import type { Credit } from '~/types/models';
 import { formatCredits, formatNumber } from '~/lib/format';
 import { getSDG } from '~/lib/sdgs';
-import { generateProjectVc, generateCreditVc } from '~/lib/mock-vc';
 import { REGISTRY_TERM_MAPPINGS } from '~/lib/registry-terms';
 import { getMethodologyName } from '~/lib/methodologies';
+import { COUNTRY_ALPHA3 } from '~/composables/useProjects';
 
 const route = useRoute();
+const { network } = useNetwork();
 const projectId = computed(() => route.params.id as string);
-const project = computed(() => MOCK_PROJECTS.find(p => p.id === projectId.value));
-const linkedCredits = computed(() => MOCK_CREDITS.filter(c => c.projectId === projectId.value));
-const linkedTransfers = computed(() => MOCK_TRANSFERS.filter(t => t.projectId === projectId.value));
-const linkedRetirements = computed(() => MOCK_RETIREMENTS.filter(r => r.projectId === projectId.value));
-const projectVc = computed(() => project.value ? generateProjectVc(project.value) : null);
+const { project, pending } = useProjectDetail(projectId);
+const { activity: activityEvents } = useProjectActivity(projectId);
 
-// Lifecycle summary
+// When the API returns no country (UNK) but we have valid coordinates, fall back
+// to a Nominatim reverse-geocode lookup so the correct flag is shown.
+const geocodedCountry = ref<{ code: string; name: string } | null>(null);
+watch(project, async (p) => {
+    geocodedCountry.value = null;
+    if (!p || p.countryCode !== 'UNK' || !p.lat || !p.lng) return;
+    try {
+        const res = await $fetch<any>('https://nominatim.openstreetmap.org/reverse', {
+            params: { lat: p.lat, lon: p.lng, format: 'json', zoom: 3 },
+            headers: { 'Accept-Language': 'en' },
+        });
+        const name: string = res?.address?.country ?? '';
+        const code = COUNTRY_ALPHA3[name] ?? 'UNK';
+        if (code !== 'UNK') geocodedCountry.value = { code, name };
+    } catch { /* ignore — fallback stays UNK */ }
+}, { immediate: true });
+
+const INVALID_COUNTRY = new Set([
+    'not applicable', 'not specified', 'n/a', 'na', 'none', 'not stated',
+    'not available', 'not provided', 'unknown',
+    'point', 'multipoint', 'linestring', 'multilinestring',
+    'polygon', 'multipolygon', 'geometrycollection',
+]);
+const displayCountryCode = computed(() => geocodedCountry.value?.code ?? project.value?.countryCode ?? 'UNK');
+const displayCountry = computed(() => {
+    const raw = geocodedCountry.value?.name ?? project.value?.country ?? '';
+    return INVALID_COUNTRY.has(raw.toLowerCase().trim()) ? '' : raw;
+});
+
+const linkedCredits = computed<Credit[]>(() => {
+    if (!project.value?.issuances?.length) return [];
+    return project.value.issuances.map(i => ({
+        id: i.tokenId,
+        tokenId: i.tokenId,
+        name: i.name ?? '',
+        symbol: i.symbol ?? '',
+        type: (i.type === 'FUNGIBLE_COMMON' ? 'Fungible' : 'Non-Fungible') as 'Fungible' | 'Non-Fungible',
+        supply: i.supply,
+        projectId: project.value!.id,
+        registry: project.value!.registry,
+        mintDate: i.mintDate ?? '',
+    }));
+});
+const linkedTransfers = computed(() => []);
+const linkedRetirements = computed(() => []);
+
+// Lifecycle summary sourced from backend-computed totals.
+// totalIssued = all NFT serials ever minted + fungible supply
+// totalRetired = NFT serials marked deleted by Mirror Node
+// totalActive  = totalIssued - totalRetired
 const lifecycleSummary = computed(() => {
-    const totalIssued = linkedCredits.value.reduce((sum, c) => sum + c.supply, 0);
-    const totalTransferred = linkedTransfers.value.reduce((sum, t) => sum + t.quantity, 0);
-    const totalRetired = linkedRetirements.value.reduce((sum, r) => sum + r.quantity, 0);
-    const active = totalIssued - totalRetired;
-    return { totalIssued, totalTransferred, totalRetired, active };
+    const totalIssued = project.value?.totalIssued ?? 0;
+    const totalRetired = project.value?.totalRetired ?? 0;
+    const active = project.value?.totalActive ?? 0;
+    return { totalIssued, totalTransferred: 0, totalRetired, active };
 });
 
 const termMappingOpen = ref(false);
@@ -36,15 +82,16 @@ const vcViewerTitle = ref('');
 const vcViewerData = ref<Record<string, any> | null>(null);
 
 function viewProjectVc() {
-    if (!project.value || !projectVc.value) return;
+    if (!project.value) return;
     vcViewerTitle.value = project.value.name;
-    vcViewerData.value = projectVc.value;
+    vcViewerData.value = project.value as unknown as Record<string, any>;
     vcViewerOpen.value = true;
 }
 
-function viewCreditVc(c: typeof MOCK_CREDITS[number]) {
+function viewCreditVc(c: Credit) {
     vcViewerTitle.value = c.name;
-    vcViewerData.value = generateCreditVc(c, project.value?.name);
+    const issuance = project.value?.issuances?.find(i => i.tokenId === c.tokenId);
+    vcViewerData.value = issuance?.rawVc ?? null;
     vcViewerOpen.value = true;
 }
 
@@ -57,45 +104,26 @@ const statusColor: Record<string, { bg: string; text: string; dot: string }> = {
 };
 
 const creditingPeriodStart = computed(() => {
-    if (!project.value) return '';
-    return `${parseInt(project.value.vintage) - 1}-01-01`;
+    if (project.value?.createdAt) return project.value.createdAt.slice(0, 10);
+    if (!project.value?.vintage) return '-';
+    const yr = parseInt(project.value.vintage);
+    return isNaN(yr) ? '-' : `${yr - 1}-01-01`;
 });
 
 const creditingPeriodEnd = computed(() => {
-    if (!project.value) return '';
-    return `${parseInt(project.value.vintage) + 9}-12-31`;
+    if (project.value?.creditingPeriodEnd) return project.value.creditingPeriodEnd.slice(0, 10);
+    if (!project.value?.vintage) return '-';
+    const yr = parseInt(project.value.vintage);
+    return isNaN(yr) ? '-' : `${yr + 9}-12-31`;
 });
 
-// Mock emission data derived from project credits
+// Emission data not yet available from API
 const emissions = computed(() => {
     if (!project.value) return null;
-    const baseline = project.value.credits * 0.0057;
-    const projectEmissions = baseline * 0.15;
-    const leakage = baseline * 0.005;
-    const baselineEmissionFactor = baseline / (project.value.credits * 0.0000612);
-    return {
-        baseline: baseline.toFixed(2),
-        project: projectEmissions.toFixed(2),
-        leakage: leakage.toFixed(2),
-        baselineEmissionFactor: baselineEmissionFactor.toFixed(5),
-        net: (baseline - projectEmissions - leakage).toFixed(2),
-    };
+    return { baseline: '-', project: '-', leakage: '-', baselineEmissionFactor: '-' };
 });
 
-// Mock activity log
-const activityLog = computed(() => {
-    if (!project.value) return [];
-    const base = new Date(project.value.createdAt);
-    return [
-        { date: new Date(base.getTime() - 180 * 86400000).toISOString().split('T')[0], action: 'Project Design Document submitted', type: 'document' },
-        { date: new Date(base.getTime() - 120 * 86400000).toISOString().split('T')[0], action: 'Validation audit initiated', type: 'verification' },
-        { date: new Date(base.getTime() - 60 * 86400000).toISOString().split('T')[0], action: 'Validation report approved', type: 'verification' },
-        { date: project.value.createdAt, action: 'Project registered on Guardian', type: 'registry' },
-        { date: new Date(base.getTime() + 30 * 86400000).toISOString().split('T')[0], action: 'First monitoring period started', type: 'monitoring' },
-        { date: new Date(base.getTime() + 180 * 86400000).toISOString().split('T')[0], action: 'Verification report submitted', type: 'verification' },
-        { date: new Date(base.getTime() + 210 * 86400000).toISOString().split('T')[0], action: 'Tokens issued to Hedera', type: 'credit' },
-    ];
-});
+const activityLog = computed(() => activityEvents.value ?? []);
 
 const activityTypeIcon: Record<string, { icon: any; color: string }> = {
     document: { icon: FileText, color: 'text-muted-foreground bg-muted' },
@@ -105,7 +133,6 @@ const activityTypeIcon: Record<string, { icon: any; color: string }> = {
     credit: { icon: Coins, color: 'text-emerald-600 bg-emerald-50' },
 };
 
-// Methodology workflow steps
 const methodologySteps = computed(() => {
     if (!project.value) return [];
     return [
@@ -118,13 +145,20 @@ const methodologySteps = computed(() => {
     ];
 });
 
-// Generate a deterministic mock transaction timestamp from project creation date
-const hashscanUrl = computed(() => {
-    if (!project.value) return '';
-    const d = new Date(project.value.createdAt);
-    const seconds = Math.floor(d.getTime() / 1000);
-    const nanos = parseInt(project.value.id) * 32210979;
-    return `https://hashscan.io/mainnet/transaction/${seconds}.${String(nanos).padStart(9, '0')}`;
+const hashscanTopicUrl = computed(() => {
+    if (!project.value?.topicId) return '';
+    return `https://hashscan.io/${network.value}/topic/${project.value.topicId}`;
+});
+
+const hashscanPolicyUrl = computed(() => {
+    if (!project.value?.policyTopicId) return '';
+    return `https://hashscan.io/${network.value}/topic/${project.value.policyTopicId}`;
+});
+
+const vcTimestamp = computed(() => {
+    const ts = project.value?.sourceTimestamp;
+    if (!ts) return null;
+    return new Date(parseFloat(ts) * 1000).toLocaleString();
 });
 
 const fullMethodologyName = computed(() => {
@@ -134,7 +168,11 @@ const fullMethodologyName = computed(() => {
 </script>
 
 <template>
-    <div v-if="!project" class="p-6">
+    <div v-if="pending" class="flex items-center justify-center p-12">
+        <div class="text-sm text-muted-foreground">Loading project...</div>
+    </div>
+
+    <div v-else-if="!project" class="p-6">
         <h1 class="text-xl font-bold text-foreground">{{ $t('projects.notFound') }}</h1>
     </div>
 
@@ -145,12 +183,13 @@ const fullMethodologyName = computed(() => {
                 <div class="min-w-0">
                     <h1 class="text-2xl font-bold text-foreground">{{ project.name }}</h1>
                     <p class="text-sm text-muted-foreground mt-1">
-                        <CountryFlag :code="project.countryCode" size="sm" class="mr-0.5" /> {{ project.country }} &middot; {{ project.registry }} &middot; {{ project.developer }}
+                        <CountryFlag :code="displayCountryCode" size="sm" class="mr-0.5" /> {{ displayCountry }} &middot; {{ project.registry }} &middot; {{ project.developer }}
                     </p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     <a
-                        :href="hashscanUrl"
+                        v-if="hashscanTopicUrl"
+                        :href="hashscanTopicUrl"
                         target="_blank"
                         rel="noopener noreferrer"
                         class="inline-flex items-center gap-2 rounded-lg border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
@@ -184,7 +223,7 @@ const fullMethodologyName = computed(() => {
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Country</div>
-                    <div class="text-sm font-medium text-foreground flex items-center gap-1.5"><CountryFlag :code="project.countryCode" size="sm" /> {{ project.country }}</div>
+                    <div class="text-sm font-medium text-foreground flex items-center gap-1.5"><CountryFlag :code="displayCountryCode" size="sm" /> {{ displayCountry }}</div>
                 </div>
                 <div class="bg-card px-5 py-4">
                     <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Status</div>
@@ -264,6 +303,94 @@ const fullMethodologyName = computed(() => {
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hedera On-Chain References -->
+        <div class="rounded-xl border bg-card overflow-hidden">
+            <div class="px-5 py-3.5 border-b bg-muted/30">
+                <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Shield class="h-4 w-4 text-primary" />
+                    Hedera On-Chain References
+                </h2>
+            </div>
+            <div class="px-5 py-4 space-y-4">
+                <!-- Verified badge -->
+                <div class="flex items-center gap-3 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
+                    <CheckCircle2 class="h-5 w-5 text-emerald-600 shrink-0" />
+                    <div>
+                        <div class="text-sm font-medium text-emerald-800">Verified on Hedera</div>
+                        <div class="text-xs text-emerald-700">This project is governed by an on-chain Guardian policy anchored to the Hedera network.</div>
+                    </div>
+                </div>
+
+                <!-- Reference grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border rounded-lg overflow-hidden border">
+                    <div class="bg-card px-5 py-4">
+                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Instance Topic ID</div>
+                        <div class="group flex items-center gap-2">
+                            <code class="text-sm font-mono text-foreground">{{ project.topicId ?? '—' }}</code>
+                            <a
+                                v-if="hashscanTopicUrl"
+                                :href="hashscanTopicUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="View on HashScan"
+                            >
+                                <ExternalLink class="h-3.5 w-3.5 text-primary" />
+                            </a>
+                        </div>
+                    </div>
+                    <div class="bg-card px-5 py-4">
+                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Policy Topic ID</div>
+                        <div class="group flex items-center gap-2">
+                            <code class="text-sm font-mono text-foreground">{{ project.policyTopicId ?? '—' }}</code>
+                            <a
+                                v-if="hashscanPolicyUrl"
+                                :href="hashscanPolicyUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="View on HashScan"
+                            >
+                                <ExternalLink class="h-3.5 w-3.5 text-primary" />
+                            </a>
+                        </div>
+                    </div>
+                    <div class="bg-card px-5 py-4">
+                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">First VC Anchored At</div>
+                        <div class="text-sm text-foreground">{{ vcTimestamp ?? '—' }}</div>
+                    </div>
+                    <div class="bg-card px-5 py-4">
+                        <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Registry DID</div>
+                        <code class="text-xs font-mono text-muted-foreground break-all">{{ project.registryDid ?? '—' }}</code>
+                    </div>
+                </div>
+
+                <!-- External links -->
+                <div class="flex flex-wrap items-center gap-4">
+                    <a
+                        v-if="hashscanTopicUrl"
+                        :href="hashscanTopicUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center gap-2 text-sm text-primary hover:underline font-medium"
+                    >
+                        <ExternalLink class="h-4 w-4" />
+                        View Instance Topic on HashScan
+                    </a>
+                    <a
+                        v-if="hashscanPolicyUrl"
+                        :href="hashscanPolicyUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center gap-2 text-sm text-primary hover:underline font-medium"
+                    >
+                        <ExternalLink class="h-4 w-4" />
+                        View Policy Topic on HashScan
+                    </a>
                 </div>
             </div>
         </div>
@@ -512,7 +639,7 @@ const fullMethodologyName = computed(() => {
                     Project Location
                 </h2>
                 <p class="text-[11px] text-muted-foreground mt-0.5">
-                    {{ project.lat.toFixed(4) }}, {{ project.lng.toFixed(4) }} &middot; {{ project.country }}
+                    {{ project.lat.toFixed(4) }}, {{ project.lng.toFixed(4) }}<span v-if="displayCountry"> &middot; {{ displayCountry }}</span>
                 </p>
             </div>
             <div class="h-[320px]">
@@ -570,7 +697,7 @@ const fullMethodologyName = computed(() => {
                         :developer="project.developer"
                         :project-id="project.id"
                         :vintage="project.vintage"
-                        :country="project.country"
+                        :country="displayCountry || undefined"
                         :sector="project.sector"
                         :token-symbol="linkedCredits[0]?.symbol"
                         :token-name="linkedCredits[0]?.name"
@@ -589,7 +716,7 @@ const fullMethodologyName = computed(() => {
                     Activity Log
                 </h2>
             </div>
-            <div class="px-5 py-5">
+            <div v-if="activityLog.length > 0" class="px-5 py-5">
                 <div class="relative">
                     <!-- Timeline line -->
                     <div class="absolute left-[15px] top-3 bottom-3 w-px bg-border" />
@@ -608,6 +735,9 @@ const fullMethodologyName = computed(() => {
                         </div>
                     </div>
                 </div>
+            </div>
+            <div v-else class="px-5 py-8 text-center text-sm text-muted-foreground">
+                No activity log entries available for this project.
             </div>
         </div>
 

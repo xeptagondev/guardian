@@ -23,6 +23,16 @@ export interface MethodologyStats {
     schemaCount: number;
 }
 
+export interface MethodologyIssuance {
+    tokenId: string;
+    name: string | null;
+    symbol: string | null;
+    type: string | null;
+    supply: number;
+    mintDate: string | null;
+    rawVc?: Record<string, any> | null;
+}
+
 export interface MethodologyDto {
     id: string;
     network: string;
@@ -34,10 +44,16 @@ export interface MethodologyDto {
     registryName: string | null;
     version: string | null;
     policyTopicId: string | null;
+    sectoralScopes: string[] | null;
+    emissionReductionApproach: string | null;
     sourceTimestamp: string | null;
     createdAt: string;
     updatedAt: string;
     stats: MethodologyStats;
+    issuances?: MethodologyIssuance[];
+    totalIssued?: number;
+    totalRetired?: number;
+    totalActive?: number;
 }
 
 export interface MethodologiesMeta {

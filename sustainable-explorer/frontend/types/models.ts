@@ -1,3 +1,13 @@
+export interface ProjectIssuance {
+    tokenId: string;
+    name: string | null;
+    symbol: string | null;
+    type: string | null;
+    supply: number;
+    mintDate: string | null;
+    rawVc?: Record<string, any> | null;
+}
+
 export interface Project {
     id: string;
     name: string;
@@ -18,6 +28,16 @@ export interface Project {
     sector: string;
     sectoralScope: string;
     createdAt: string;
+    creditingPeriodEnd?: string | null;
+    topicId?: string;
+    policyTopicId?: string;
+    registryDid?: string;
+    sourceTimestamp?: string;
+    issuances?: ProjectIssuance[];
+    issuanceCount?: number;
+    totalIssued?: number;
+    totalRetired?: number;
+    totalActive?: number;
     rawVc?: Record<string, any>;
 }
 
