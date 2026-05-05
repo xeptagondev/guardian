@@ -33,12 +33,14 @@ async function bootstrap() {
     });
 
     // Swagger / OpenAPI
+    const port = parseInt(process.env.API_PORT || '3030', 10);
+    const publicUrl = process.env.API_PUBLIC_URL || `http://localhost:${port}`;
     const swaggerConfig = new DocumentBuilder()
         .setTitle('Sustainable Explorer API')
         .setDescription('REST API for querying indexed Hedera Guardian sustainability data')
         .setVersion('1.0')
         .addTag('registries', 'Standard Registries')
-        .addServer('http://localhost:3030', 'Local development')
+        .addServer(publicUrl, publicUrl === `http://localhost:${port}` ? 'Local development' : 'API server')
         .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('api/docs', app, document, {
@@ -49,7 +51,6 @@ async function bootstrap() {
         },
     });
 
-    const port = parseInt(process.env.API_PORT || '3030', 10);
     await app.listen(port);
 
     logger.log(`API server running on http://localhost:${port}`);
