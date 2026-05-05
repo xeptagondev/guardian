@@ -1,8 +1,16 @@
 import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_RETIREMENTS } from '~/data';
 import type { ActivityItem, MapPoint, MapCountry } from '~/types/models';
 import { formatCredits } from '~/lib/format';
+import { useSummaryApi } from './api/useSummaryApi';
+import { useRegistriesApi } from './api/useRegistriesApi';
+import { useProjectsApi } from './api/useProjectsApi';
+import { useMethodologiesApi } from './api/useMethodologiesApi';
+import { useGeocodedCountries } from './useGeocodedCountries';
 
-export function useDashboard(filters?: Ref<{ developer?: string; registry?: string }>) {
+export function useDashboard(
+    filters?: Ref<{ developer?: string; registry?: string }>,
+    network?: Ref<string>,
+) {
     const developerOptions = computed(() => {
         return ['All Developers', ...new Set(MOCK_PROJECTS.map(p => p.developer))].sort((a, b) => {
             if (a === 'All Developers') return -1;
@@ -48,95 +56,6 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             }
         }
         return result;
-    });
-
-    // Country stats derived from filtered projects
-    const countries = computed(() => {
-        const countryMap: Record<string, {
-            name: string; flag: string; code: string; projects: number;
-            credits: number; methodologies: Set<string>;
-            developer: string; registry: string;
-        }> = {};
-
-        for (const p of filteredProjects.value) {
-            if (!countryMap[p.countryCode]) {
-                countryMap[p.countryCode] = {
-                    name: p.country,
-                    flag: p.flag,
-                    code: p.countryCode,
-                    projects: 0,
-                    credits: 0,
-                    methodologies: new Set(),
-                    developer: p.developer,
-                    registry: p.registry,
-                };
-            }
-            countryMap[p.countryCode].projects++;
-            countryMap[p.countryCode].credits += p.credits;
-            countryMap[p.countryCode].methodologies.add(p.methodologyId);
-        }
-
-        return Object.values(countryMap)
-            .map(c => ({
-                name: c.name,
-                flag: c.flag,
-                code: c.code,
-                projects: c.projects,
-                credits: formatCredits(c.credits),
-                methodologies: c.methodologies.size,
-                developer: c.developer,
-                registry: c.registry,
-            }))
-            .sort((a, b) => b.projects - a.projects);
-    });
-
-    const mapCountries = computed<MapCountry[]>(() => {
-        return countries.value.map(c => ({
-            country: c.name,
-            countryCode: c.code,
-            projects: c.projects,
-            credits: c.credits,
-        }));
-    });
-
-    const mapPoints = computed<MapPoint[]>(() => {
-        return filteredProjects.value.map(p => ({
-            name: p.name,
-            lat: p.lat,
-            lng: p.lng,
-            credits: formatCredits(p.credits),
-        }));
-    });
-
-    // Registries derived from filtered projects
-    const registries = computed(() => {
-        const orgMap: Record<string, { name: string; policies: Set<string>; projects: number; credits: number }> = {};
-
-        for (const p of filteredProjects.value) {
-            if (!orgMap[p.registry]) {
-                orgMap[p.registry] = { name: p.registry, policies: new Set(), projects: 0, credits: 0 };
-            }
-            orgMap[p.registry].policies.add(p.methodologyId);
-            orgMap[p.registry].projects++;
-            orgMap[p.registry].credits += p.credits;
-        }
-
-        // Use display names for registries
-        const displayNames: Record<string, string> = {
-            'Verra': 'Verra (VCS)',
-            'Gold Standard': 'Gold Standard',
-            'CAR': 'Climate Action Reserve',
-            'ACR': 'American Carbon Registry',
-        };
-
-        return Object.entries(orgMap)
-            .map(([key, data]) => ({
-                name: displayNames[key] || key,
-                policies: data.policies.size,
-                projects: data.projects,
-                credits: formatCredits(data.credits),
-            }))
-            .sort((a, b) => b.projects - a.projects);
     });
 
     // Aggregation helper: group date/value pairs by period
@@ -256,7 +175,7 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             activities.push({
                 time: '2 min ago',
                 action: 'New project registered',
-                detail: `${sortedProjects[0].name} \u2014 ${sortedProjects[0].registry}`,
+                detail: `${sortedProjects[0].name} — ${sortedProjects[0].registry}`,
                 type: 'project',
             });
         }
@@ -269,7 +188,7 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             activities.push({
                 time: '8 min ago',
                 action: 'Issuances minted',
-                detail: `${formatCredits(sortedCredits[0].supply)} \u2014 ${sortedCredits[0].name}`,
+                detail: `${formatCredits(sortedCredits[0].supply)} — ${sortedCredits[0].name}`,
                 type: 'credit',
             });
         }
@@ -278,7 +197,7 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             activities.push({
                 time: '15 min ago',
                 action: 'Policy published',
-                detail: `${sortedProjects[1].methodology} \u2014 ${sortedProjects[1].registry}`,
+                detail: `${sortedProjects[1].methodology} — ${sortedProjects[1].registry}`,
                 type: 'policy',
             });
         }
@@ -287,18 +206,18 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             activities.push({
                 time: '23 min ago',
                 action: 'Verification completed',
-                detail: `${sortedProjects[2].name} \u2014 ${sortedProjects[2].registry}`,
+                detail: `${sortedProjects[2].name} — ${sortedProjects[2].registry}`,
                 type: 'verification',
             });
         }
 
         // Registry join
-        const registries = [...new Set(filteredProjects.value.map(p => p.registry))];
-        if (registries.length > 0) {
+        const registryList = [...new Set(filteredProjects.value.map(p => p.registry))];
+        if (registryList.length > 0) {
             activities.push({
                 time: '1 hour ago',
                 action: 'New registry joined',
-                detail: registries[registries.length - 1],
+                detail: registryList[registryList.length - 1],
                 type: 'registry',
             });
         }
@@ -307,7 +226,7 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             activities.push({
                 time: '2 hours ago',
                 action: 'Issuances retired',
-                detail: `${formatCredits(Math.round(sortedCredits[1].supply * 0.1))} \u2014 ${sortedCredits[1].name}`,
+                detail: `${formatCredits(Math.round(sortedCredits[1].supply * 0.1))} — ${sortedCredits[1].name}`,
                 type: 'retirement',
             });
         }
@@ -315,25 +234,11 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         return activities;
     });
 
-    // Stats
+    // Stats active filter flag (still driven by mock filter state)
     const hasActiveFilter = computed(() => {
         if (!filters?.value) return false;
         const f = filters.value;
         return (f.developer && f.developer !== 'All Developers') || (f.registry && f.registry !== 'All Registries');
-    });
-
-    const stats = computed(() => {
-        const totalProjects = filteredProjects.value.length;
-        const totalCredits = filteredProjects.value.reduce((sum, p) => sum + p.credits, 0);
-        const uniqueRegistries = new Set(filteredProjects.value.map(p => p.registry)).size;
-        const uniqueMethodologies = new Set(filteredProjects.value.map(p => p.methodologyId)).size;
-
-        return {
-            registries: uniqueRegistries,
-            methodologies: uniqueMethodologies,
-            projects: totalProjects,
-            totalCredits,
-        };
     });
 
     // Sector breakdown for pie charts
@@ -393,72 +298,11 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             .sort((a, b) => b.projectCount - a.projectCount);
     });
 
-    // Country detail for the side panel
-    function getCountryDetail(code: string) {
-        const countryData = countries.value.find(c => c.code === code);
-        if (!countryData) return null;
-
-        // Get projects for this country
-        const countryProjects = filteredProjects.value.filter(p => p.countryCode === code);
-
-        // Build sector breakdown from project categories
-        const catCredits: Record<string, number> = {};
-        let totalCredits = 0;
-        for (const p of countryProjects) {
-            catCredits[p.category] = (catCredits[p.category] || 0) + p.credits;
-            totalCredits += p.credits;
-        }
-
-        const sectorColors: Record<string, string> = {
-            'Renewable Energy': '#1a9850',
-            'Forestry': '#0f6b3a',
-            'Blue Carbon': '#0a97d9',
-            'Energy Efficiency': '#66bd63',
-            'Agriculture': '#d9ef8b',
-            'Water': '#26bde2',
-            'Waste': '#a6d96a',
-        };
-
-        const sectors = Object.entries(catCredits)
-            .map(([label, credits]) => ({
-                label,
-                value: totalCredits > 0 ? Math.round((credits / totalCredits) * 100) : 0,
-                color: sectorColors[label] || '#d4d4d8',
-            }))
-            .sort((a, b) => b.value - a.value);
-
-        // Registry breakdown
-        const regCredits: Record<string, number> = {};
-        for (const p of countryProjects) {
-            regCredits[p.registry] = (regCredits[p.registry] || 0) + p.credits;
-        }
-        const registries = Object.entries(regCredits)
-            .map(([name, credits]) => ({
-                name,
-                pct: totalCredits > 0 ? Math.round((credits / totalCredits) * 1000) / 10 : 0,
-            }))
-            .sort((a, b) => b.pct - a.pct)
-            .slice(0, 3);
-
-        return {
-            name: countryData.name,
-            flag: countryData.flag,
-            projects: countryData.projects,
-            credits: countryData.credits,
-            totalReduction: String(Math.round(countryData.projects * 5.2)),
-            annualReduction: String(Math.round(countryData.projects * 2.8)),
-            sectors,
-            registries,
-        };
-    }
-
     // Total retired from mock retirements, filtered by relevant projects
     const filteredRetirements = computed(() => {
         const projectIds = new Set(filteredProjects.value.map(p => p.id));
         return MOCK_RETIREMENTS.filter(r => projectIds.has(r.projectId));
     });
-
-    const totalRetired = computed(() => filteredRetirements.value.reduce((sum, r) => sum + r.quantity, 0));
 
     // Retirement trend by month
     const retirementMonths = computed(() => {
@@ -505,6 +349,259 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         return vals.length > 0 ? Math.max(...vals) : 1;
     });
 
+    // -----------------------------------------------------------------------
+    // Real API calls — stat cards, top registries, map/country data
+    // -----------------------------------------------------------------------
+
+    const _network = network ?? ref('mainnet');
+
+    // -- Real API: summary totals for stat cards --
+    const { data: summaryData } = useSummaryApi({ network: _network });
+
+    // -- Real API: registry count (meta.total) --
+    const { data: registriesCountData } = useRegistriesApi({
+        page: ref(1), limit: ref(1), search: ref(''),
+        network: _network, sortBy: ref(null), sortDir: ref(null),
+    });
+
+    // -- Real API: methodology count (meta.total) --
+    const { data: methodologiesCountData } = useMethodologiesApi({
+        page: ref(1), limit: ref(1), search: ref(''),
+        network: _network, sortBy: ref(null), sortDir: ref(null),
+    });
+
+    // -- Real API: project count (meta.total) --
+    const { meta: projectsCountMeta } = useProjectsApi({
+        page: ref(1), limit: ref(1), search: ref(''),
+        network: _network, sortBy: ref(null), sortDir: ref(null),
+    });
+
+    // -- Real API: top registries for table --
+    const { data: topRegistriesData } = useRegistriesApi({
+        page: ref(1), limit: ref(10), search: ref(''),
+        network: _network, sortBy: ref('projects'), sortDir: ref('desc'),
+    });
+
+    // -- Real API: project batch for map/country data --
+    const { projects: projectsBatch } = useProjectsApi({
+        page: ref(1), limit: ref(100), search: ref(''),
+        network: _network, sortBy: ref('credits'), sortDir: ref('desc'),
+    });
+
+    // -----------------------------------------------------------------------
+    // Overrides: use real API data instead of mock-backed computeds
+    // -----------------------------------------------------------------------
+
+    // Override stats — use real counts, fall back to 0 when data isn't loaded yet
+    const stats = computed(() => {
+        const registryCount = registriesCountData.value?.meta.total ?? 0;
+        const methodologyCount = methodologiesCountData.value?.meta.total ?? 0;
+        const projectCount = projectsCountMeta.value?.total ?? 0;
+        const totalCredits = summaryData.value?.totalIssued ?? 0;
+        const totalRetiredVal = summaryData.value?.totalRetired ?? 0;
+        return {
+            registries: registryCount,
+            methodologies: methodologyCount,
+            projects: projectCount,
+            totalCredits,
+            totalRetired: totalRetiredVal,
+        };
+    });
+
+    // Override totalRetired — use real API summary
+    const totalRetired = computed(() => summaryData.value?.totalRetired ?? 0);
+
+    // Override registries — replace mock-backed with real API
+    const registries = computed(() => {
+        const rows = topRegistriesData.value?.data ?? [];
+        return rows.map(r => ({
+            name: r.name ?? r.did ?? 'Unknown',
+            policies: r.stats?.policyCount ?? 0,
+            projects: r.stats?.projectCount ?? 0,
+            credits: formatCredits(r.stats?.issuanceCount ?? 0),
+        }));
+    });
+
+    // Real projects from API batch — already mapped to Project[] by useProjectsApi
+    const _realProjects = computed(() => projectsBatch.value);
+
+    // Reverse geocode UNK country codes from lat/lng (same as projects page)
+    const { resolvedCode } = useGeocodedCountries(_realProjects);
+
+    // Override vintageDistribution — group real projects by vintage
+    // Prefer totalIssued (actual minted); fall back to credits (ER_y estimate) if zero
+    const vintageDistributionReal = computed(() => {
+        const vintageMap: Record<string, { projects: number; credits: number }> = {};
+        for (const p of _realProjects.value) {
+            const year = p.vintage;
+            if (!year) continue;
+            if (!vintageMap[year]) vintageMap[year] = { projects: 0, credits: 0 };
+            vintageMap[year].projects++;
+            vintageMap[year].credits += p.totalIssued ?? 0;
+        }
+        return Object.entries(vintageMap)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([year, data]) => ({ year, projects: data.projects, credits: data.credits }));
+    });
+
+    const vintageMaxReal = computed(() => {
+        const vals = vintageDistributionReal.value.map(v => v.credits);
+        return vals.length > 0 ? Math.max(...vals) : 1;
+    });
+
+    // Override registryBreakdown — group real projects by registryName
+    const fallbackColors = [
+        'hsl(197, 71%, 52%)',
+        'hsl(271, 81%, 56%)',
+        'hsl(338, 85%, 55%)',
+        'hsl(24, 95%, 53%)',
+        'hsl(162, 63%, 41%)',
+        'hsl(217, 71%, 53%)',
+        'hsl(45, 93%, 47%)',
+    ];
+    const registryBreakdownReal = computed(() => {
+        const groups: Record<string, { projectCount: number; creditCount: number }> = {};
+        for (const p of _realProjects.value) {
+            const name = p.registry || 'Unknown Registry';
+            if (!groups[name]) groups[name] = { projectCount: 0, creditCount: 0 };
+            groups[name].projectCount++;
+            groups[name].creditCount += p.totalIssued ?? 0;
+        }
+        let fallbackIdx = 0;
+        return Object.entries(groups)
+            .map(([label, data]) => ({
+                label,
+                projectCount: data.projectCount,
+                creditCount: data.creditCount,
+                color: registryColors[label] || fallbackColors[fallbackIdx++ % fallbackColors.length],
+            }))
+            .sort((a, b) => b.projectCount - a.projectCount);
+    });
+
+    // Override countries — aggregate from real projects batch
+    const countries = computed(() => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        const countryMap: Record<string, {
+            name: string; flag: string; code: string; projects: number;
+            credits: number; methodologies: Set<string>;
+            developer: string; registry: string;
+        }> = {};
+
+        for (const p of _realProjects.value) {
+            const code = resolvedCode(p);
+            if (!code || code === 'UNK') continue;
+            if (!countryMap[code]) {
+                countryMap[code] = {
+                    name: p.country || code,
+                    flag: p.flag,
+                    code,
+                    projects: 0,
+                    credits: 0,
+                    methodologies: new Set(),
+                    developer: p.developer,
+                    registry: p.registry,
+                };
+            }
+            countryMap[code].projects++;
+            countryMap[code].credits += p.credits ?? 0;
+            if (p.methodologyId) countryMap[code].methodologies.add(p.methodologyId);
+        }
+
+        return Object.values(countryMap)
+            .map(c => ({
+                name: c.name,
+                flag: c.flag,
+                code: c.code,
+                projects: c.projects,
+                credits: formatCredits(c.credits),
+                methodologies: c.methodologies.size,
+                developer: c.developer,
+                registry: c.registry,
+            }))
+            .sort((a, b) => b.projects - a.projects);
+    });
+
+    // Override mapCountries
+    const mapCountries = computed<MapCountry[]>(() =>
+        countries.value.map(c => ({
+            country: c.name,
+            countryCode: c.code,
+            projects: c.projects,
+            credits: c.credits,
+        })),
+    );
+
+    // Override mapPoints
+    const mapPoints = computed<MapPoint[]>(() =>
+        _realProjects.value
+            .filter(p => p.lat != null && p.lng != null)
+            .map(p => ({
+                name: p.name,
+                lat: p.lat!,
+                lng: p.lng!,
+                credits: formatCredits(p.credits ?? 0),
+            })),
+    );
+
+    // Country detail for the side panel — uses _realProjects instead of filteredProjects
+    function getCountryDetail(code: string) {
+        const countryData = countries.value.find(c => c.code === code);
+        if (!countryData) return null;
+
+        // Get projects for this country from real API batch
+        const countryProjects = _realProjects.value.filter(p => resolvedCode(p) === code);
+
+        // Build sector breakdown from project categories
+        const catCredits: Record<string, number> = {};
+        let totalCredits = 0;
+        for (const p of countryProjects) {
+            catCredits[p.category] = (catCredits[p.category] || 0) + p.credits;
+            totalCredits += p.credits;
+        }
+
+        const sectorColorMap: Record<string, string> = {
+            'Renewable Energy': '#1a9850',
+            'Forestry': '#0f6b3a',
+            'Blue Carbon': '#0a97d9',
+            'Energy Efficiency': '#66bd63',
+            'Agriculture': '#d9ef8b',
+            'Water': '#26bde2',
+            'Waste': '#a6d96a',
+        };
+
+        const sectors = Object.entries(catCredits)
+            .map(([label, credits]) => ({
+                label,
+                value: totalCredits > 0 ? Math.round((credits / totalCredits) * 100) : 0,
+                color: sectorColorMap[label] || '#d4d4d8',
+            }))
+            .sort((a, b) => b.value - a.value);
+
+        // Registry breakdown
+        const regCredits: Record<string, number> = {};
+        for (const p of countryProjects) {
+            regCredits[p.registry] = (regCredits[p.registry] || 0) + p.credits;
+        }
+        const regList = Object.entries(regCredits)
+            .map(([name, credits]) => ({
+                name,
+                pct: totalCredits > 0 ? Math.round((credits / totalCredits) * 1000) / 10 : 0,
+            }))
+            .sort((a, b) => b.pct - a.pct)
+            .slice(0, 3);
+
+        return {
+            name: countryData.name,
+            flag: countryData.flag,
+            projects: countryData.projects,
+            credits: countryData.credits,
+            totalReduction: String(Math.round(countryData.projects * 5.2)),
+            annualReduction: String(Math.round(countryData.projects * 2.8)),
+            sectors,
+            registries: regList,
+        };
+    }
+
     return {
         stats,
         hasActiveFilter,
@@ -517,7 +614,7 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         issuanceTotal,
         recentActivity,
         sectorBreakdown,
-        registryBreakdown,
+        registryBreakdown: registryBreakdownReal,
         developerOptions,
         registryOptions,
         getCountryDetail,
@@ -525,9 +622,10 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         retirementMonths,
         retirementMax,
         retirementTotal,
-        vintageDistribution,
-        vintageMax,
+        vintageDistribution: vintageDistributionReal,
+        vintageMax: vintageMaxReal,
         buildIssuanceSeries,
         buildRetirementSeries,
+        _realProjects,
     };
 }

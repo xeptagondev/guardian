@@ -48,6 +48,8 @@ function syncDashboardUrl() {
     router.replace({ query });
 }
 
+const { network } = useNetwork();
+
 const {
     stats,
     hasActiveFilter,
@@ -72,7 +74,7 @@ const {
     vintageMax,
     buildIssuanceSeries,
     buildRetirementSeries,
-} = useDashboard(dashboardFilters);
+} = useDashboard(dashboardFilters, network);
 
 type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
 const issuancePeriod = ref<TimePeriod>('monthly');
