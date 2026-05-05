@@ -14,7 +14,7 @@ const { network } = useNetwork();
 const route = useRoute();
 const router = useRouter();
 
-const PAGE_SIZE = 10;
+const pageSize = ref(route.query.limit ? parseInt(route.query.limit as string) : 10);
 
 // Server-side pagination state — initialised from URL query params
 const currentPage = ref(route.query.page ? parseInt(route.query.page as string) : 1);
@@ -81,7 +81,7 @@ watch(currentPage, syncUrl);
 
 const { projects, meta, pending } = useProjectsApi({
     page: currentPage,
-    limit: ref(PAGE_SIZE),
+    limit: pageSize,
     search: searchQuery,
     network,
     sortBy: sortKey,
@@ -302,9 +302,9 @@ const statusColor: Record<string, string> = {
 
             <Pagination
                 v-model:current-page="currentPage"
+                v-model:page-size="pageSize"
                 :total-pages="meta.totalPages"
                 :total-items="meta.total"
-                :page-size="PAGE_SIZE"
             />
         </div>
 
