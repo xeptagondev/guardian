@@ -1,7 +1,7 @@
 import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_RETIREMENTS } from '~/data';
 import type { ActivityItem, MapPoint, MapCountry } from '~/types/models';
 import { formatCredits } from '~/lib/format';
-import { useSummaryApi } from './api/useSummaryApi';
+import { useSummaryApi, useIssuanceTimelineApi } from './api/useSummaryApi';
 import { useRegistriesApi } from './api/useRegistriesApi';
 import { useProjectsApi } from './api/useProjectsApi';
 import { useMethodologiesApi } from './api/useMethodologiesApi';
@@ -94,33 +94,44 @@ export function useDashboard(
             });
     }
 
-    // Build issuance time series from filtered projects
+    // Build issuance time series from real API timeline data.
+    // Backend returns monthly granularity; quarterly/yearly are aggregated here
+    // so a single API call serves all three period modes with no re-fetching.
     function buildIssuanceSeries(period: 'monthly' | 'quarterly' | 'yearly'): { label: string; value: number }[] {
-        const map: Record<string, { sortKey: string; label: string; value: number }> = {};
+        const points = rawTimeline.value ?? [];
+        if (points.length === 0) return [];
 
-        for (const p of filteredProjects.value) {
-            const d = new Date(p.createdAt);
-            const val = p.credits / 1000000;
-            let sortKey: string;
-            let label: string;
-            if (period === 'yearly') {
-                sortKey = String(d.getFullYear());
-                label = sortKey;
-            } else if (period === 'quarterly') {
-                const q = Math.floor(d.getMonth() / 3);
-                sortKey = `${d.getFullYear()}-Q${q}`;
-                label = `${quarterNames[q]} '${String(d.getFullYear()).slice(2)}`;
-            } else {
-                sortKey = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
-                label = `${monthNames[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`;
-            }
-            if (!map[sortKey]) map[sortKey] = { sortKey, label, value: 0 };
-            map[sortKey].value += val;
+        if (period === 'monthly') {
+            return points.map(p => {
+                const [year, month] = p.period.split('-');
+                const label = `${monthNames[parseInt(month, 10) - 1]} '${year.slice(2)}`;
+                return { label, value: Math.max(Math.round(p.totalIssued / 1_000_000 * 10) / 10, 0.1) };
+            });
         }
 
-        return Object.values(map)
-            .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-            .map(e => ({ label: e.label, value: Math.max(Math.round(e.value * 10) / 10, 0.1) }));
+        if (period === 'quarterly') {
+            const map: Record<string, { sortKey: string; label: string; total: number }> = {};
+            for (const p of points) {
+                const [year, month] = p.period.split('-');
+                const q = Math.floor((parseInt(month, 10) - 1) / 3) + 1;
+                const key = `${year}-Q${q}`;
+                if (!map[key]) map[key] = { sortKey: key, label: `Q${q} '${year.slice(2)}`, total: 0 };
+                map[key].total += p.totalIssued;
+            }
+            return Object.values(map)
+                .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+                .map(e => ({ label: e.label, value: Math.max(Math.round(e.total / 1_000_000 * 10) / 10, 0.1) }));
+        }
+
+        // Yearly
+        const map: Record<string, number> = {};
+        for (const p of points) {
+            const year = p.period.slice(0, 4);
+            map[year] = (map[year] ?? 0) + p.totalIssued;
+        }
+        return Object.entries(map)
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([year, total]) => ({ label: year, value: Math.max(Math.round(total / 1_000_000 * 10) / 10, 0.1) }));
     }
 
     function buildRetirementSeries(period: 'monthly' | 'quarterly' | 'yearly'): { label: string; value: number }[] {
@@ -161,78 +172,70 @@ export function useDashboard(
         Math.round(issuanceMonths.value.reduce((sum, m) => sum + m.value, 0) * 10) / 10,
     );
 
-    // Recent activity derived from the most recent projects and credits
+    // Convert HCS consensusTimestamp (Unix seconds string) to relative time string
+    function timeAgo(timestamp: string | null | undefined): string {
+        if (!timestamp) return '';
+        const seconds = parseFloat(timestamp);
+        const diff = Date.now() / 1000 - seconds;
+        if (diff < 60)     return 'just now';
+        if (diff < 3600)   return `${Math.round(diff / 60)} min ago`;
+        if (diff < 86400)  return `${Math.round(diff / 3600)} hours ago`;
+        return `${Math.round(diff / 86400)} days ago`;
+    }
+
+    // Real activity feed built from live API data
     const recentActivity = computed<ActivityItem[]>(() => {
-        const activities: ActivityItem[] = [];
+        const items: ActivityItem[] = [];
 
-        // Sort projects by createdAt descending
-        const sortedProjects = [...filteredProjects.value].sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        );
-
-        // Generate activity items from recent projects/credits
-        if (sortedProjects.length > 0) {
-            activities.push({
-                time: '2 min ago',
+        // New project registered — most recently created project
+        const latestProject = recentProjects.value[0];
+        if (latestProject) {
+            items.push({
+                time: timeAgo(latestProject.sourceTimestamp),
                 action: 'New project registered',
-                detail: `${sortedProjects[0].name} — ${sortedProjects[0].registry}`,
+                detail: `${latestProject.name} — ${latestProject.registry ?? ''}`,
                 type: 'project',
             });
         }
 
-        const sortedCredits = [...filteredCredits.value].sort(
-            (a, b) => new Date(b.mintDate).getTime() - new Date(a.mintDate).getTime(),
-        );
-
-        if (sortedCredits.length > 0) {
-            activities.push({
-                time: '8 min ago',
-                action: 'Issuances minted',
-                detail: `${formatCredits(sortedCredits[0].supply)} — ${sortedCredits[0].name}`,
-                type: 'credit',
-            });
-        }
-
-        if (sortedProjects.length > 1) {
-            activities.push({
-                time: '15 min ago',
+        // Policy published — most recently created methodology
+        const latestMethodology = recentMethodologiesData.value?.data[0];
+        if (latestMethodology) {
+            items.push({
+                time: timeAgo(latestMethodology.sourceTimestamp ?? undefined),
                 action: 'Policy published',
-                detail: `${sortedProjects[1].methodology} — ${sortedProjects[1].registry}`,
+                detail: `${latestMethodology.name} — ${latestMethodology.registryName ?? ''}`,
                 type: 'policy',
             });
         }
 
-        if (sortedProjects.length > 2) {
-            activities.push({
-                time: '23 min ago',
-                action: 'Verification completed',
-                detail: `${sortedProjects[2].name} — ${sortedProjects[2].registry}`,
-                type: 'verification',
-            });
-        }
-
-        // Registry join
-        const registryList = [...new Set(filteredProjects.value.map(p => p.registry))];
-        if (registryList.length > 0) {
-            activities.push({
-                time: '1 hour ago',
+        // New registry joined — most recently created registry
+        const latestRegistry = recentRegistriesData.value?.data[0];
+        if (latestRegistry) {
+            items.push({
+                time: timeAgo(latestRegistry.sourceTimestamp ?? undefined),
                 action: 'New registry joined',
-                detail: registryList[registryList.length - 1],
+                detail: latestRegistry.name ?? latestRegistry.did ?? '',
                 type: 'registry',
             });
         }
 
-        if (sortedCredits.length > 1) {
-            activities.push({
-                time: '2 hours ago',
-                action: 'Issuances retired',
-                detail: `${formatCredits(Math.round(sortedCredits[1].supply * 0.1))} — ${sortedCredits[1].name}`,
-                type: 'retirement',
-            });
-        }
-
-        return activities;
+        // Sort all items by most recent first
+        return items.sort((a, b) => {
+            const toSeconds = (t: string) => {
+                if (t === 'just now') return 0;
+                const minMatch = t.match(/^(\d+) min/);
+                if (minMatch) return parseInt(minMatch[1]) * 60;
+                const hrMatch = t.match(/^(\d+) hours/);
+                if (hrMatch) return parseInt(hrMatch[1]) * 3600;
+                const dayMatch = t.match(/^(\d+) days/);
+                if (dayMatch) return parseInt(dayMatch[1]) * 86400;
+                return 0;
+            };
+            return toSeconds(a.time) - toSeconds(b.time);
+        });
     });
+
 
     // Stats active filter flag (still driven by mock filter state)
     const hasActiveFilter = computed(() => {
@@ -387,6 +390,27 @@ export function useDashboard(
         page: ref(1), limit: ref(100), search: ref(''),
         network: _network, sortBy: ref('credits'), sortDir: ref('desc'),
     });
+
+    // -- Real API: recent projects for activity feed --
+    const { projects: recentProjects } = useProjectsApi({
+        page: ref(1), limit: ref(5), search: ref(''),
+        network: _network, sortBy: ref('createdAt'), sortDir: ref('desc'),
+    });
+
+    // -- Real API: recent methodologies for activity feed --
+    const { data: recentMethodologiesData } = useMethodologiesApi({
+        page: ref(1), limit: ref(3), search: ref(''),
+        network: _network, sortBy: ref('createdAt'), sortDir: ref('desc'),
+    });
+
+    // -- Real API: recent registries for activity feed --
+    const { data: recentRegistriesData } = useRegistriesApi({
+        page: ref(1), limit: ref(3), search: ref(''),
+        network: _network, sortBy: ref('createdAt'), sortDir: ref('desc'),
+    });
+
+    // -- Real API: monthly issuance timeline (period toggle is client-side) --
+    const { data: rawTimeline } = useIssuanceTimelineApi({ network: _network });
 
     // -----------------------------------------------------------------------
     // Overrides: use real API data instead of mock-backed computeds

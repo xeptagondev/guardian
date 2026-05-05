@@ -1,33 +1,50 @@
 import { DataSource } from 'typeorm';
-import { SummaryResponseDto } from '../dto/summary.dto';
+import { SummaryResponseDto, TimelinePointDto } from '../dto/summary.dto';
 
 /**
- * PostgreSQL implementation for global credit-total queries.
+ * Shared CTE: one row per Guardian-issued token, deduplicated via DISTINCT ON.
  *
- * totalIssued  — sum of all MintToken VC amounts from the message table.
- * totalRetired — count of deleted NFT serials from nft_cache.
- * totalActive  — derived: totalIssued - totalRetired.
- *
- * Both queries run concurrently via Promise.all to keep latency minimal.
+ * A tokenId can appear in multiple business_view CREDIT rows (each Guardian Token
+ * message republication creates a new row).  DISTINCT ON picks the earliest row
+ * per token so totalSupply is counted exactly once, consistent across both the
+ * summary totals and the timeline breakdown.
  */
+const DEDUPED_CREDITS_CTE = `
+    deduped AS (
+        SELECT DISTINCT ON (tc."tokenId")
+            tc."tokenId",
+            tc."totalSupply",
+            tc.decimals,
+            bv."sourceTimestamp" AS first_seen
+        FROM business_view bv
+        JOIN token_cache tc
+            ON tc."tokenId" = bv."businessData" ->> 'tokenId'
+        WHERE bv."viewType" = 'CREDIT'
+          AND tc."totalSupply" IS NOT NULL
+        ORDER BY tc."tokenId", bv."sourceTimestamp" ASC
+    )
+`;
+
+const ADJUSTED_SUPPLY_EXPR = `
+    CASE
+        WHEN decimals IS NOT NULL AND decimals > 0
+        THEN FLOOR("totalSupply"::numeric / POWER(10, decimals))
+        ELSE "totalSupply"::numeric
+    END
+`;
+
 export class PgSummaryRepository {
     constructor(private readonly dataSource: DataSource) {}
 
     async getSummary(): Promise<SummaryResponseDto> {
         const issuedSql = `
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN decimals IS NOT NULL AND decimals > 0
-                    THEN FLOOR(CAST("totalSupply" AS NUMERIC) / POWER(10, decimals))
-                    ELSE CAST("totalSupply" AS NUMERIC)
-                END
-            ), 0)::BIGINT AS total_issued
-            FROM token_cache
-            WHERE "totalSupply" IS NOT NULL
+            WITH ${DEDUPED_CREDITS_CTE}
+            SELECT COALESCE(SUM(${ADJUSTED_SUPPLY_EXPR}), 0)::bigint AS total_issued
+            FROM deduped
         `;
 
         const retiredSql = `
-            SELECT COUNT(*)::BIGINT AS total_retired
+            SELECT COUNT(*)::bigint AS total_retired
             FROM nft_cache
             WHERE deleted = true
         `;
@@ -45,5 +62,28 @@ export class PgSummaryRepository {
         const totalActive = totalIssued - totalRetired;
 
         return { totalIssued, totalRetired, totalActive };
+    }
+
+    async getTimeline(): Promise<TimelinePointDto[]> {
+        const sql = `
+            WITH ${DEDUPED_CREDITS_CTE}
+            SELECT
+                to_char(
+                    date_trunc('month', to_timestamp(first_seen::double precision)),
+                    'YYYY-MM'
+                ) AS period,
+                SUM(${ADJUSTED_SUPPLY_EXPR})::bigint AS total_issued
+            FROM deduped
+            GROUP BY 1
+            ORDER BY 1
+        `;
+
+        const rows: Array<{ period: string; total_issued: string }> =
+            await this.dataSource.query(sql);
+
+        return rows.map(r => ({
+            period: r.period,
+            totalIssued: parseInt(r.total_issued ?? '0', 10),
+        }));
     }
 }

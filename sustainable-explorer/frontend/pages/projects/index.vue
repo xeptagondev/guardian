@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FileJson, Sparkles } from 'lucide-vue-next';
+import { FileJson, Sparkles, X, ArrowRight } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import type { ProjectSortKey, ProjectSortDir } from '~/composables/api/useProjectsApi';
 import { formatCredits } from '~/lib/format';
@@ -8,6 +8,8 @@ import { generateProjectVc } from '~/lib/mock-vc';
 import { MOCK_TRANSFERS, MOCK_RETIREMENTS } from '~/data';
 import { getMethodologyLongName } from '~/lib/methodologies';
 import type { Project } from '~/types/models';
+
+const { selectedIds, selectedEntries, canAdd, isSelected, toggleProject, clearAll } = useProjectComparison();
 
 const { t } = useI18n();
 const { network } = useNetwork();
@@ -210,6 +212,7 @@ const statusColor: Record<string, string> = {
                 <table class="w-full text-sm min-w-[900px]">
                     <thead>
                         <tr class="border-b bg-muted/30">
+                            <th class="w-10 py-2.5 px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider" />
                             <SortableHeader :label="$t('projects.columns.project')" sort-key="name" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader :label="$t('projects.columns.country')" sort-key="country" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader :label="$t('projects.columns.registry')" sort-key="registry" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
@@ -229,11 +232,38 @@ const statusColor: Record<string, string> = {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
+                        <tr v-if="pending" v-for="i in pageSize" :key="`skel-${i}`" class="animate-pulse">
+                            <td class="py-3 px-3"><div class="mx-auto h-4 w-4 rounded bg-muted" /></td>
+                            <td class="py-3 px-4"><div class="h-4 w-40 rounded bg-muted" /></td>
+                            <td class="py-3 px-4"><div class="h-4 w-20 rounded bg-muted" /></td>
+                            <td class="py-3 px-4"><div class="h-4 w-24 rounded bg-muted" /></td>
+                            <td class="py-3 px-4"><div class="h-5 w-16 rounded bg-muted" /></td>
+                            <td class="py-3 px-4"><div class="h-4 w-24 rounded bg-muted" /></td>
+                            <td class="py-3 px-4"><div class="h-4 w-10 rounded bg-muted ml-auto" /></td>
+                            <td class="py-3 px-4"><div class="h-4 w-12 rounded bg-muted ml-auto" /></td>
+                            <td class="py-3 px-4"><div class="h-4 w-12 rounded bg-muted ml-auto" /></td>
+                            <td class="py-3 px-4"><div class="h-5 w-16 rounded-full bg-muted" /></td>
+                            <td class="py-3 px-4"><div class="h-5 w-24 rounded bg-muted" /></td>
+                            <td class="py-3 px-3"><div class="mx-auto h-7 w-7 rounded-md bg-muted" /></td>
+                        </tr>
                         <tr
+                            v-else
                             v-for="p in displayProjects"
                             :key="p.id"
                             class="hover:bg-muted/30 transition-colors cursor-pointer"
                         >
+                            <td class="py-3 px-3 text-center" @click.stop>
+                                <input
+                                    type="checkbox"
+                                    :checked="isSelected(p.id)"
+                                    :disabled="!canAdd && !isSelected(p.id)"
+                                    :class="[
+                                        'h-4 w-4 rounded border-border cursor-pointer accent-primary',
+                                        !canAdd && !isSelected(p.id) ? 'opacity-30 cursor-not-allowed' : '',
+                                    ]"
+                                    @change="toggleProject(p.id, p.name)"
+                                />
+                            </td>
                             <td class="py-3 px-4">
                                 <NuxtLink :to="`/projects/${p.id}`" class="font-medium text-foreground hover:text-primary transition-colors">{{ p.name }}</NuxtLink>
                             </td>
@@ -294,11 +324,59 @@ const statusColor: Record<string, string> = {
                             </td>
                         </tr>
                         <tr v-if="!pending && displayProjects.length === 0">
-                            <td colspan="11" class="py-12 text-center text-sm text-muted-foreground">{{ $t('projects.noMatch') }}</td>
+                            <td colspan="12" class="py-12 text-center text-sm text-muted-foreground">{{ $t('projects.noMatch') }}</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
+
+            <!-- Comparison Bar -->
+            <Transition
+                enter-active-class="transition-all duration-200 ease-out"
+                enter-from-class="opacity-0 translate-y-2"
+                enter-to-class="opacity-100 translate-y-0"
+                leave-active-class="transition-all duration-150 ease-in"
+                leave-from-class="opacity-100 translate-y-0"
+                leave-to-class="opacity-0 translate-y-2"
+            >
+                <div
+                    v-if="selectedIds.length > 0"
+                    class="sticky bottom-0 z-20 mt-3 flex items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-md"
+                >
+                    <span class="text-xs font-medium text-muted-foreground shrink-0">Compare:</span>
+                    <div class="flex flex-1 flex-wrap items-center gap-2">
+                        <span
+                            v-for="entry in selectedEntries"
+                            :key="entry.id"
+                            class="inline-flex items-center gap-1.5 rounded-full border bg-primary/8 px-2.5 py-0.5 text-xs font-medium text-foreground"
+                        >
+                            {{ entry.name }}
+                            <button
+                                class="ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground transition-colors"
+                                @click="toggleProject(entry.id, entry.name)"
+                            >
+                                <X class="h-3 w-3" />
+                            </button>
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button
+                            class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            @click="clearAll()"
+                        >
+                            <X class="h-3.5 w-3.5" />
+                            Clear
+                        </button>
+                        <NuxtLink
+                            :to="`/projects/compare?ids=${selectedIds.join(',')}`"
+                            class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                        >
+                            Compare
+                            <ArrowRight class="h-3.5 w-3.5" />
+                        </NuxtLink>
+                    </div>
+                </div>
+            </Transition>
 
             <Pagination
                 v-model:current-page="currentPage"

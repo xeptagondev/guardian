@@ -1,7 +1,7 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { SummaryService } from '../services/summary.service';
-import { SummaryResponseDto } from '../dto/summary.dto';
+import { SummaryResponseDto, TimelinePointDto } from '../dto/summary.dto';
 
 @ApiTags('summary')
 @Controller('api/v1')
@@ -25,5 +25,24 @@ export class SummaryController {
         @Param('network') network: string,
     ): Promise<SummaryResponseDto> {
         return this.summaryService.getSummary(network);
+    }
+
+    @Get(':network/summary/timeline')
+    @ApiOperation({
+        summary: 'Get monthly issuance timeline',
+        description:
+            'Returns per-month MintToken VC totals. Monthly granularity only — callers should aggregate to quarterly/yearly client-side.',
+    })
+    @ApiParam({
+        name: 'network',
+        enum: ['mainnet', 'testnet', 'previewnet'],
+        description: 'Hedera network',
+    })
+    @ApiResponse({ status: 200, type: [TimelinePointDto] })
+    @ApiResponse({ status: 404, description: 'Network not configured on this API instance' })
+    async getTimeline(
+        @Param('network') network: string,
+    ): Promise<TimelinePointDto[]> {
+        return this.summaryService.getTimeline(network);
     }
 }

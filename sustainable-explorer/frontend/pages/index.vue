@@ -570,21 +570,7 @@ const filteredStats = computed(() => {
                     <!-- Sector Breakdown -->
                     <div class="rounded-xl border bg-card p-5">
                         <h3 class="text-sm font-semibold text-foreground mb-4">{{ $t('dashboard.bySector') }}</h3>
-                        <div class="flex items-start gap-5">
-                            <DonutChart :segments="sectorChartSegments" :size="140" />
-                            <div class="space-y-2 flex-1 min-w-0 pt-1">
-                                <div v-for="s in sectorBreakdown" :key="s.label" class="flex items-center gap-2">
-                                    <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: s.color }" />
-                                    <span class="text-xs text-muted-foreground truncate flex-1">{{ s.label }}</span>
-                                    <span class="text-xs font-medium text-foreground tabular-nums shrink-0">
-                                        {{ sectorTotal > 0 ? ((chartMode === 'projects' ? s.projectCount : s.creditCount) / sectorTotal * 100).toFixed(1) : '0.0' }}%
-                                    </span>
-                                    <span class="text-xs text-muted-foreground tabular-nums shrink-0">
-                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : `${formatCredits(s.creditCount)}` }}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
+                        <ComingSoon message="Sector breakdown not yet integrated" height="160px" />
                     </div>
 
                     <!-- Registry Breakdown -->
@@ -700,36 +686,12 @@ const filteredStats = computed(() => {
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-0">
                 <!-- Retirement Trend -->
                 <div class="lg:border-r">
-                    <div class="flex items-center justify-between px-6 py-4">
-                        <div>
-                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">{{ $t('dashboard.retirementTrend') }} <InfoTooltip :text="$t('dashboard.retirementTrendTooltip')" /></h2>
-                            <p class="text-xs text-muted-foreground mt-0.5">{{ $t('dashboard.volumeMillions') }}</p>
-                        </div>
-                        <div class="flex items-center rounded-lg border p-0.5">
-                            <button
-                                v-for="p in (['monthly', 'quarterly', 'yearly'] as const)"
-                                :key="p"
-                                class="rounded-md px-2.5 py-0.5 text-[11px] font-medium transition-colors"
-                                :class="retirementPeriod === p ? 'bg-foreground text-background shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-                                @click="retirementPeriod = p"
-                            >
-                                {{ p === 'monthly' ? 'Monthly' : p === 'quarterly' ? 'Quarterly' : 'Yearly' }}
-                            </button>
-                        </div>
+                    <div class="px-6 py-4">
+                        <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">{{ $t('dashboard.retirementTrend') }} <InfoTooltip :text="$t('dashboard.retirementTrendTooltip')" /></h2>
+                        <p class="text-xs text-muted-foreground mt-0.5">{{ $t('dashboard.volumeMillions') }}</p>
                     </div>
                     <div class="px-6 pb-6">
-                        <div class="rounded-xl border bg-card p-5">
-                            <TrendLineChart
-                                :data="retirementSeriesData"
-                                color="hsl(24, 95%, 53%)"
-                                fill-color="hsl(24, 95%, 53%, 0.08)"
-                                :empty-text="$t('dashboard.noRetirementData')"
-                            />
-                            <div class="flex items-center justify-between mt-4 pt-3 border-t">
-                                <span class="text-xs text-muted-foreground">{{ retirementSeriesData.length }} {{ retirementPeriod === 'monthly' ? $t('dashboard.months') : retirementPeriod === 'quarterly' ? $t('dashboard.quarters') : $t('dashboard.years') }}</span>
-                                <span class="text-sm font-semibold text-foreground">{{ retirementSeriesTotal }}{{ $t('dashboard.mTotal') }}</span>
-                            </div>
-                        </div>
+                        <ComingSoon message="Retirement trend not yet integrated" />
                     </div>
                 </div>
 

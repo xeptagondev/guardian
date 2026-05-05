@@ -141,21 +141,29 @@ const hoveredIndex = ref<number | null>(null);
                     <!-- Value tooltip on hover -->
                     <g v-if="hoveredIndex === i">
                         <rect
-                            :x="pt.x - 24"
-                            :y="pt.y - 24"
-                            width="48"
-                            height="18"
+                            :x="Math.min(Math.max(pt.x - 30, padX), chartWidth - padX - 60)"
+                            :y="pt.y - 42"
+                            width="60"
+                            height="34"
                             rx="4"
-                            fill="hsl(var(--foreground))"
-                            opacity="0.9"
+                            :style="{ fill: 'var(--color-popover)', stroke: 'var(--color-border)', strokeWidth: '1' }"
                         />
                         <text
-                            :x="pt.x"
-                            :y="pt.y - 13"
+                            :x="Math.min(Math.max(pt.x, padX + 30), chartWidth - padX - 30)"
+                            :y="pt.y - 29"
                             text-anchor="middle"
-                            fill="hsl(var(--background))"
+                            font-size="8"
+                            :style="{ fill: 'var(--color-muted-foreground)' }"
+                        >
+                            {{ pt.label }}
+                        </text>
+                        <text
+                            :x="Math.min(Math.max(pt.x, padX + 30), chartWidth - padX - 30)"
+                            :y="pt.y - 16"
+                            text-anchor="middle"
                             font-size="10"
                             font-weight="600"
+                            :style="{ fill: 'var(--color-popover-foreground)' }"
                         >
                             {{ pt.value }}{{ unit }}
                         </text>
