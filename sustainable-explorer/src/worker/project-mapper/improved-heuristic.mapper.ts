@@ -331,7 +331,12 @@ export async function buildProjectViewsPolicyBased(
     // Persist any missing configs so the next run uses the fast path.
     if (needsConfigBackfill.size > 0) {
         for (const entry of needsConfigBackfill.values()) {
-            const config = { geoKey: entry.geoKey, section: entry.section, fieldMap: entry.fieldMap };
+            const config = {
+                geoKey: entry.geoKey,
+                section: entry.section,
+                fieldMap: entry.fieldMap,
+                resolvedFields: entry.resolvedFields ?? resolveFieldPaths(entry.fieldMap),
+            };
             await dataSource.query(
                 `UPDATE policy_schema SET "projectSchemaConfig" = $1 WHERE "schemaId" = $2`,
                 [JSON.stringify(config), entry.schemaUuid],
@@ -633,7 +638,7 @@ export async function buildProjectViewsPolicyBased(
         // SDGs / co-benefits
         const sdgKey = rf?.sdgOrCobenefits
             ?? Object.entries(fm).find(([, fd]) => {
-                const t = fd.title.toLowerCase();
+                const t = `${fd.title} ${fd.description}`.toLowerCase();
                 return t.includes('co-benefit') || t.includes('sustainable') || t.includes('sdg');
             })?.[0];
         const field25Raw = sdgKey ? String(subject[sdgKey] ?? '').trim() : '';

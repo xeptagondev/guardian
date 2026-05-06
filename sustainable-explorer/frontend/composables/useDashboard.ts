@@ -1,6 +1,7 @@
 import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_RETIREMENTS } from '~/data';
 import type { ActivityItem, MapPoint, MapCountry } from '~/types/models';
 import { formatCredits } from '~/lib/format';
+import { getSectorColor } from '~/lib/enums';
 import { useDashboardSummaryApi } from './api/useSummaryApi';
 import { useRegistriesApi } from './api/useRegistriesApi';
 import { useProjectsApi } from './api/useProjectsApi';
@@ -220,6 +221,20 @@ export function useDashboard(
             });
         }
 
+        // Issuances minted — top 2 most recently issued projects
+        const recentIssuances = _realProjects.value
+            .filter(p => (p.totalIssued ?? 0) > 0 && p.sourceTimestamp)
+            .sort((a, b) => (b.sourceTimestamp ?? '').localeCompare(a.sourceTimestamp ?? ''))
+            .slice(0, 2);
+        for (const p of recentIssuances) {
+            items.push({
+                time: timeAgo(p.sourceTimestamp),
+                action: 'Issuances minted',
+                detail: `${formatCredits(p.totalIssued!)} — ${p.name}`,
+                type: 'credit',
+            });
+        }
+
         // Sort all items by most recent first
         return items.sort((a, b) => {
             const toSeconds = (t: string) => {
@@ -245,16 +260,6 @@ export function useDashboard(
     });
 
     // Sector breakdown for pie charts
-    const sectorColors: Record<string, string> = {
-        'Energy Industries': 'hsl(142, 76%, 36%)',
-        'Energy Demand': 'hsl(197, 37%, 24%)',
-        'Forestry and Land Use': 'hsl(47, 96%, 53%)',
-        'Waste Handling and Disposal': 'hsl(349, 89%, 60%)',
-        'Agriculture': 'hsl(262, 83%, 58%)',
-        'Coastal and Marine': 'hsl(199, 89%, 48%)',
-        'Water Supply': 'hsl(217, 71%, 53%)',
-    };
-
     const sectorBreakdown = computed(() => {
         const groups: Record<string, { projectCount: number; creditCount: number }> = {};
         for (const p of filteredProjects.value) {
@@ -269,7 +274,7 @@ export function useDashboard(
                 label,
                 projectCount: data.projectCount,
                 creditCount: data.creditCount,
-                color: sectorColors[label] || 'hsl(220, 13%, 69%)',
+                color: getSectorColor(label),
             }))
             .sort((a, b) => b.projectCount - a.projectCount);
     });
@@ -507,6 +512,25 @@ export function useDashboard(
             .sort((a, b) => b.projectCount - a.projectCount);
     });
 
+    // Override sectorBreakdown — group real projects by normalized sector
+    const sectorBreakdownReal = computed(() => {
+        const groups: Record<string, { projectCount: number; creditCount: number }> = {};
+        for (const p of _realProjects.value) {
+            const label = p.sector || 'Others';
+            if (!groups[label]) groups[label] = { projectCount: 0, creditCount: 0 };
+            groups[label].projectCount++;
+            groups[label].creditCount += p.totalIssued ?? p.credits ?? 0;
+        }
+        return Object.entries(groups)
+            .map(([label, data]) => ({
+                label,
+                projectCount: data.projectCount,
+                creditCount: data.creditCount,
+                color: getSectorColor(label),
+            }))
+            .sort((a, b) => b.projectCount - a.projectCount);
+    });
+
     // Override countries — aggregate from real projects batch
     const countries = computed(() => {
         // eslint-disable-next-line @typescript-eslint/no-unused-expressions
@@ -642,7 +666,7 @@ export function useDashboard(
         issuanceMax,
         issuanceTotal,
         recentActivity,
-        sectorBreakdown,
+        sectorBreakdown: sectorBreakdownReal,
         registryBreakdown: registryBreakdownReal,
         developerOptions,
         registryOptions,

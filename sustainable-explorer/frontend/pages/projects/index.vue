@@ -4,6 +4,7 @@ import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import type { ProjectSortKey, ProjectSortDir } from '~/composables/api/useProjectsApi';
 import { formatCredits } from '~/lib/format';
 import { SDG_LIST } from '~/lib/sdgs';
+import { SECTORS } from '~/lib/enums';
 import { generateProjectVc } from '~/lib/mock-vc';
 import { MOCK_TRANSFERS, MOCK_RETIREMENTS } from '~/data';
 import { getMethodologyLongName } from '~/lib/methodologies';
@@ -130,7 +131,7 @@ const displayProjects = computed(() => projects.value.map(p => ({
 })));
 
 const presets = computed(() => [
-    { label: t('projects.presets.issuingForestry'), filters: { status: 'Issuing', sector: 'Forestry and Land Use' } },
+    { label: t('projects.presets.issuingForestry'), filters: { status: 'Issuing', sector: 'Land Use & Forestry' } },
     { label: t('projects.presets.goldStandard'), filters: { registry: 'Gold Standard' } },
     { label: t('projects.presets.sdg13'), filters: { sdgs: '13' } },
     { label: t('projects.presets.underValidation'), filters: { status: 'Under Validation' } },
@@ -149,7 +150,7 @@ const filters = computed<FilterOption[]>(() => [
     {
         key: 'sector',
         label: t('projects.filters.sector'),
-        options: ['Energy', 'Transport', 'Waste', 'Nature Based Solutions', 'Industrial Process'].map(s => ({ value: s, label: s })),
+        options: SECTORS.map(s => ({ value: s, label: s })),
     },
     {
         key: 'sdgs',

@@ -570,7 +570,21 @@ const filteredStats = computed(() => {
                     <!-- Sector Breakdown -->
                     <div class="rounded-xl border bg-card p-5">
                         <h3 class="text-sm font-semibold text-foreground mb-4">{{ $t('dashboard.bySector') }}</h3>
-                        <ComingSoon message="Sector breakdown not yet integrated" height="160px" />
+                        <div class="flex items-start gap-5">
+                            <DonutChart :segments="sectorChartSegments" :size="140" />
+                            <div class="space-y-2 flex-1 min-w-0 pt-1">
+                                <div v-for="s in sectorBreakdown" :key="s.label" class="flex items-center gap-2">
+                                    <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: s.color }" />
+                                    <span class="text-xs text-muted-foreground truncate flex-1">{{ s.label }}</span>
+                                    <span class="text-xs font-medium text-foreground tabular-nums shrink-0">
+                                        {{ sectorTotal > 0 ? ((chartMode === 'projects' ? s.projectCount : s.creditCount) / sectorTotal * 100).toFixed(1) : '0.0' }}%
+                                    </span>
+                                    <span class="text-xs text-muted-foreground tabular-nums shrink-0">
+                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : formatCredits(s.creditCount) }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Registry Breakdown -->
