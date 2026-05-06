@@ -18,20 +18,16 @@ export const SECTOR_KEYWORD_MAP: Array<{ sector: string; keywords: string[] }> =
     { sector: 'Transport', keywords: ['transport'] },
     { sector: 'Waste', keywords: ['waste'] },
     {
-        sector: 'Nature Based Solutions',
+        sector: 'Land Use & Forestry',
         keywords: [
-            'afforestation', 'reforestation', 'redd', 'forest', 'agriculture',
-            'land use', 'blue carbon', 'wetland', 'coastal', 'marine',
-            'grassland', 'peatland', 'restoration',
+            'forestry', 'reforestation', 'forest', 'land use'
         ],
     },
     {
         sector: 'Industrial Process',
-        keywords: [
-            'manufacturing', 'chemical', 'construction', 'mining',
-            'metal', 'fugitive', 'solvent', 'industrial',
-        ],
+        keywords: ['manufacturing', 'chemical', 'metal', 'industrial'],
     },
+    { sector: 'Fugitive Emissions', keywords: ['fugitive'] },
 ];
 
 export function normalizeSector(inputs: string[]): string {
@@ -299,6 +295,10 @@ export function resolveFieldPaths(fieldMap: Record<string, FieldDef>): ResolvedF
     const find = (keywords: string[], exclude: string[] = []): string | null => {
         for (const [fk, fd] of Object.entries(fieldMap)) {
             if (fd.isGeoJson) continue;
+            // Skip fields with very long descriptions — VCS criteria text (hundreds of chars)
+            // causes false positives when a keyword appears incidentally mid-sentence.
+            // Genuine field labels are concise.
+            if (fd.description.length > 150) continue;
             const searchable = `${fd.title} ${fd.description}`.toLowerCase();
             if (
                 keywords.some(kw => searchable.includes(kw)) &&
@@ -312,7 +312,7 @@ export function resolveFieldPaths(fieldMap: Record<string, FieldDef>): ResolvedF
     let sdgOrCobenefits: string | null = null;
 
     for (const [fk, fd] of Object.entries(fieldMap)) {
-        const t = fd.title.toLowerCase();
+        const t = `${fd.title} ${fd.description}`.toLowerCase();
         if (!creditingPeriod && t.includes('crediting period')) creditingPeriod = fk;
         if (!sdgOrCobenefits && (t.includes('co-benefit') || t.includes('sustainable') || t.includes('sdg'))) {
             sdgOrCobenefits = fk;

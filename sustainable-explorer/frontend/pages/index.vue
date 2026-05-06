@@ -48,6 +48,8 @@ function syncDashboardUrl() {
     router.replace({ query });
 }
 
+const { network } = useNetwork();
+
 const {
     stats,
     hasActiveFilter,
@@ -72,7 +74,7 @@ const {
     vintageMax,
     buildIssuanceSeries,
     buildRetirementSeries,
-} = useDashboard(dashboardFilters);
+} = useDashboard(dashboardFilters, network);
 
 type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
 const issuancePeriod = ref<TimePeriod>('monthly');
@@ -410,11 +412,11 @@ const filteredStats = computed(() => {
             </div>
             <div class="px-6 pb-6">
                 <!-- Map view with side panel -->
-                <div v-if="viewMode === 'map'" class="rounded-xl border bg-card overflow-hidden">
+                <div v-show="viewMode === 'map'" class="rounded-xl border bg-card overflow-hidden">
                     <div class="flex" :class="activeDetail ? 'h-[28rem]' : 'h-96'">
                         <!-- Map -->
                         <div class="flex-1 relative">
-                            <ProjectMap :countries="mapCountries" :points="mapPoints" @country-click="onCountryClick" />
+                            <ProjectMap :countries="mapCountries" :points="mapPoints" :visible="viewMode === 'map'" @country-click="onCountryClick" />
                         </div>
 
                         <!-- Side Panel -->
@@ -500,7 +502,7 @@ const filteredStats = computed(() => {
                 </div>
 
                 <!-- Table view -->
-                <div v-else class="rounded-xl border bg-card overflow-hidden">
+                <div v-show="viewMode === 'table'" class="rounded-xl border bg-card overflow-hidden">
                     <table class="w-full text-sm">
                         <thead>
                             <tr class="border-b bg-muted/30">
@@ -578,7 +580,7 @@ const filteredStats = computed(() => {
                                         {{ sectorTotal > 0 ? ((chartMode === 'projects' ? s.projectCount : s.creditCount) / sectorTotal * 100).toFixed(1) : '0.0' }}%
                                     </span>
                                     <span class="text-xs text-muted-foreground tabular-nums shrink-0">
-                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : `${formatCredits(s.creditCount)}` }}
+                                        {{ chartMode === 'projects' ? `${s.projectCount} projects` : formatCredits(s.creditCount) }}
                                     </span>
                                 </div>
                             </div>
@@ -698,36 +700,12 @@ const filteredStats = computed(() => {
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-0">
                 <!-- Retirement Trend -->
                 <div class="lg:border-r">
-                    <div class="flex items-center justify-between px-6 py-4">
-                        <div>
-                            <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">{{ $t('dashboard.retirementTrend') }} <InfoTooltip :text="$t('dashboard.retirementTrendTooltip')" /></h2>
-                            <p class="text-xs text-muted-foreground mt-0.5">{{ $t('dashboard.volumeMillions') }}</p>
-                        </div>
-                        <div class="flex items-center rounded-lg border p-0.5">
-                            <button
-                                v-for="p in (['monthly', 'quarterly', 'yearly'] as const)"
-                                :key="p"
-                                class="rounded-md px-2.5 py-0.5 text-[11px] font-medium transition-colors"
-                                :class="retirementPeriod === p ? 'bg-foreground text-background shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-                                @click="retirementPeriod = p"
-                            >
-                                {{ p === 'monthly' ? 'Monthly' : p === 'quarterly' ? 'Quarterly' : 'Yearly' }}
-                            </button>
-                        </div>
+                    <div class="px-6 py-4">
+                        <h2 class="text-base font-semibold text-foreground inline-flex items-center gap-1.5">{{ $t('dashboard.retirementTrend') }} <InfoTooltip :text="$t('dashboard.retirementTrendTooltip')" /></h2>
+                        <p class="text-xs text-muted-foreground mt-0.5">{{ $t('dashboard.volumeMillions') }}</p>
                     </div>
                     <div class="px-6 pb-6">
-                        <div class="rounded-xl border bg-card p-5">
-                            <TrendLineChart
-                                :data="retirementSeriesData"
-                                color="hsl(24, 95%, 53%)"
-                                fill-color="hsl(24, 95%, 53%, 0.08)"
-                                :empty-text="$t('dashboard.noRetirementData')"
-                            />
-                            <div class="flex items-center justify-between mt-4 pt-3 border-t">
-                                <span class="text-xs text-muted-foreground">{{ retirementSeriesData.length }} {{ retirementPeriod === 'monthly' ? $t('dashboard.months') : retirementPeriod === 'quarterly' ? $t('dashboard.quarters') : $t('dashboard.years') }}</span>
-                                <span class="text-sm font-semibold text-foreground">{{ retirementSeriesTotal }}{{ $t('dashboard.mTotal') }}</span>
-                            </div>
-                        </div>
+                        <ComingSoon message="Retirement trend not yet integrated" />
                     </div>
                 </div>
 

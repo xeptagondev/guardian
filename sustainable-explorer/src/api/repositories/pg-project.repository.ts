@@ -45,6 +45,11 @@ const REGISTRY_NAME_JOIN = `
 /**
  * LATERAL subquery joined into findAll to count per-project MintToken VCs
  * published back to the project's instance topic by Guardian after each mint.
+ *
+ * Guardian encodes the credentialSubject type differently across versions:
+ *   older: plain "MintToken"
+ *   newer: "{uuid}&#MintToken&{version}" (schema IRI format)
+ * ILIKE '%MintToken%' handles both.
  */
 const ISSUANCE_COUNT_JOIN = `
     LEFT JOIN LATERAL (
@@ -52,7 +57,7 @@ const ISSUANCE_COUNT_JOIN = `
         FROM message m
         WHERE m."topicId" = bv."relatedTopicId"
           AND m.type = 'VC-Document'
-          AND m.documents -> 'credentialSubject' -> 0 ->> 'type' = 'MintToken'
+          AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
     ) mint ON true
 `;
 
@@ -211,7 +216,7 @@ export class PgProjectRepository extends ProjectRepository {
                  FROM message m
                  WHERE m."topicId" = $1
                    AND m.type = 'VC-Document'
-                   AND m.documents -> 'credentialSubject' -> 0 ->> 'type' = 'MintToken'
+                   AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
                  ORDER BY m."consensusTimestamp" ASC`,
                 [instanceTopicId],
             )

@@ -252,7 +252,8 @@ const skeletonRows = computed(() =>
 
     <div class="px-6 pb-6">
       <div class="rounded-xl border bg-card overflow-hidden">
-        <table class="w-full text-sm">
+        <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
           <thead>
             <tr class="border-b bg-muted/30">
               <SortableHeader
@@ -456,6 +457,7 @@ const skeletonRows = computed(() =>
             </template>
           </tbody>
         </table>
+        </div>
       </div>
 
       <Pagination
