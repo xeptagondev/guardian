@@ -18,20 +18,16 @@ export const SECTOR_KEYWORD_MAP: Array<{ sector: string; keywords: string[] }> =
     { sector: 'Transport', keywords: ['transport'] },
     { sector: 'Waste', keywords: ['waste'] },
     {
-        sector: 'Nature Based Solutions',
+        sector: 'Land Use & Forestry',
         keywords: [
-            'afforestation', 'reforestation', 'redd', 'forest', 'agriculture',
-            'land use', 'blue carbon', 'wetland', 'coastal', 'marine',
-            'grassland', 'peatland', 'restoration',
+            'forestry', 'reforestation', 'forest', 'land use'
         ],
     },
     {
         sector: 'Industrial Process',
-        keywords: [
-            'manufacturing', 'chemical', 'construction', 'mining',
-            'metal', 'fugitive', 'solvent', 'industrial',
-        ],
+        keywords: ['manufacturing', 'chemical', 'metal', 'industrial'],
     },
+    { sector: 'Fugitive Emissions', keywords: ['fugitive'] },
 ];
 
 export function normalizeSector(inputs: string[]): string {
