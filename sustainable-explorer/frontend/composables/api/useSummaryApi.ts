@@ -1,76 +1,53 @@
 import type { NetworkId } from '~/composables/useNetwork';
 
 export interface TimelinePointDto {
-    period: string;    // "YYYY-MM"
+    period: string;     // "YYYY-MM"
     totalIssued: number;
 }
 
-export interface SummaryDto {
+export interface RegistryBreakdownItemDto {
+    registry: string;
+    totalIssued: number;
+}
+
+export interface DashboardSummaryDto {
     totalIssued: number;
     totalRetired: number;
     totalActive: number;
+    timeline: TimelinePointDto[];
+    registryBreakdown: RegistryBreakdownItemDto[];
 }
 
-export interface UseSummaryApiOptions {
-    network: Ref<NetworkId | string>;
-}
-
-const emptySummary = (): SummaryDto => ({
+const emptyDashboardSummary = (): DashboardSummaryDto => ({
     totalIssued: 0,
     totalRetired: 0,
     totalActive: 0,
+    timeline: [],
+    registryBreakdown: [],
 });
 
-export const useSummaryApi = (opts: UseSummaryApiOptions) => {
+export const useDashboardSummaryApi = (opts: { network: Ref<NetworkId | string> }) => {
     const config = useRuntimeConfig();
     const baseURL = import.meta.server
         ? (config.apiBaseUrl as string)
         : (config.public.apiBaseUrl as string);
 
-    const url = computed(() => `/api/v1/${opts.network.value}/summary`);
-    const key = computed(() => `summary:${opts.network.value}`);
+    const url = computed(() => `/api/v1/${opts.network.value}/dashboard-summary`);
+    const key = computed(() => `dashboard-summary:${opts.network.value}`);
 
-    const { data, pending, error, refresh } = useAsyncData<SummaryDto>(
+    const { data, pending, error, refresh } = useAsyncData<DashboardSummaryDto>(
         key.value,
         async () => {
             try {
-                const res = await $fetch<SummaryDto>(url.value, { baseURL });
-                return res ?? emptySummary();
+                const res = await $fetch<DashboardSummaryDto>(url.value, { baseURL });
+                return res ?? emptyDashboardSummary();
             } catch (err) {
-                console.error('[useSummaryApi] fetch failed:', err);
-                return emptySummary();
+                console.error('[useDashboardSummaryApi] fetch failed:', err);
+                return emptyDashboardSummary();
             }
         },
         {
-            default: () => emptySummary(),
-            watch: [opts.network],
-        },
-    );
-
-    return { data, pending, error, refresh };
-};
-
-export const useIssuanceTimelineApi = (opts: { network: Ref<NetworkId | string> }) => {
-    const config = useRuntimeConfig();
-    const baseURL = import.meta.server
-        ? (config.apiBaseUrl as string)
-        : (config.public.apiBaseUrl as string);
-
-    const url = computed(() => `/api/v1/${opts.network.value}/summary/timeline`);
-    const key = computed(() => `issuance-timeline:${opts.network.value}`);
-
-    const { data, pending, error, refresh } = useAsyncData<TimelinePointDto[]>(
-        key.value,
-        async () => {
-            try {
-                return await $fetch<TimelinePointDto[]>(url.value, { baseURL }) ?? [];
-            } catch (err) {
-                console.error('[useIssuanceTimelineApi] fetch failed:', err);
-                return [];
-            }
-        },
-        {
-            default: () => [] as TimelinePointDto[],
+            default: () => emptyDashboardSummary(),
             watch: [opts.network],
         },
     );

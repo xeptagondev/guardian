@@ -19,6 +19,7 @@ export interface ProjectPoint {
 const props = defineProps<{
     countries: CountryData[];
     points?: ProjectPoint[];
+    visible?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -28,6 +29,7 @@ const emit = defineEmits<{
 const mapContainer = ref<HTMLElement | null>(null);
 let map: L.Map | null = null;
 let geoLayer: L.GeoJSON | null = null;
+let pointMarkers: L.CircleMarker[] = [];
 
 const maxProjects = computed(() => Math.max(...props.countries.map(c => c.projects), 1));
 
@@ -49,6 +51,42 @@ function getFillOpacity(projects: number): number {
 
 function getCountryData(code: string): CountryData | undefined {
     return props.countries.find(c => c.countryCode === code);
+}
+
+function countryStyle(feature: any) {
+    const code = feature?.properties?.['ISO3166-1-Alpha-3'] || '';
+    const data = getCountryData(code);
+    const projects = data?.projects ?? 0;
+    return {
+        fillColor: projects > 0 ? getColor(projects) : 'transparent',
+        fillOpacity: getFillOpacity(projects),
+        color: projects > 0 ? '#2d6a4f' : '#ddd',
+        weight: projects > 0 ? 1.5 : 0.5,
+    };
+}
+
+function addPointMarkers() {
+    if (!map) return;
+    pointMarkers.forEach(m => m.remove());
+    pointMarkers = [];
+    if (!props.points?.length) return;
+    for (const pt of props.points) {
+        const marker = L.circleMarker([pt.lat, pt.lng], {
+            radius: 4,
+            fillColor: '#1a9850',
+            fillOpacity: 0.9,
+            color: '#fff',
+            weight: 1.5,
+        })
+            .bindPopup(`
+                <div style="font-size:12px;line-height:1.6">
+                    <strong>${pt.name}</strong>
+                    ${pt.credits ? `<br><span style="color:#666">Issuances:</span> <strong>${pt.credits}</strong>` : ''}
+                </div>
+            `)
+            .addTo(map);
+        pointMarkers.push(marker);
+    }
 }
 
 async function initMap() {
@@ -73,32 +111,19 @@ async function initMap() {
         const geojson = await response.json();
 
         geoLayer = L.geoJSON(geojson, {
-            style: (feature) => {
-                const code = feature?.properties?.['ISO3166-1-Alpha-3'] || '';
-                const data = getCountryData(code);
-                const projects = data?.projects ?? 0;
-
-                return {
-                    fillColor: projects > 0 ? getColor(projects) : 'transparent',
-                    fillOpacity: getFillOpacity(projects),
-                    color: projects > 0 ? '#2d6a4f' : '#ddd',
-                    weight: projects > 0 ? 1.5 : 0.5,
-                };
-            },
+            style: countryStyle,
             onEachFeature: (feature, layer) => {
                 const code = feature?.properties?.['ISO3166-1-Alpha-3'] || '';
-                const data = getCountryData(code);
-                if (data) {
-                    layer.on('click', () => {
-                        emit('country-click', code);
-                    });
-                    layer.on('mouseover', function () {
-                        (layer as any).setStyle({ fillOpacity: 0.85, weight: 2.5 });
-                    });
-                    layer.on('mouseout', function () {
-                        geoLayer?.resetStyle(layer);
-                    });
-                }
+                layer.on('click', () => {
+                    const data = getCountryData(code);
+                    if (data) emit('country-click', code);
+                });
+                layer.on('mouseover', function () {
+                    (layer as any).setStyle({ fillOpacity: 0.85, weight: 2.5 });
+                });
+                layer.on('mouseout', function () {
+                    geoLayer?.resetStyle(layer);
+                });
             },
         }).addTo(map);
     } catch {
@@ -110,33 +135,39 @@ async function initMap() {
         pane: 'overlayPane',
     }).addTo(map);
 
-    if (props.points?.length) {
-        for (const pt of props.points) {
-            L.circleMarker([pt.lat, pt.lng], {
-                radius: 4,
-                fillColor: '#1a9850',
-                fillOpacity: 0.9,
-                color: '#fff',
-                weight: 1.5,
-            })
-                .bindPopup(`
-                    <div style="font-size:12px;line-height:1.6">
-                        <strong>${pt.name}</strong>
-                        ${pt.credits ? `<br><span style="color:#666">Issuances:</span> <strong>${pt.credits}</strong>` : ''}
-                    </div>
-                `)
-                .addTo(map);
-        }
-    }
+    addPointMarkers();
 }
+
+// Re-colour countries when data arrives after initial mount
+watch(() => props.countries, () => {
+    geoLayer?.setStyle(countryStyle);
+}, { deep: true });
+
+// Redraw point markers when data arrives after initial mount
+watch(() => props.points, () => {
+    addPointMarkers();
+}, { deep: true });
+
+// Recalculate map size when revealed by v-show
+watch(() => props.visible, async (isVisible) => {
+    if (isVisible && map) {
+        await nextTick();
+        map.invalidateSize();
+    }
+});
 
 onMounted(async () => {
     await nextTick();
     await initMap();
-    // Leaflet needs a size recalc after the container is laid out
     setTimeout(() => { map?.invalidateSize(); }, 100);
 });
-onUnmounted(() => { map?.remove(); map = null; });
+
+onUnmounted(() => {
+    pointMarkers.forEach(m => m.remove());
+    pointMarkers = [];
+    map?.remove();
+    map = null;
+});
 </script>
 
 <template>

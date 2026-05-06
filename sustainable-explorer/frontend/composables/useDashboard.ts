@@ -1,7 +1,7 @@
 import { MOCK_PROJECTS, MOCK_CREDITS, MOCK_RETIREMENTS } from '~/data';
 import type { ActivityItem, MapPoint, MapCountry } from '~/types/models';
 import { formatCredits } from '~/lib/format';
-import { useSummaryApi, useIssuanceTimelineApi } from './api/useSummaryApi';
+import { useDashboardSummaryApi } from './api/useSummaryApi';
 import { useRegistriesApi } from './api/useRegistriesApi';
 import { useProjectsApi } from './api/useProjectsApi';
 import { useMethodologiesApi } from './api/useMethodologiesApi';
@@ -358,8 +358,8 @@ export function useDashboard(
 
     const _network = network ?? ref('mainnet');
 
-    // -- Real API: summary totals for stat cards --
-    const { data: summaryData } = useSummaryApi({ network: _network });
+    // -- Real API: full dashboard summary (totals + timeline + registry breakdown) --
+    const { data: dashboardSummary } = useDashboardSummaryApi({ network: _network });
 
     // -- Real API: registry count (meta.total) --
     const { data: registriesCountData } = useRegistriesApi({
@@ -409,8 +409,7 @@ export function useDashboard(
         network: _network, sortBy: ref('createdAt'), sortDir: ref('desc'),
     });
 
-    // -- Real API: monthly issuance timeline (period toggle is client-side) --
-    const { data: rawTimeline } = useIssuanceTimelineApi({ network: _network });
+    const rawTimeline = computed(() => dashboardSummary.value?.timeline ?? []);
 
     // -----------------------------------------------------------------------
     // Overrides: use real API data instead of mock-backed computeds
@@ -421,8 +420,8 @@ export function useDashboard(
         const registryCount = registriesCountData.value?.meta.total ?? 0;
         const methodologyCount = methodologiesCountData.value?.meta.total ?? 0;
         const projectCount = projectsCountMeta.value?.total ?? 0;
-        const totalCredits = summaryData.value?.totalIssued ?? 0;
-        const totalRetiredVal = summaryData.value?.totalRetired ?? 0;
+        const totalCredits = dashboardSummary.value?.totalIssued ?? 0;
+        const totalRetiredVal = dashboardSummary.value?.totalRetired ?? 0;
         return {
             registries: registryCount,
             methodologies: methodologyCount,
@@ -432,8 +431,7 @@ export function useDashboard(
         };
     });
 
-    // Override totalRetired — use real API summary
-    const totalRetired = computed(() => summaryData.value?.totalRetired ?? 0);
+    const totalRetired = computed(() => dashboardSummary.value?.totalRetired ?? 0);
 
     // Override registries — replace mock-backed with real API
     const registries = computed(() => {
@@ -484,19 +482,26 @@ export function useDashboard(
         'hsl(45, 93%, 47%)',
     ];
     const registryBreakdownReal = computed(() => {
-        const groups: Record<string, { projectCount: number; creditCount: number }> = {};
+        // projectCount — derived from local project batch
+        const projectGroups: Record<string, number> = {};
         for (const p of _realProjects.value) {
             const name = p.registry || 'Unknown Registry';
-            if (!groups[name]) groups[name] = { projectCount: 0, creditCount: 0 };
-            groups[name].projectCount++;
-            groups[name].creditCount += p.totalIssued ?? 0;
+            projectGroups[name] = (projectGroups[name] ?? 0) + 1;
         }
+
+        // creditCount — from API registry breakdown (MintToken VCs, accurate)
+        const creditMap: Record<string, number> = {};
+        for (const r of dashboardSummary.value?.registryBreakdown ?? []) {
+            creditMap[r.registry] = r.totalIssued;
+        }
+
+        const allNames = new Set([...Object.keys(projectGroups), ...Object.keys(creditMap)]);
         let fallbackIdx = 0;
-        return Object.entries(groups)
-            .map(([label, data]) => ({
+        return Array.from(allNames)
+            .map(label => ({
                 label,
-                projectCount: data.projectCount,
-                creditCount: data.creditCount,
+                projectCount: projectGroups[label] ?? 0,
+                creditCount: creditMap[label] ?? 0,
                 color: registryColors[label] || fallbackColors[fallbackIdx++ % fallbackColors.length],
             }))
             .sort((a, b) => b.projectCount - a.projectCount);

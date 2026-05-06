@@ -412,11 +412,11 @@ const filteredStats = computed(() => {
             </div>
             <div class="px-6 pb-6">
                 <!-- Map view with side panel -->
-                <div v-if="viewMode === 'map'" class="rounded-xl border bg-card overflow-hidden">
+                <div v-show="viewMode === 'map'" class="rounded-xl border bg-card overflow-hidden">
                     <div class="flex" :class="activeDetail ? 'h-[28rem]' : 'h-96'">
                         <!-- Map -->
                         <div class="flex-1 relative">
-                            <ProjectMap :countries="mapCountries" :points="mapPoints" @country-click="onCountryClick" />
+                            <ProjectMap :countries="mapCountries" :points="mapPoints" :visible="viewMode === 'map'" @country-click="onCountryClick" />
                         </div>
 
                         <!-- Side Panel -->
@@ -502,7 +502,7 @@ const filteredStats = computed(() => {
                 </div>
 
                 <!-- Table view -->
-                <div v-else class="rounded-xl border bg-card overflow-hidden">
+                <div v-show="viewMode === 'table'" class="rounded-xl border bg-card overflow-hidden">
                     <table class="w-full text-sm">
                         <thead>
                             <tr class="border-b bg-muted/30">
