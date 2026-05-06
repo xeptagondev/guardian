@@ -1,46 +1,17 @@
 import { DataSource } from 'typeorm';
 import { SummaryResponseDto, TimelinePointDto } from '../dto/summary.dto';
 
-/**
- * Shared CTE: one row per Guardian-issued token, deduplicated via DISTINCT ON.
- *
- * A tokenId can appear in multiple business_view CREDIT rows (each Guardian Token
- * message republication creates a new row).  DISTINCT ON picks the earliest row
- * per token so totalSupply is counted exactly once, consistent across both the
- * summary totals and the timeline breakdown.
- */
-const DEDUPED_CREDITS_CTE = `
-    deduped AS (
-        SELECT DISTINCT ON (tc."tokenId")
-            tc."tokenId",
-            tc."totalSupply",
-            tc.decimals,
-            bv."sourceTimestamp" AS first_seen
-        FROM business_view bv
-        JOIN token_cache tc
-            ON tc."tokenId" = bv."businessData" ->> 'tokenId'
-        WHERE bv."viewType" = 'CREDIT'
-          AND tc."totalSupply" IS NOT NULL
-        ORDER BY tc."tokenId", bv."sourceTimestamp" ASC
-    )
-`;
-
-const ADJUSTED_SUPPLY_EXPR = `
-    CASE
-        WHEN decimals IS NOT NULL AND decimals > 0
-        THEN FLOOR("totalSupply"::numeric / POWER(10, decimals))
-        ELSE "totalSupply"::numeric
-    END
-`;
-
 export class PgSummaryRepository {
     constructor(private readonly dataSource: DataSource) {}
 
     async getSummary(): Promise<SummaryResponseDto> {
         const issuedSql = `
-            WITH ${DEDUPED_CREDITS_CTE}
-            SELECT COALESCE(SUM(${ADJUSTED_SUPPLY_EXPR}), 0)::bigint AS total_issued
-            FROM deduped
+            SELECT COALESCE(
+                SUM((m.documents -> 'credentialSubject' -> 0 ->> 'amount')::numeric), 0
+            )::bigint AS total_issued
+            FROM message m
+            WHERE m.type = 'VC-Document'
+              AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
         `;
 
         const retiredSql = `
@@ -66,14 +37,15 @@ export class PgSummaryRepository {
 
     async getTimeline(): Promise<TimelinePointDto[]> {
         const sql = `
-            WITH ${DEDUPED_CREDITS_CTE}
             SELECT
                 to_char(
-                    date_trunc('month', to_timestamp(first_seen::double precision)),
+                    date_trunc('month', to_timestamp(m."consensusTimestamp"::double precision)),
                     'YYYY-MM'
                 ) AS period,
-                SUM(${ADJUSTED_SUPPLY_EXPR})::bigint AS total_issued
-            FROM deduped
+                SUM((m.documents -> 'credentialSubject' -> 0 ->> 'amount')::numeric)::bigint AS total_issued
+            FROM message m
+            WHERE m.type = 'VC-Document'
+              AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
             GROUP BY 1
             ORDER BY 1
         `;
