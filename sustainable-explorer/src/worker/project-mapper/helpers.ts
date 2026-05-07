@@ -14,20 +14,74 @@ export function slugify(s: string): string {
 // ---------------------------------------------------------------------------
 
 export const SECTOR_KEYWORD_MAP: Array<{ sector: string; keywords: string[] }> = [
-    { sector: 'Energy', keywords: ['energy'] },
-    { sector: 'Transport', keywords: ['transport'] },
-    { sector: 'Waste', keywords: ['waste'] },
+    {
+        sector: 'Energy',
+        keywords: [
+            'energy',
+            'industries',
+            'distribution',
+            'demand',
+        ],
+    },
+    {
+        sector: 'Transport',
+        keywords: ['transport'],
+    },
+    {
+        sector: 'Waste',
+        keywords: [
+            'waste',
+            'handling',
+            'disposal',
+        ],
+    },
     {
         sector: 'Land Use & Forestry',
         keywords: [
-            'forestry', 'reforestation', 'forest', 'land use'
+            'forestry',
+            'reforestation',
+            'forest',
+            'land',
+            'agriculture',
+            'afforestation',
         ],
     },
     {
         sector: 'Industrial Process',
-        keywords: ['manufacturing', 'chemical', 'metal', 'industrial'],
+        keywords: [
+            'manufacturing',
+            'chemical',
+            'metal',
+            'industrial',
+            'industry',
+            'production',
+        ],
     },
-    { sector: 'Fugitive Emissions', keywords: ['fugitive'] },
+    {
+        sector: 'Fugitive Emissions',
+        keywords: [
+            'fugitive',
+            'fuels',
+            'oil',
+            'gas',
+            'solid',
+        ],
+    },
+    {
+        sector: 'Others',
+        keywords: [
+            'construction',
+            'mining',
+            'mineral',
+            'halocarbons',
+            'sulphur',
+            'solvents',
+            'storage',
+            'removals',
+            'oceans',
+            'marine',
+        ],
+    },
 ];
 
 export function normalizeSector(inputs: string[]): string {
