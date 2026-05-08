@@ -18,20 +18,24 @@ export class MvRefreshProcessor extends WorkerHost implements OnModuleInit {
     }
 
     /**
-     * Ensures all registered materialized views exist on startup.
-     * Uses CREATE MATERIALIZED VIEW IF NOT EXISTS — safe to run repeatedly.
+     * Recreates all registered materialized views on startup so SQL definition
+     * changes take effect automatically without manual DB intervention.
+     * The AS SELECT clause populates data immediately on creation.
      */
     async onModuleInit(): Promise<void> {
         for (const mv of MATERIALIZED_VIEWS) {
             try {
+                await this.dataSource.query(
+                    `DROP MATERIALIZED VIEW IF EXISTS ${mv.name} CASCADE`,
+                );
                 await this.dataSource.query(mv.createSql);
                 if (mv.indexSql) {
                     await this.dataSource.query(mv.indexSql);
                 }
-                this.logger.log(`Ensured materialized view: ${mv.name}`);
+                this.logger.log(`Recreated materialized view: ${mv.name}`);
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
-                this.logger.error(`Failed to ensure materialized view ${mv.name}: ${message}`);
+                this.logger.error(`Failed to recreate materialized view ${mv.name}: ${message}`);
             }
         }
     }

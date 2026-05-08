@@ -42,22 +42,11 @@ const REGISTRY_NAME_JOIN = `
     ) reg ON true
 `;
 
-/**
- * LATERAL subquery joined into findAll to count per-project MintToken VCs
- * published back to the project's instance topic by Guardian after each mint.
- *
- * Guardian encodes the credentialSubject type differently across versions:
- *   older: plain "MintToken"
- *   newer: "{uuid}&#MintToken&{version}" (schema IRI format)
- * ILIKE '%MintToken%' handles both.
- */
 const ISSUANCE_COUNT_JOIN = `
     LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS issuance_count
-        FROM message m
-        WHERE m."topicId" = bv."relatedTopicId"
-          AND m.type = 'VC-Document'
-          AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
+        FROM project_mint_link pml
+        WHERE pml.project_source_timestamp = bv."sourceTimestamp"
     ) mint ON true
 `;
 
@@ -178,9 +167,11 @@ export class PgProjectRepository extends ProjectRepository {
             `
             SELECT
                 bv.*,
-                reg.registry_name
+                reg.registry_name,
+                mint.issuance_count
             FROM business_view bv
             ${REGISTRY_NAME_JOIN}
+            ${ISSUANCE_COUNT_JOIN}
             WHERE bv."viewType" = 'PROJECT'
               AND bv."sourceTimestamp" = $1
             LIMIT 1
@@ -194,41 +185,39 @@ export class PgProjectRepository extends ProjectRepository {
         const policyTopicId = (row.businessData as Record<string, any> | null)?.['policyTopicId'] as string | null;
         const instanceTopicId = row.relatedTopicId;
 
-        // Step 1 — try per-project attribution via MintToken VCs published back to
-        // the project's instance topic by Guardian after each mint event.
-        // Each MintToken VC has: { type: "MintToken", tokenId, amount, date }
+        // Step 1 — look up per-project mints from project_mint_link.
+        // The linker pre-resolves each MintToken to its specific project via the
+        // relationships chain, so grouped projects (multiple projects per instance
+        // topic) are correctly split rather than double-counted.
         let issuances: IssuanceRow[] = [];
         let totalIssued = 0;
         let totalRetired = 0;
 
         const mintTokenRows: Array<{
             token_id: string | null;
-            amount: string | null;
-            mint_date: string | null;
+            amount: number | null;
+            mint_date: Date | null;
             documents: Record<string, any> | null;
-        }> = instanceTopicId
-            ? await this.dataSource.query(
-                `SELECT
-                    m.documents -> 'credentialSubject' -> 0 ->> 'tokenId' AS token_id,
-                    m.documents -> 'credentialSubject' -> 0 ->> 'amount'  AS amount,
-                    m.documents -> 'credentialSubject' -> 0 ->> 'date'    AS mint_date,
-                    m.documents
-                 FROM message m
-                 WHERE m."topicId" = $1
-                   AND m.type = 'VC-Document'
-                   AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
-                 ORDER BY m."consensusTimestamp" ASC`,
-                [instanceTopicId],
-            )
-            : [];
+        }> = await this.dataSource.query(
+            `SELECT
+                pml.token_id,
+                pml.amount,
+                pml.mint_date,
+                m.documents
+             FROM project_mint_link pml
+             JOIN message m ON m."consensusTimestamp" = pml.mint_consensus_timestamp
+             WHERE pml.project_source_timestamp = $1
+             ORDER BY pml.mint_date ASC NULLS LAST`,
+            [id],
+        );
 
         if (mintTokenRows.length > 0) {
             // Aggregate minted amount per token; keep last MintToken VC as raw data
-            const mintsByToken = new Map<string, { total: number; mintDate: string | null; rawVc: Record<string, any> | null }>();
+            const mintsByToken = new Map<string, { total: number; mintDate: Date | null; rawVc: Record<string, any> | null }>();
             for (const r of mintTokenRows) {
                 if (!r.token_id) continue;
                 const existing = mintsByToken.get(r.token_id) ?? { total: 0, mintDate: r.mint_date, rawVc: r.documents };
-                existing.total += parseInt(r.amount ?? '0', 10);
+                existing.total += r.amount != null ? Number(r.amount) : 0;
                 existing.rawVc = r.documents;
                 mintsByToken.set(r.token_id, existing);
             }
@@ -257,7 +246,7 @@ export class PgProjectRepository extends ProjectRepository {
                     type: meta?.type ?? null,
                     supply: data.total,
                     mintDate: data.mintDate
-                        ? new Date(data.mintDate).toISOString().split('T')[0]
+                        ? data.mintDate.toISOString().split('T')[0]
                         : null,
                     rawVc: data.rawVc,
                 };

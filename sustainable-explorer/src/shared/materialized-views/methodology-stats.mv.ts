@@ -32,11 +32,23 @@ export const MV_METHODOLOGY_STATS_CREATE_SQL = `
               AND p."businessData"->>'policyTopicId' = mb.policy_topic_id
         ), 0)::bigint AS project_count,
         COALESCE((
-            SELECT COUNT(*)
+            SELECT COUNT(DISTINCT m.documents -> 'credentialSubject' -> 0 ->> 'tokenId')
             FROM message m
-            WHERE m."topicId" = mb.policy_topic_id
-              AND m.type = 'Token'
-              AND m.options->>'tokenId' IS NOT NULL
+            WHERE m.type = 'VC-Document'
+              AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
+              AND m.documents -> 'credentialSubject' -> 0 ->> 'tokenId' IS NOT NULL
+              AND m."topicId" IN (
+                  SELECT topic FROM (
+                      VALUES (mb.policy_topic_id), (mb."relatedTopicId")
+                      UNION ALL
+                      SELECT bv."relatedTopicId"
+                      FROM business_view bv
+                      WHERE bv."viewType" = 'PROJECT'
+                        AND bv."businessData"->>'policyTopicId' = mb.policy_topic_id
+                        AND bv."relatedTopicId" IS NOT NULL
+                  ) t(topic)
+                  WHERE topic IS NOT NULL
+              )
         ), 0)::bigint AS issuance_count,
         COALESCE((
             SELECT COUNT(DISTINCT ps."schemaId")

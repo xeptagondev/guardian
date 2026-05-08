@@ -170,7 +170,7 @@ export function useDashboard(
         return vals.length > 0 ? Math.max(...vals) : 1;
     });
     const issuanceTotal = computed(() =>
-        Math.round(issuanceMonths.value.reduce((sum, m) => sum + m.value, 0) * 10) / 10,
+        Math.round((dashboardSummary.value?.totalIssued ?? 0) / 1_000_000 * 10) / 10,
     );
 
     // Convert HCS consensusTimestamp (Unix seconds string) to relative time string

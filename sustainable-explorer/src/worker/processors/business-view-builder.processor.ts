@@ -5,6 +5,7 @@ import { DataSource } from "typeorm";
 import Redis from "ioredis";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
 import { buildProjectViewsPolicyBased } from "../project-mapper/improved-heuristic.mapper";
+import { ensureMintProjectLinkTable, buildMintProjectLinks } from "../project-mapper/mint-project-linker";
 
 /**
  * Mapping from HCS message types to business domain view types.
@@ -35,6 +36,10 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
         @Inject("REDICT_PUB") private readonly redis: Redis,
     ) {
         super();
+    }
+
+    async onModuleInit(): Promise<void> {
+        await ensureMintProjectLinkTable(this.dataSource);
     }
 
     async process(job: Job): Promise<void> {
@@ -142,6 +147,8 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
             default:
                 await buildProjectViewsPolicyBased(this.dataSource, this.logger);
         }
+
+        await buildMintProjectLinks(this.dataSource, this.logger);
 
         await this.redis.publish(
             "se:events",

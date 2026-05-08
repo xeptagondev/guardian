@@ -374,6 +374,43 @@ export async function buildProjectViewsPolicyBased(
                 confirmed.resolvedFields = resolveFieldPaths(confirmed.fieldMap);
                 newlyConfirmed.set(topicId, confirmed);
                 confirmedByTopic.set(topicId, confirmed);
+            } else if (entries.length > 1) {
+                // TIE: multiple schemas pass geo+name. Apply tiebreaker: keep only
+                // schemas whose UUID actually appears in VC credentialSubject.type.
+                // Sub-schemas (like "Project Description" embedded inside "Project")
+                // are never used directly as VC types and are eliminated here.
+                const tiedUuids = entries.map(e => e.schemaUuid);
+                const vcMatches: Array<{ schema_id: string }> = await dataSource.query(`
+                    SELECT DISTINCT split_part(
+                        documents->'credentialSubject'->0->>'type', '&', 1
+                    ) AS schema_id
+                    FROM message
+                    WHERE type = 'VC-Document'
+                      AND split_part(
+                            documents->'credentialSubject'->0->>'type', '&', 1
+                          ) = ANY($1)
+                    LIMIT $2
+                `, [tiedUuids, tiedUuids.length]);
+
+                const usedUuids = new Set(vcMatches.map(r => r.schema_id));
+                const surviving = entries.filter(e => usedUuids.has(e.schemaUuid));
+
+                if (surviving.length === 1) {
+                    const confirmed = surviving[0];
+                    confirmed.resolvedFields = resolveFieldPaths(confirmed.fieldMap);
+                    newlyConfirmed.set(topicId, confirmed);
+                    confirmedByTopic.set(topicId, confirmed);
+                    logger.log(
+                        `Schema TIE resolved for topic ${topicId}: ` +
+                        `confirmed ${confirmed.schemaUuid} (only tied schema found in VCs)`,
+                    );
+                } else {
+                    logger.warn(
+                        `Schema TIE unresolved for topic ${topicId}: ` +
+                        `${entries.length} schemas pass geo+name, ` +
+                        `${surviving.length} appear in VCs — skipping confirmation`,
+                    );
+                }
             }
         }
 

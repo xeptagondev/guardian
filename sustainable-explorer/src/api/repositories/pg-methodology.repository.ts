@@ -187,56 +187,85 @@ export class PgMethodologyRepository extends MethodologyRepository {
 
         const row = rawRows[0];
 
-        // Resolve the topic IDs to look up CREDIT rows.
-        // businessData.policyTopicId is the Guardian policy topic; relatedTopicId is the
-        // instance topic stored on the business_view row. We union both and deduplicate
-        // so that credits linked to either topic are captured.
         const policyTopicId = (row.businessData as Record<string, any> | null)?.['topicId'] as string | null;
         const instanceTopicId = row.relatedTopicId;
-        const topicIds = [...new Set([policyTopicId, instanceTopicId].filter((t): t is string => !!t))];
+
+        // Expand topic search to include all project instance topics under this methodology
+        // so MintToken VCs on project sub-topics are captured alongside those on the
+        // methodology's own instance topic.
+        const projectTopicRows: Array<{ relatedTopicId: string }> = policyTopicId
+            ? await this.dataSource.query(
+                `SELECT DISTINCT "relatedTopicId"
+                 FROM business_view
+                 WHERE "viewType" = 'PROJECT'
+                   AND "businessData"->>'policyTopicId' = $1
+                   AND "relatedTopicId" IS NOT NULL`,
+                [policyTopicId],
+            )
+            : [];
+
+        const topicIds = [
+            ...new Set([
+                policyTopicId,
+                instanceTopicId,
+                ...projectTopicRows.map(r => r.relatedTopicId),
+            ].filter((t): t is string => !!t)),
+        ];
 
         let issuances: IssuanceRow[] = [];
         if (topicIds.length > 0) {
-            const placeholders = topicIds.map((_, i) => `$${i + 1}`).join(', ');
-            const creditRows: Array<{
-                tokenId: string | null;
-                name: string | null;
-                symbol: string | null;
-                type: string | null;
-                supply: string | null;
-                mintDate: Date | null;
-                raw_vc: Record<string, any> | null;
+            const mintTokenRows: Array<{
+                token_id: string | null;
+                amount: string | null;
+                mint_date: string | null;
+                documents: Record<string, any> | null;
             }> = await this.dataSource.query(
-                `
-                SELECT
-                    COALESCE(tc."tokenId", bv."businessData"->>'tokenId') AS "tokenId",
-                    COALESCE(tc.name,      bv."displayName")              AS name,
-                    COALESCE(tc.symbol,    bv."businessData"->>'symbol')  AS symbol,
-                    tc.type,
-                    tc."totalSupply"                                      AS supply,
-                    bv."createdAt"                                        AS "mintDate",
-                    m.documents                                           AS raw_vc
-                FROM business_view bv
-                LEFT JOIN token_cache tc
-                    ON tc."tokenId" = bv."businessData"->>'tokenId'
-                LEFT JOIN message m
-                    ON m."consensusTimestamp" = bv."sourceTimestamp"
-                WHERE bv."viewType" = 'CREDIT'
-                  AND bv."relatedTopicId" IN (${placeholders})
-                ORDER BY bv."createdAt" ASC
-                `,
-                topicIds,
+                `SELECT
+                    m.documents -> 'credentialSubject' -> 0 ->> 'tokenId' AS token_id,
+                    m.documents -> 'credentialSubject' -> 0 ->> 'amount'  AS amount,
+                    m.documents -> 'credentialSubject' -> 0 ->> 'date'    AS mint_date,
+                    m.documents
+                 FROM message m
+                 WHERE m."topicId" = ANY($1::varchar[])
+                   AND m.type = 'VC-Document'
+                   AND m.documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
+                 ORDER BY m."consensusTimestamp" ASC`,
+                [topicIds],
             );
 
-            issuances = creditRows.map(r => ({
-                tokenId: r.tokenId ?? '',
-                name: r.name ?? null,
-                symbol: r.symbol ?? null,
-                type: r.type ?? null,
-                supply: r.supply != null ? parseFloat(r.supply) : 0,
-                mintDate: r.mintDate ? r.mintDate.toISOString().split('T')[0] : null,
-                rawVc: r.raw_vc ?? null,
-            }));
+            if (mintTokenRows.length > 0) {
+                const mintsByToken = new Map<string, { total: number; mintDate: string | null; rawVc: Record<string, any> | null }>();
+                for (const r of mintTokenRows) {
+                    if (!r.token_id) continue;
+                    const existing = mintsByToken.get(r.token_id) ?? { total: 0, mintDate: r.mint_date, rawVc: r.documents };
+                    existing.total += r.amount != null ? Number(r.amount) : 0;
+                    existing.rawVc = r.documents;
+                    mintsByToken.set(r.token_id, existing);
+                }
+
+                const distinctTokenIds = Array.from(mintsByToken.keys());
+                const tokenMeta: Array<{ tokenId: string; name: string | null; symbol: string | null; type: string | null }> =
+                    await this.dataSource.query(
+                        `SELECT "tokenId", name, symbol, type
+                         FROM token_cache
+                         WHERE "tokenId" = ANY($1::varchar[])`,
+                        [distinctTokenIds],
+                    );
+                const metaMap = new Map(tokenMeta.map(t => [t.tokenId, t]));
+
+                issuances = [...mintsByToken.entries()].map(([tokenId, data]) => {
+                    const meta = metaMap.get(tokenId);
+                    return {
+                        tokenId,
+                        name: meta?.name ?? null,
+                        symbol: meta?.symbol ?? null,
+                        type: meta?.type ?? null,
+                        supply: data.total,
+                        mintDate: data.mintDate ? new Date(data.mintDate).toISOString().split('T')[0] : null,
+                        rawVc: data.rawVc,
+                    };
+                });
+            }
         }
 
         // Aggregate lifecycle stats for NFT tokens: total minted (all serials) and
@@ -263,9 +292,20 @@ export class PgMethodologyRepository extends MethodologyRepository {
                     [nftTokenIds],
                 );
 
+            const nftStatMap = new Map(nftStats.map(s => [s.tokenId, s]));
+
             for (const s of nftStats) {
                 totalIssued += parseInt(s.total_minted, 10);
                 totalRetired += parseInt(s.total_retired, 10);
+            }
+
+            // nft_cache is ground truth for NFT supply — overwrite VC-derived supply
+            // which can be incomplete when mints occurred on sub-topics not searched.
+            for (const issuance of issuances) {
+                if (issuance.type === TokenType.NonFungibleUnique) {
+                    const stat = nftStatMap.get(issuance.tokenId);
+                    if (stat) issuance.supply = parseInt(stat.total_minted, 10);
+                }
             }
         }
 

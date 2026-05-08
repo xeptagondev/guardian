@@ -81,9 +81,7 @@ const issuancePeriod = ref<TimePeriod>('monthly');
 const retirementPeriod = ref<TimePeriod>('monthly');
 
 const issuanceSeriesData = computed(() => buildIssuanceSeries(issuancePeriod.value));
-const issuanceSeriesTotal = computed(() =>
-    Math.round(issuanceSeriesData.value.reduce((s, d) => s + d.value, 0) * 10) / 10,
-);
+const issuanceSeriesTotal = computed(() => issuanceTotal.value);
 
 const retirementSeriesData = computed(() => buildRetirementSeries(retirementPeriod.value));
 const retirementSeriesTotal = computed(() =>
