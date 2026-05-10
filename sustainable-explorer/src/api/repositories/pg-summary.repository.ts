@@ -10,7 +10,8 @@ export class PgSummaryRepository {
                 SELECT
                     (documents -> 'credentialSubject' -> 0 ->> 'amount')::numeric AS amount,
                     "consensusTimestamp"::double precision                          AS ts,
-                    documents -> 'credentialSubject' -> 0 ->> 'tokenId'            AS token_id
+                    "consensusTimestamp"                                            AS consensus_ts,
+                    documents ->> 'issuer'                                         AS issuer_did
                 FROM message
                 WHERE type = 'VC-Document'
                   AND documents -> 'credentialSubject' -> 0 ->> 'type' ILIKE '%MintToken%'
@@ -31,18 +32,35 @@ export class PgSummaryRepository {
                     SELECT json_agg(r ORDER BY r.total_issued DESC)
                     FROM (
                         SELECT
-                            COALESCE(bv_reg."displayName", bv_credit."registryDid", 'Unknown') AS registry,
+                            COALESCE(reg.display_name, m.issuer_did, 'Unknown') AS registry,
                             SUM(m.amount)::bigint AS total_issued
                         FROM mints m
-                        LEFT JOIN business_view bv_credit
-                            ON bv_credit."viewType" = 'CREDIT'
-                            AND bv_credit."businessData" ->> 'tokenId' = m.token_id
-                        LEFT JOIN business_view bv_reg
-                            ON bv_reg."viewType" = 'REGISTRY'
-                            AND bv_reg."registryDid" = bv_credit."registryDid"
+                        LEFT JOIN LATERAL (
+                            SELECT "displayName" AS display_name
+                            FROM business_view
+                            WHERE "viewType" = 'REGISTRY'
+                              AND "registryDid" = m.issuer_did
+                            ORDER BY "createdAt" DESC NULLS LAST
+                            LIMIT 1
+                        ) reg ON m.issuer_did IS NOT NULL
                         GROUP BY 1
                     ) r
-                ) AS registry_breakdown
+                ) AS registry_breakdown,
+                (
+                    SELECT json_agg(s ORDER BY s.total_issued DESC)
+                    FROM (
+                        SELECT
+                            COALESCE(NULLIF(proj."businessData" ->> 'sector', ''), 'Others') AS sector,
+                            SUM(m.amount)::bigint AS total_issued
+                        FROM mints m
+                        JOIN project_mint_link pml
+                            ON pml.mint_consensus_timestamp = m.consensus_ts
+                        JOIN business_view proj
+                            ON proj."sourceTimestamp" = pml.project_source_timestamp
+                            AND proj."viewType" = 'PROJECT'
+                        GROUP BY 1
+                    ) s
+                ) AS sector_breakdown
         `;
 
         const retiredSql = `
@@ -56,6 +74,7 @@ export class PgSummaryRepository {
                 total_issued: string;
                 timeline: Array<{ period: string; total_issued: string }> | null;
                 registry_breakdown: Array<{ registry: string; total_issued: string }> | null;
+                sector_breakdown: Array<{ sector: string; total_issued: string }> | null;
             }>,
             Array<{ total_retired: string }>,
         ] = await Promise.all([
@@ -78,6 +97,10 @@ export class PgSummaryRepository {
             registryBreakdown: (row?.registry_breakdown ?? []).map(r => ({
                 registry: r.registry,
                 totalIssued: parseInt(r.total_issued, 10),
+            })),
+            sectorBreakdown: (row?.sector_breakdown ?? []).map(s => ({
+                sector: s.sector,
+                totalIssued: parseInt(s.total_issued, 10),
             })),
         };
     }

@@ -10,12 +10,18 @@ export interface RegistryBreakdownItemDto {
     totalIssued: number;
 }
 
+export interface SectorBreakdownItemDto {
+    sector: string;
+    totalIssued: number;
+}
+
 export interface DashboardSummaryDto {
     totalIssued: number;
     totalRetired: number;
     totalActive: number;
     timeline: TimelinePointDto[];
     registryBreakdown: RegistryBreakdownItemDto[];
+    sectorBreakdown: SectorBreakdownItemDto[];
 }
 
 const emptyDashboardSummary = (): DashboardSummaryDto => ({
@@ -24,6 +30,7 @@ const emptyDashboardSummary = (): DashboardSummaryDto => ({
     totalActive: 0,
     timeline: [],
     registryBreakdown: [],
+    sectorBreakdown: [],
 });
 
 export const useDashboardSummaryApi = (opts: { network: Ref<NetworkId | string> }) => {

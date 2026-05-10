@@ -512,20 +512,26 @@ export function useDashboard(
             .sort((a, b) => b.projectCount - a.projectCount);
     });
 
-    // Override sectorBreakdown — group real projects by normalized sector
+    // Override sectorBreakdown — project counts from local batch, credit counts from API
     const sectorBreakdownReal = computed(() => {
-        const groups: Record<string, { projectCount: number; creditCount: number }> = {};
+        const projectGroups: Record<string, number> = {};
         for (const p of _realProjects.value) {
             const label = p.sector || 'Others';
-            if (!groups[label]) groups[label] = { projectCount: 0, creditCount: 0 };
-            groups[label].projectCount++;
-            groups[label].creditCount += p.totalIssued ?? p.credits ?? 0;
+            projectGroups[label] = (projectGroups[label] ?? 0) + 1;
         }
-        return Object.entries(groups)
-            .map(([label, data]) => ({
+
+        const creditMap: Record<string, number> = {};
+        for (const s of dashboardSummary.value?.sectorBreakdown ?? []) {
+            const label = s.sector || 'Others';
+            creditMap[label] = (creditMap[label] ?? 0) + s.totalIssued;
+        }
+
+        const allLabels = new Set([...Object.keys(projectGroups), ...Object.keys(creditMap)]);
+        return Array.from(allLabels)
+            .map(label => ({
                 label,
-                projectCount: data.projectCount,
-                creditCount: data.creditCount,
+                projectCount: projectGroups[label] ?? 0,
+                creditCount: creditMap[label] ?? 0,
                 color: getSectorColor(label),
             }))
             .sort((a, b) => b.projectCount - a.projectCount);

@@ -16,6 +16,14 @@ export class RegistryBreakdownItemDto {
     totalIssued: number;
 }
 
+export class SectorBreakdownItemDto {
+    @ApiProperty({ description: 'Sector label derived from linked project businessData' })
+    sector: string;
+
+    @ApiProperty({ description: 'Total MintToken VC amounts issued under this sector' })
+    totalIssued: number;
+}
+
 export class DashboardSummaryDto {
     @ApiProperty({ description: 'Total credits issued (sum of all MintToken VC amounts)' })
     totalIssued: number;
@@ -31,4 +39,7 @@ export class DashboardSummaryDto {
 
     @ApiProperty({ type: [RegistryBreakdownItemDto], description: 'Issuances grouped by registry' })
     registryBreakdown: RegistryBreakdownItemDto[];
+
+    @ApiProperty({ type: [SectorBreakdownItemDto], description: 'Issuances grouped by sector (linked projects only)' })
+    sectorBreakdown: SectorBreakdownItemDto[];
 }
