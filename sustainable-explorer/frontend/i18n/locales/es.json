@@ -202,22 +202,28 @@
     },
     "credits": {
         "title": "Emisiones",
-        "subtitle": "Tokens emitidos en Hedera",
-        "searchPlaceholder": "Buscar por nombre, símbolo, ID de token...",
+        "subtitle": "Eventos de acuñación de créditos de carbono en todos los proyectos de la red Guardian",
+        "searchPlaceholder": "Buscar por nombre de proyecto, token o ID de token...",
         "noMatch": "Ninguna emisión coincide con tus filtros",
         "supplyTooltip": "Suministro total de tokens acuñado en Hedera. Para tokens fungibles es el suministro total. Para NFTs es el número de serials únicos.",
+        "amountTooltip": "Número de créditos de carbono acuñados en este evento.",
         "columns": {
+            "date": "Fecha",
             "token": "Token",
-            "symbol": "Símbolo",
-            "type": "Tipo",
-            "supply": "Suministro",
+            "amount": "Cantidad",
             "project": "Proyecto",
+            "methodology": "Metodología",
+            "type": "Tipo",
             "registry": "Registro",
+            "symbol": "Símbolo",
+            "supply": "Suministro",
             "rawData": "Datos brutos"
         },
         "filters": {
             "tokenType": "Tipo de token",
-            "registry": "Registro"
+            "registry": "Registro",
+            "dateFrom": "Desde",
+            "dateTo": "Hasta"
         }
     },
     "methodologies": {

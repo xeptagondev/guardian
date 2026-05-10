@@ -1,3 +1,20 @@
+export interface IssuanceListItem {
+    mintConsensusTimestamp: string;
+    tokenId: string | null;
+    tokenName: string | null;
+    symbol: string | null;
+    tokenType: string | null;
+    amount: number;
+    mintDate: string | null;
+    projectId: string | null;
+    projectName: string | null;
+    methodology: string | null;
+    methodologyId: string | null;
+    country: string | null;
+    registry: string | null;
+    linkMethod: string;
+}
+
 export interface ProjectIssuance {
     tokenId: string;
     name: string | null;

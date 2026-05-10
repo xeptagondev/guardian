@@ -11,6 +11,7 @@ import { MethodologiesController } from './controllers/methodologies.controller'
 import { PolicySchemasController } from './controllers/policy-schemas.controller';
 import { ProjectsController } from './controllers/project.controller';
 import { SummaryController } from './controllers/summary.controller';
+import { IssuancesController } from './controllers/issuance.controller';
 
 // Services
 import { RegistriesService } from './services/registries.service';
@@ -18,6 +19,7 @@ import { MethodologiesService } from './services/methodologies.service';
 import { PolicySchemasService } from './services/policy-schemas.service';
 import { ProjectsService } from './services/project.service';
 import { SummaryService } from './services/summary.service';
+import { IssuancesService } from './services/issuance.service';
 
 @Module({
     imports: [
@@ -32,6 +34,7 @@ import { SummaryService } from './services/summary.service';
         PolicySchemasController,
         ProjectsController,
         SummaryController,
+        IssuancesController,
     ],
     providers: [
         NetworkDataSourceRegistry,
@@ -40,6 +43,7 @@ import { SummaryService } from './services/summary.service';
         PolicySchemasService,
         ProjectsService,
         SummaryService,
+        IssuancesService,
     ],
 })
 export class ApiModule {}

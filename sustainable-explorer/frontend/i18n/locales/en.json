@@ -202,22 +202,28 @@
     },
     "credits": {
         "title": "Issuances",
-        "subtitle": "Tokens issued on Hedera",
-        "searchPlaceholder": "Search by name, symbol, token ID...",
+        "subtitle": "Carbon credit mint events across all projects on the Guardian network",
+        "searchPlaceholder": "Search by project name, token name, or token ID...",
         "noMatch": "No issuances match your filters",
         "supplyTooltip": "Total token supply minted on Hedera. For fungible tokens this is the total supply. For NFTs this is the number of unique serials.",
+        "amountTooltip": "Number of carbon credits minted in this event.",
         "columns": {
+            "date": "Date",
             "token": "Token",
-            "symbol": "Symbol",
-            "type": "Type",
-            "supply": "Supply",
+            "amount": "Amount",
             "project": "Project",
+            "methodology": "Methodology",
+            "type": "Type",
             "registry": "Registry",
+            "symbol": "Symbol",
+            "supply": "Supply",
             "rawData": "Raw Data"
         },
         "filters": {
             "tokenType": "Token Type",
-            "registry": "Registry"
+            "registry": "Registry",
+            "dateFrom": "From",
+            "dateTo": "To"
         }
     },
     "methodologies": {
