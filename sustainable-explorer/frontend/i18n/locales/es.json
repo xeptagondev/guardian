@@ -141,7 +141,24 @@
         "mtco2AnnualEst": "MtCO2 anual est.",
         "sector": "Sector",
         "registry": "Registro",
-        "totalIssuancesLabel": "Emisiones totales"
+        "totalIssuancesLabel": "Emisiones totales",
+        "activityTypes": {
+            "project": "Nuevo proyecto registrado",
+            "policy": "Política publicada",
+            "registry": "Nuevo registro incorporado",
+            "credit": "Emisiones acuñadas",
+            "verification": "Verificación completada",
+            "retirement": "Créditos retirados"
+        },
+        "sectors": {
+            "Energy": "Energía",
+            "Industrial Process": "Proceso Industrial",
+            "Land Use & Forestry": "Uso del Suelo y Silvicultura",
+            "Waste": "Residuos",
+            "Fugitive Emissions": "Emisiones Fugitivas",
+            "Transport": "Transporte",
+            "Others": "Otros"
+        }
     },
     "projects": {
         "title": "Proyectos",

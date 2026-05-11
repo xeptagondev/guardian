@@ -141,7 +141,24 @@
         "mtco2AnnualEst": "MtCO2 Annual Est.",
         "sector": "Sector",
         "registry": "Registry",
-        "totalIssuancesLabel": "Total Issuances"
+        "totalIssuancesLabel": "Total Issuances",
+        "activityTypes": {
+            "project": "New project registered",
+            "policy": "Policy published",
+            "registry": "New registry joined",
+            "credit": "Issuances minted",
+            "verification": "Verification completed",
+            "retirement": "Credits retired"
+        },
+        "sectors": {
+            "Energy": "Energy",
+            "Industrial Process": "Industrial Process",
+            "Land Use & Forestry": "Land Use & Forestry",
+            "Waste": "Waste",
+            "Fugitive Emissions": "Fugitive Emissions",
+            "Transport": "Transport",
+            "Others": "Others"
+        }
     },
     "projects": {
         "title": "Projects",

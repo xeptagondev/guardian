@@ -573,7 +573,7 @@ const filteredStats = computed(() => {
                             <div class="space-y-2 flex-1 min-w-0 pt-1">
                                 <div v-for="s in sectorBreakdown" :key="s.label" class="flex items-center gap-2">
                                     <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: s.color }" />
-                                    <span class="text-xs text-muted-foreground truncate flex-1">{{ s.label }}</span>
+                                    <span class="text-xs text-muted-foreground truncate flex-1">{{ $t(`dashboard.sectors.${s.label}`, s.label) }}</span>
                                     <span class="text-xs font-medium text-foreground tabular-nums shrink-0">
                                         {{ sectorTotal > 0 ? ((chartMode === 'projects' ? s.projectCount : s.creditCount) / sectorTotal * 100).toFixed(1) : '0.0' }}%
                                     </span>
@@ -761,7 +761,7 @@ const filteredStats = computed(() => {
                             <component :is="activityIcons[item.type]" :class="[activityColors[item.type], 'h-4 w-4']" />
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium text-foreground">{{ item.action }}</p>
+                            <p class="text-sm font-medium text-foreground">{{ $t(`dashboard.activityTypes.${item.type}`, item.action) }}</p>
                             <p class="text-xs text-muted-foreground truncate">{{ item.detail }}</p>
                         </div>
                         <div class="flex items-center gap-1 shrink-0">
