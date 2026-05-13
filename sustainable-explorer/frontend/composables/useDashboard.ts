@@ -1,5 +1,6 @@
 import type { ActivityItem, MapPoint, MapCountry } from '~/types/models';
 import { formatCredits } from '~/lib/format';
+import { allocateDonutColors } from '~/lib/chart-colors';
 
 function relativeTime(dateStr: string): string {
     const now = Date.now();
@@ -354,29 +355,25 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             totalCredits += p.credits;
         }
 
-        const sectorColorMap: Record<string, string> = {
-            'Renewable Energy': '#1a9850',
-            'Forestry': '#0f6b3a',
-            'Blue Carbon': '#0a97d9',
-            'Energy Efficiency': '#66bd63',
-            'Agriculture': '#d9ef8b',
-            'Water': '#26bde2',
-            'Waste': '#a6d96a',
-        };
-
         const useCredits = totalCredits > 0;
         const denom = useCredits ? totalCredits : (totalProjects || 1);
 
-        const sectors = Object.keys(catCounts)
+        const sectorRows = Object.keys(catCounts)
             .map(label => {
                 const numerator = useCredits ? catCredits[label] : catCounts[label];
                 return {
                     label,
                     value: Math.round((numerator / denom) * 100),
-                    color: sectorColorMap[label] || '#d4d4d8',
                 };
             })
             .sort((a, b) => b.value - a.value);
+
+        const sectorSeed = `country-sectors|${code}|${sectorRows.map(s => `${s.label}:${s.value}`).join('|')}`;
+        const sectorColors = allocateDonutColors(sectorRows.length, sectorSeed);
+        const sectors = sectorRows.map((s, i) => ({
+            ...s,
+            color: sectorColors[i] ?? 'hsl(220, 13%, 75%)',
+        }));
 
         const regCredits: Record<string, number> = {};
         const regCounts: Record<string, number> = {};

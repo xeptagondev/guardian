@@ -2,6 +2,7 @@
 import { BarChart3, TrendingUp, ArrowUpRight, ArrowDownRight } from 'lucide-vue-next';
 import { MOCK_PROJECTS, MOCK_CREDITS } from '~/data';
 import { formatCredits } from '~/lib/format';
+import { allocateDonutColors } from '~/lib/chart-colors';
 
 const { t } = useI18n();
 
@@ -28,18 +29,20 @@ const byMethodology = computed(() => {
         total += p.credits;
     }
 
-    const colors = ['bg-chart-1', 'bg-chart-2', 'bg-chart-3', 'bg-chart-4', 'bg-chart-5'];
-    return Object.entries(catCredits)
+    const rows = Object.entries(catCredits)
         .map(([name, credits]) => ({
             name,
             value: total > 0 ? Math.round((credits / total) * 100) : 0,
         }))
         .sort((a, b) => b.value - a.value)
-        .slice(0, 5)
-        .map((item, idx) => ({
-            ...item,
-            color: colors[idx] || 'bg-chart-5',
-        }));
+        .slice(0, 5);
+
+    const seed = `analytics-methodology|${rows.map(r => `${r.name}:${r.value}`).join('|')}`;
+    const palette = allocateDonutColors(rows.length, seed);
+    return rows.map((item, idx) => ({
+        ...item,
+        accentColor: palette[idx] ?? 'hsl(220, 13%, 75%)',
+    }));
 });
 </script>
 
@@ -82,9 +85,8 @@ const byMethodology = computed(() => {
                             <span class="text-xs text-muted-foreground w-32 shrink-0 text-right">{{ m.name }}</span>
                             <div class="flex-1 h-7 bg-muted/50 rounded-md overflow-hidden">
                                 <div
-                                    :class="m.color"
                                     class="h-full rounded-md transition-all duration-500"
-                                    :style="{ width: `${m.value}%` }"
+                                    :style="{ width: `${m.value}%`, backgroundColor: m.accentColor }"
                                 />
                             </div>
                             <span class="text-xs font-medium text-foreground w-10 text-right tabular-nums">{{ m.value }}%</span>
