@@ -64,6 +64,8 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
                 -- OrganizationName over the inline options.name (VC data wins).
                 -- Other types fall back to options.name / options.tokenName.
                 COALESCE(
+                    -- Highest priority: explicit organizationName in message options.attributes
+                    m.options->'attributes'->> 'organizationName',
                     sr_vc.cs ->> 'OrganizationName',
                     m.options->>'name',
                     m.options->>'tokenName'

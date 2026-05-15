@@ -77,6 +77,11 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
             await this.backfillProjectMappings();
         }
 
+        if (process.env.BACKFILL_REGISTRIES_ON_BOOT === 'true') {
+            this.logger.log('BACKFILL_REGISTRIES_ON_BOOT=true — rebuilding REGISTRY rows');
+            await this.backfillRegistryMappings();
+        }
+
         // Renew leadership periodically
         this.leaderInterval = setInterval(async () => {
             try {
@@ -448,6 +453,34 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(
             `Boot backfill: replayed ${processed}/${total} VCs through project mapper (errors: ${errors}); ${projectCount[0].count} project row(s) produced`,
         );
+    }
+
+    /**
+     * Boot-time backfill: rebuild REGISTRY rows in business_view.
+     *
+     * Uses message.options.attributes.organizationName as the highest-priority
+     * display name (handled in BusinessViewBuilderProcessor). This method
+     * deletes existing REGISTRY rows and enqueues the business view builder
+     * to repopulate them.
+     */
+    private async backfillRegistryMappings(): Promise<void> {
+        const probe: Array<{ count: string }> = await this.dataSource.query(
+            `SELECT COUNT(*)::text AS count FROM message
+             WHERE type='Standard Registry' OR (options->'attributes'->>'organizationName') IS NOT NULL`,
+        );
+        const total = parseInt(probe[0]?.count ?? '0', 10);
+        if (total === 0) return;
+
+        await this.dataSource.query(
+            `DELETE FROM business_view WHERE "viewType"='REGISTRY'`,
+        );
+
+        // Enqueue an immediate one-shot build to repopulate registry rows.
+        await this.businessViewQueue.add('build-business-views', {}, {
+            jobId: `business-view-build-initial-${Date.now()}`,
+        });
+
+        this.logger.log(`Boot backfill: enqueued business view builder to rebuild REGISTRY rows from ${total} message(s)`);
     }
 
     private async scheduleMvRefresh(): Promise<void> {
