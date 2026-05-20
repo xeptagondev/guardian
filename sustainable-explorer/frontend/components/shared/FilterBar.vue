@@ -8,7 +8,7 @@ const { t } = useI18n();
 export interface FilterOption {
     key: string;
     label: string;
-    options: { value: string; label: string; icon?: string }[];
+    options?: { value: string; label: string; icon?: string }[];
     multiSelect?: boolean;
     type?: 'select' | 'range' | 'yearRange';
     rangePlaceholder?: { min?: string; max?: string };
@@ -77,7 +77,7 @@ function getActiveLabel(filter: FilterOption): string {
         const count = active.split(',').length;
         return `${filter.label} (${count})`;
     }
-    return filter.options.find(o => o.value === active)?.label ?? filter.label;
+    return filter.options?.find(o => o.value === active)?.label ?? filter.label;
 }
 
 const hasActiveFilters = computed(() => {
@@ -175,7 +175,7 @@ if (import.meta.client) {
                 >
                     <option value="">{{ $t('common.from') }}</option>
                     <option
-                        v-for="opt in [...filter.options].sort((a, b) => a.value.localeCompare(b.value))"
+                        v-for="opt in [...(filter.options ?? [])].sort((a, b) => a.value.localeCompare(b.value))"
                         :key="opt.value"
                         :value="opt.value"
                     >{{ opt.label }}</option>
@@ -189,7 +189,7 @@ if (import.meta.client) {
                 >
                     <option value="">{{ $t('common.to') }}</option>
                     <option
-                        v-for="opt in [...filter.options].sort((a, b) => a.value.localeCompare(b.value))"
+                        v-for="opt in [...(filter.options ?? [])].sort((a, b) => a.value.localeCompare(b.value))"
                         :key="opt.value"
                         :value="opt.value"
                     >{{ opt.label }}</option>
@@ -232,7 +232,7 @@ if (import.meta.client) {
                         </button>
                         <div class="my-1 border-t" />
                         <button
-                            v-for="opt in filter.options"
+                            v-for="opt in (filter.options ?? [])"
                             :key="opt.value"
                             class="flex w-full items-center justify-start text-left gap-2 rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
                             :class="isMultiSelected(filter.key, opt.value) ? 'font-medium text-foreground' : 'text-muted-foreground'"
@@ -257,7 +257,7 @@ if (import.meta.client) {
                         class="absolute left-0 top-full mt-1 z-50 min-w-[10rem] max-h-[60vh] overflow-y-auto rounded-md border bg-popover p-1 shadow-md text-left"
                     >
                         <button
-                            v-for="opt in [{ value: 'all', label: `${t('common.all')} ${filter.label}` }, ...filter.options]"
+                            v-for="opt in [{ value: 'all', label: `${t('common.all')} ${filter.label}` }, ...(filter.options ?? [])]"
                             :key="opt.value"
                             class="flex w-full items-center justify-start text-left rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
                             :class="(activeFilters[filter.key] || 'all') === opt.value ? 'font-medium text-foreground' : 'text-muted-foreground'"
