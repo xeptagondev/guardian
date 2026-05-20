@@ -22,6 +22,51 @@ const TYPE_MAPPINGS: Record<string, string> = {
     'Token': 'CREDIT',
 };
 
+const ROLE_MAPPINGS: Array<{ mappedRole: string; patterns: RegExp[] }> = [
+    {
+        mappedRole: 'Project_Developer',
+        patterns: [
+            /project/i,
+            /developer/i,
+            /proponent/i,
+            /participant/i,
+            /farmer/i,
+            /supplier/i,
+        ],
+    },
+    {
+        mappedRole: 'VVB',
+        patterns: [
+            /\bvvb\b/i,
+            /verifier/i,
+            /verification/i,
+            /validation/i,
+            /analyst/i,
+            /auditor/i,
+        ],
+    },
+    {
+        mappedRole: 'Owner',
+        patterns: [
+            /owner/i,
+        ],
+    },
+];
+
+function normalizeRole(role: string | null | undefined): string {
+    if (!role) return 'Unknown';
+
+    const normalized = role.trim();
+
+    for (const { mappedRole, patterns } of ROLE_MAPPINGS) {
+        if (patterns.some((pattern) => pattern.test(normalized))) {
+            return mappedRole;
+        }
+    }
+
+    return 'Unknown';
+}
+
 @Processor(QUEUE_NAMES.BUSINESS_VIEW_BUILD)
 export class BusinessViewBuilderProcessor extends WorkerHost {
     private readonly logger = new Logger(BusinessViewBuilderProcessor.name);
@@ -147,12 +192,19 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
                 "userDid",
                 "policyTopicId",
                 "policyRole",
+                "role",
                 "consensusTimeStamp"
             )
             SELECT
                 m.options->>'issuer',
                 m."topicId",
                 m.options->>'role',
+                CASE
+                    WHEN m.options->>'role' ~* '(project|developer|proponent|participant|farmer|supplier|co[[:space:]_-]?operative)' THEN 'Project_Developer'
+                    WHEN m.options->>'role' ~* '(\\bvvb\\b|verifier|verification|validation|analyst|auditor)' THEN 'VVB'
+                    WHEN m.options->>'role' ~* '(owner|methodology)' THEN 'Owner'
+                    ELSE 'Unknown'
+                END,
                 m."consensusTimestamp"
             FROM message m
             WHERE m.type = 'Role-Document'
@@ -160,6 +212,7 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
               AND m."topicId" IS NOT NULL
             ON CONFLICT ("userDid", "policyTopicId") DO UPDATE SET
                 "policyRole" = EXCLUDED."policyRole",
+                "role" = EXCLUDED."role",
                 "consensusTimeStamp" = EXCLUDED."consensusTimeStamp"
         `);
 

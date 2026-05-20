@@ -11,6 +11,9 @@ export class User {
     @Column({ type: 'varchar', length: 100, nullable: true })
     policyRole: string | null;
 
+    @Column({ type: 'varchar', length: 50, default: 'Unknown' })
+    role: string;
+
     @Column({ type: 'varchar', length: 30 })
     consensusTimeStamp: string;
 }

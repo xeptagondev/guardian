@@ -98,6 +98,7 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
             "userDid"         VARCHAR(200) NOT NULL,
             "policyTopicId"   VARCHAR(30)  NOT NULL,
             "policyRole"      VARCHAR(100),
+            "role"            VARCHAR(50)  NOT NULL DEFAULT 'Unknown',
             "consensusTimeStamp" VARCHAR(30) NOT NULL,
             PRIMARY KEY ("userDid", "policyTopicId")
         )
