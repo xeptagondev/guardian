@@ -56,7 +56,7 @@ const ROLE_MAPPINGS: Array<{ mappedRole: string; patterns: RegExp[] }> = [
 function normalizeRole(role: string | null | undefined): string {
     if (!role) return 'Unknown';
 
-    const normalized = role.trim();
+    const normalized = role.trim().toLowerCase();
 
     for (const { mappedRole, patterns } of ROLE_MAPPINGS) {
         if (patterns.some((pattern) => pattern.test(normalized))) {
@@ -200,9 +200,9 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
                 m."topicId",
                 m.options->>'role',
                 CASE
-                    WHEN m.options->>'role' ~* '(project|developer|proponent|participant|farmer|supplier|co[[:space:]_-]?operative)' THEN 'Project_Developer'
-                    WHEN m.options->>'role' ~* '(\\bvvb\\b|verifier|verification|validation|analyst|auditor)' THEN 'VVB'
-                    WHEN m.options->>'role' ~* '(owner|methodology)' THEN 'Owner'
+                    WHEN lower(trim(COALESCE(m.options->>'role', ''))) ~ '(project|developer|proponent|participant|farmer|supplier|co[[:space:]_-]?operative)' THEN 'Project_Developer'
+                    WHEN lower(trim(COALESCE(m.options->>'role', ''))) ~ '(^|[^a-z0-9])vvb([^a-z0-9]|$)|verifier|verification|validation|analyst|auditor' THEN 'VVB'
+                    WHEN lower(trim(COALESCE(m.options->>'role', ''))) ~ '(owner|methodology)' THEN 'Owner'
                     ELSE 'Unknown'
                 END,
                 m."consensusTimestamp"
