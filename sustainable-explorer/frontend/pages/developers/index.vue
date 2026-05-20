@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Users } from 'lucide-vue-next';
+import { Users, Sparkles } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 
 const { t } = useI18n();
@@ -11,12 +11,25 @@ function goToProjectsForDeveloper(name: string) {
 
 const allDevelopers = computed(() => developers.value);
 
-const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters } =
+const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters, applyPreset } =
     useFilteredPagination(allDevelopers, {
         searchFields: ['name', 'country'],
         pageSize: 10,
         defaultSort: { key: 'projects', dir: 'desc' },
     });
+
+const presets = computed(() => [
+    { label: t('developers.presets.active'), filters: { status: 'Active' } },
+    { label: t('developers.presets.goldStandard'), search: 'Gold Standard' },
+    { label: t('developers.presets.forestry'), search: 'Forestry' },
+]);
+
+const summaryStats = computed(() => {
+    const f = filtered.value;
+    const totalProjects = f.reduce((sum, d) => sum + d.projects, 0);
+    const uniqueCountries = new Set(f.map(d => d.country).filter(c => c && c !== '—')).size;
+    return { totalProjects, uniqueCountries };
+});
 
 const filters = computed<FilterOption[]>(() => [
     {
@@ -52,6 +65,30 @@ const statusColor: Record<string, string> = {
                 @filter="setFilter"
                 @clear="clearFilters"
             />
+
+            <div class="flex items-center gap-2 mt-2.5 flex-wrap">
+                <span class="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Sparkles class="h-3 w-3" /> {{ $t('developers.quickFilters') }}
+                </span>
+                <button
+                    v-for="preset in presets"
+                    :key="preset.label"
+                    class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    @click="applyPreset({ search: preset.search, filters: preset.filters } as any)"
+                >
+                    {{ preset.label }}
+                </button>
+            </div>
+        </div>
+
+        <div v-if="filtered.length !== total" class="px-6 pb-3">
+            <div class="flex items-center gap-4 rounded-lg bg-muted/50 px-4 py-2.5 text-xs">
+                <span class="font-medium text-foreground">{{ $t('developers.developersFound', { count: filtered.length }) }}</span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">{{ $t('developers.totalProjects') }} <strong class="text-foreground">{{ summaryStats.totalProjects }}</strong></span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">{{ $t('developers.countriesCovered') }} <strong class="text-foreground">{{ summaryStats.uniqueCountries }}</strong></span>
+            </div>
         </div>
 
         <div class="px-6 pb-6">
@@ -137,9 +174,9 @@ const statusColor: Record<string, string> = {
 
             <Pagination
                 v-model:current-page="currentPage"
+                v-model:page-size="pageSize"
                 :total-pages="totalPages"
                 :total-items="filtered.length"
-                :page-size="pageSize"
             />
         </div>
     </div>

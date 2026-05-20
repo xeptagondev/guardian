@@ -148,6 +148,8 @@ export function useProjects() {
         vintages: [...new Set(projects.value.map(p => p.vintage).filter(Boolean))].sort((a, b) => b.localeCompare(a)),
         sectors: [...new Set(projects.value.map(p => p.sector).filter(Boolean))].sort(),
         sectoralScopes: [...new Set(projects.value.map(p => p.sectoralScope).filter(Boolean))].sort(),
+        countries: [...new Set(projects.value.map(p => p.country).filter(Boolean))].sort(),
+        methodologies: [...new Set(projects.value.map(p => p.methodology).filter(Boolean))].sort(),
     }));
 
     return { projects, total, filterOptions, pending, error };

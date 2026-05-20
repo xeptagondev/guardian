@@ -10,6 +10,10 @@ export interface FilterOption {
     label: string;
     options: { value: string; label: string; icon?: string }[];
     multiSelect?: boolean;
+    type?: 'select' | 'range' | 'yearRange';
+    rangePlaceholder?: { min?: string; max?: string };
+    rangeMin?: number;
+    rangeMax?: number;
 }
 
 const props = defineProps<{
@@ -62,6 +66,10 @@ function isMultiSelected(key: string, value: string): boolean {
     return current.split(',').includes(value);
 }
 
+function isRangeActive(filter: FilterOption): boolean {
+    return !!(props.activeFilters[filter.key + '__min'] || props.activeFilters[filter.key + '__max']);
+}
+
 function getActiveLabel(filter: FilterOption): string {
     const active = props.activeFilters[filter.key];
     if (!active || active === 'all') return filter.label;
@@ -107,82 +115,159 @@ if (import.meta.client) {
             />
         </div>
 
-        <!-- Filter dropdowns -->
+        <!-- Filter dropdowns / range inputs -->
         <div
             v-for="filter in filters"
             :key="filter.key"
             :ref="(el) => { if (el) dropdownRefs[filter.key] = el as HTMLElement }"
             class="relative"
         >
-            <button
-                class="inline-flex items-center justify-start text-left gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
-                :class="activeFilters[filter.key] && activeFilters[filter.key] !== 'all'
-                    ? 'border-primary/30 bg-primary/5 text-primary'
-                    : 'border-input text-muted-foreground'"
-                @click.stop="toggleDropdown(filter.key)"
+            <!-- Numeric range: two number inputs inline -->
+            <div
+                v-if="filter.type === 'range'"
+                :class="[
+                    'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs h-8',
+                    isRangeActive(filter) ? 'border-primary/30 bg-primary/5' : 'border-input',
+                ]"
             >
-                {{ getActiveLabel(filter) }}
-                <svg class="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-            </button>
+                <span :class="['shrink-0 font-medium', isRangeActive(filter) ? 'text-primary' : 'text-muted-foreground']">
+                    {{ filter.label }}:
+                </span>
+                <input
+                    type="number"
+                    :value="activeFilters[filter.key + '__min'] || ''"
+                    :placeholder="filter.rangePlaceholder?.min ?? $t('common.from')"
+                    :min="filter.rangeMin"
+                    :max="filter.rangeMax"
+                    class="w-14 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+                    :class="isRangeActive(filter) ? 'text-primary' : 'text-foreground'"
+                    @input="emit('filter', filter.key + '__min', ($event.target as HTMLInputElement).value)"
+                />
+                <span class="text-muted-foreground">–</span>
+                <input
+                    type="number"
+                    :value="activeFilters[filter.key + '__max'] || ''"
+                    :placeholder="filter.rangePlaceholder?.max ?? $t('common.to')"
+                    :min="filter.rangeMin"
+                    :max="filter.rangeMax"
+                    class="w-14 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+                    :class="isRangeActive(filter) ? 'text-primary' : 'text-foreground'"
+                    @input="emit('filter', filter.key + '__max', ($event.target as HTMLInputElement).value)"
+                />
+            </div>
 
-            <Transition
-                enter-active-class="transition ease-out duration-100"
-                enter-from-class="opacity-0 -translate-y-1"
-                enter-to-class="opacity-100 translate-y-0"
-                leave-active-class="transition ease-in duration-75"
-                leave-from-class="opacity-100"
-                leave-to-class="opacity-0"
+            <!-- Year range: two selects inline -->
+            <div
+                v-else-if="filter.type === 'yearRange'"
+                :class="[
+                    'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs h-8',
+                    isRangeActive(filter) ? 'border-primary/30 bg-primary/5' : 'border-input',
+                ]"
             >
-                <!-- Multi-select dropdown -->
-                <div
-                    v-if="openDropdown === filter.key && filter.multiSelect"
-                    class="absolute left-0 top-full mt-1 z-50 min-w-[12rem] max-h-64 overflow-y-auto rounded-md border bg-popover p-1 shadow-md text-left"
+                <span :class="['shrink-0 font-medium', isRangeActive(filter) ? 'text-primary' : 'text-muted-foreground']">
+                    {{ filter.label }}:
+                </span>
+                <select
+                    :value="activeFilters[filter.key + '__min'] || ''"
+                    class="bg-transparent text-xs outline-none cursor-pointer"
+                    :class="isRangeActive(filter) ? 'text-primary' : 'text-muted-foreground'"
+                    @change="emit('filter', filter.key + '__min', ($event.target as HTMLSelectElement).value)"
                 >
-                    <button
-                        class="flex w-full items-center justify-start text-left rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent text-muted-foreground"
-                        @click="emit('filter', filter.key, 'all')"
-                    >
-                        {{ $t('common.clearSelection') }}
-                    </button>
-                    <div class="my-1 border-t" />
-                    <button
-                        v-for="opt in filter.options"
+                    <option value="">{{ $t('common.from') }}</option>
+                    <option
+                        v-for="opt in [...filter.options].sort((a, b) => a.value.localeCompare(b.value))"
                         :key="opt.value"
-                        class="flex w-full items-center justify-start text-left gap-2 rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
-                        :class="isMultiSelected(filter.key, opt.value) ? 'font-medium text-foreground' : 'text-muted-foreground'"
-                        @click.stop="toggleMultiSelect(filter.key, opt.value)"
+                        :value="opt.value"
+                    >{{ opt.label }}</option>
+                </select>
+                <span class="text-muted-foreground">–</span>
+                <select
+                    :value="activeFilters[filter.key + '__max'] || ''"
+                    class="bg-transparent text-xs outline-none cursor-pointer"
+                    :class="isRangeActive(filter) ? 'text-primary' : 'text-muted-foreground'"
+                    @change="emit('filter', filter.key + '__max', ($event.target as HTMLSelectElement).value)"
+                >
+                    <option value="">{{ $t('common.to') }}</option>
+                    <option
+                        v-for="opt in [...filter.options].sort((a, b) => a.value.localeCompare(b.value))"
+                        :key="opt.value"
+                        :value="opt.value"
+                    >{{ opt.label }}</option>
+                </select>
+            </div>
+
+            <!-- Default: button + dropdown -->
+            <template v-else>
+                <button
+                    class="inline-flex items-center justify-start text-left gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+                    :class="activeFilters[filter.key] && activeFilters[filter.key] !== 'all'
+                        ? 'border-primary/30 bg-primary/5 text-primary'
+                        : 'border-input text-muted-foreground'"
+                    @click.stop="toggleDropdown(filter.key)"
+                >
+                    {{ getActiveLabel(filter) }}
+                    <svg class="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+
+                <Transition
+                    enter-active-class="transition ease-out duration-100"
+                    enter-from-class="opacity-0 -translate-y-1"
+                    enter-to-class="opacity-100 translate-y-0"
+                    leave-active-class="transition ease-in duration-75"
+                    leave-from-class="opacity-100"
+                    leave-to-class="opacity-0"
+                >
+                    <!-- Multi-select dropdown -->
+                    <div
+                        v-if="openDropdown === filter.key && filter.multiSelect"
+                        class="absolute left-0 top-full mt-1 z-50 min-w-[12rem] max-h-64 overflow-y-auto rounded-md border bg-popover p-1 shadow-md text-left"
                     >
-                        <span
-                            class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors"
-                            :class="isMultiSelected(filter.key, opt.value) ? 'bg-primary border-primary' : 'border-input'"
+                        <button
+                            class="flex w-full items-center justify-start text-left rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent text-muted-foreground"
+                            @click="emit('filter', filter.key, 'all')"
                         >
-                            <svg v-if="isMultiSelected(filter.key, opt.value)" class="h-2.5 w-2.5 text-primary-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-                            </svg>
-                        </span>
-                        <img v-if="opt.icon" :src="opt.icon" :alt="opt.label" class="h-4 w-4 rounded-sm shrink-0" />
-                        <span class="text-left">{{ opt.label }}</span>
-                    </button>
-                </div>
+                            {{ $t('common.clearSelection') }}
+                        </button>
+                        <div class="my-1 border-t" />
+                        <button
+                            v-for="opt in filter.options"
+                            :key="opt.value"
+                            class="flex w-full items-center justify-start text-left gap-2 rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
+                            :class="isMultiSelected(filter.key, opt.value) ? 'font-medium text-foreground' : 'text-muted-foreground'"
+                            @click.stop="toggleMultiSelect(filter.key, opt.value)"
+                        >
+                            <span
+                                class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors"
+                                :class="isMultiSelected(filter.key, opt.value) ? 'bg-primary border-primary' : 'border-input'"
+                            >
+                                <svg v-if="isMultiSelected(filter.key, opt.value)" class="h-2.5 w-2.5 text-primary-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                                </svg>
+                            </span>
+                            <img v-if="opt.icon" :src="opt.icon" :alt="opt.label" class="h-4 w-4 rounded-sm shrink-0" />
+                            <span class="text-left">{{ opt.label }}</span>
+                        </button>
+                    </div>
 
-                <!-- Single-select dropdown -->
-                <div
-                    v-else-if="openDropdown === filter.key"
-                    class="absolute left-0 top-full mt-1 z-50 min-w-[10rem] rounded-md border bg-popover p-1 shadow-md text-left"
-                >
-                    <button
-                        v-for="opt in [{ value: 'all', label: `${t('common.all')} ${filter.label}` }, ...filter.options]"
-                        :key="opt.value"
-                        class="flex w-full items-center justify-start text-left rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
-                        :class="(activeFilters[filter.key] || 'all') === opt.value ? 'font-medium text-foreground' : 'text-muted-foreground'"
-                        @click="selectFilter(filter.key, opt.value)"
+                    <!-- Single-select dropdown -->
+                    <div
+                        v-else-if="openDropdown === filter.key"
+                        class="absolute left-0 top-full mt-1 z-50 min-w-[10rem] max-h-[60vh] overflow-y-auto rounded-md border bg-popover p-1 shadow-md text-left"
                     >
-                        {{ opt.label }}
-                    </button>
-                </div>
-            </Transition>
+                        <button
+                            v-for="opt in [{ value: 'all', label: `${t('common.all')} ${filter.label}` }, ...filter.options]"
+                            :key="opt.value"
+                            class="flex w-full items-center justify-start text-left rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
+                            :class="(activeFilters[filter.key] || 'all') === opt.value ? 'font-medium text-foreground' : 'text-muted-foreground'"
+                            @click="selectFilter(filter.key, opt.value)"
+                        >
+                            {{ opt.label }}
+                        </button>
+                    </div>
+                </Transition>
+            </template>
         </div>
 
         <!-- Clear filters -->

@@ -204,7 +204,11 @@
       "vintage": "Vintage",
       "sector": "Sector",
       "sectoralScope": "Sectoral Scope",
-      "sdgs": "SDGs"
+      "sdgs": "SDGs",
+      "developer": "Developer",
+      "country": "Country",
+      "methodology": "Methodology",
+      "issuances": "Issuances"
     },
     "presets": {
       "issuingForestry": "Issuing Forestry",
@@ -294,6 +298,16 @@
     "filters": {
       "tokenType": "Token Type",
       "registry": "Registry"
+    },
+    "quickFilters": "Quick filters:",
+    "creditsFound": "{count} issuances found",
+    "totalSupply": "Total supply:",
+    "projectsCovered": "Projects:",
+    "registriesCovered": "Registries:",
+    "presets": {
+      "fungible": "Fungible Tokens",
+      "nonFungible": "Non-Fungible",
+      "goldStandard": "Gold Standard"
     }
   },
   "methodologies": {
@@ -568,6 +582,15 @@
     },
     "filters": {
       "status": "Status"
+    },
+    "quickFilters": "Quick filters:",
+    "developersFound": "{count} developers found",
+    "totalProjects": "Total projects:",
+    "countriesCovered": "Countries:",
+    "presets": {
+      "active": "Active",
+      "goldStandard": "Gold Standard",
+      "forestry": "Forestry"
     }
   },
   "sdgs": {

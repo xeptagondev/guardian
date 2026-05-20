@@ -6,6 +6,7 @@ export function useFilteredPagination<T>(
         searchFields: (keyof T)[];
         pageSize?: number;
         arrayFields?: (keyof T)[];
+        rangeFields?: (keyof T)[];
         defaultSort?: { key: keyof T; dir: 'asc' | 'desc' };
         syncUrl?: boolean;
     },
@@ -103,6 +104,9 @@ export function useFilteredPagination<T>(
         const arrayFieldSet = new Set(opts.arrayFields?.map(String) ?? []);
         for (const [key, value] of Object.entries(activeFilters.value)) {
             if (value && value !== 'all') {
+                // Range sub-keys are handled in the range loop below
+                if (key.endsWith('__min') || key.endsWith('__max')) continue;
+
                 if (arrayFieldSet.has(key)) {
                     const selectedValues = value.split(',');
                     result = result.filter((item) => {
@@ -115,6 +119,24 @@ export function useFilteredPagination<T>(
                     result = result.filter((item) => selectedValues.includes(String(item[key as keyof T])));
                 } else {
                     result = result.filter((item) => String(item[key as keyof T]) === value);
+                }
+            }
+        }
+
+        // Range filters — stored as `fieldName__min` / `fieldName__max` in activeFilters
+        for (const field of (opts.rangeFields ?? [])) {
+            const minVal = activeFilters.value[String(field) + '__min'];
+            const maxVal = activeFilters.value[String(field) + '__max'];
+            if (minVal && minVal !== '' && minVal !== 'all') {
+                const min = Number(minVal);
+                if (!isNaN(min)) {
+                    result = result.filter((item) => Number(item[field]) >= min);
+                }
+            }
+            if (maxVal && maxVal !== '' && maxVal !== 'all') {
+                const max = Number(maxVal);
+                if (!isNaN(max)) {
+                    result = result.filter((item) => Number(item[field]) <= max);
                 }
             }
         }

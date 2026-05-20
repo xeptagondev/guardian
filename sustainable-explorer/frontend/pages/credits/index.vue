@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Coins, FileJson } from 'lucide-vue-next';
+import { Coins, FileJson, Sparkles } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import { formatCredits } from '~/lib/format';
 
@@ -39,12 +39,26 @@ const allCredits = computed(() => credits.value.map(c => ({
     supplyFormatted: formatCredits(c.supply),
 })));
 
-const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters } =
+const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters, applyPreset } =
     useFilteredPagination(allCredits, {
         searchFields: ['name', 'symbol', 'tokenId', 'project', 'registry'],
         pageSize: 8,
         defaultSort: { key: 'supply', dir: 'desc' },
     });
+
+const presets = computed(() => [
+    { label: t('credits.presets.fungible'), filters: { type: 'Fungible' } },
+    { label: t('credits.presets.nonFungible'), filters: { type: 'Non-Fungible' } },
+    { label: t('credits.presets.goldStandard'), filters: { registry: 'Gold Standard' } },
+]);
+
+const summaryStats = computed(() => {
+    const f = filtered.value;
+    const totalSupply = f.reduce((sum, c) => sum + (c.supply ?? 0), 0);
+    const uniqueRegistries = new Set(f.map(c => c.registry).filter(Boolean)).size;
+    const uniqueProjects = new Set(f.map(c => c.projectId).filter(Boolean)).size;
+    return { totalSupply, uniqueRegistries, uniqueProjects };
+});
 
 const filters = computed<FilterOption[]>(() => [
     { key: 'type', label: t('credits.filters.tokenType'), options: filterOptions.value.types.map((x: string) => ({ value: x, label: x })) },
@@ -63,6 +77,32 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
 
         <div class="px-6 pb-3">
             <FilterBar v-model="searchQuery" :filters="filters" :active-filters="activeFilters" :result-count="filtered.length" :total-count="total" :search-placeholder="$t('credits.searchPlaceholder')" @filter="setFilter" @clear="clearFilters" />
+
+            <div class="flex items-center gap-2 mt-2.5 flex-wrap">
+                <span class="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Sparkles class="h-3 w-3" /> {{ $t('credits.quickFilters') }}
+                </span>
+                <button
+                    v-for="preset in presets"
+                    :key="preset.label"
+                    class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    @click="applyPreset({ filters: preset.filters } as any)"
+                >
+                    {{ preset.label }}
+                </button>
+            </div>
+        </div>
+
+        <div v-if="filtered.length !== total" class="px-6 pb-3">
+            <div class="flex items-center gap-4 rounded-lg bg-muted/50 px-4 py-2.5 text-xs">
+                <span class="font-medium text-foreground">{{ $t('credits.creditsFound', { count: filtered.length }) }}</span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">{{ $t('credits.totalSupply') }} <strong class="text-foreground">{{ formatCredits(summaryStats.totalSupply) }}</strong></span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">{{ $t('credits.projectsCovered') }} <strong class="text-foreground">{{ summaryStats.uniqueProjects }}</strong></span>
+                <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">{{ $t('credits.registriesCovered') }} <strong class="text-foreground">{{ summaryStats.uniqueRegistries }}</strong></span>
+            </div>
         </div>
 
         <div class="px-6 pb-6">

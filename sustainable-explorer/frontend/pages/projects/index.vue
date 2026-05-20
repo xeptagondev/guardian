@@ -59,10 +59,11 @@ const allProjects = computed(() => projects.value.map(p => ({
 
 const { searchQuery, currentPage, paginated, filtered, totalPages, pageSize, activeFilters, sortKey, sortDir, toggleSort, setFilter, clearFilters, applyPreset } =
     useFilteredPagination(allProjects, {
-        searchFields: ['name', 'country', 'methodology', 'registry', 'sector', 'sectoralScope'],
-        pageSize: 8,
+        searchFields: ['name', 'country', 'methodology', 'registry', 'sector', 'sectoralScope', 'developer'],
+        pageSize: 10,
         defaultSort: { key: 'createdAt', dir: 'desc' },
         arrayFields: ['sdgs'],
+        rangeFields: ['issuanceCount', 'vintage'],
     });
 
 const presets = computed(() => [
@@ -97,7 +98,15 @@ const filters = computed<FilterOption[]>(() => [
     {
         key: 'vintage',
         label: t('projects.filters.vintage'),
+        type: 'yearRange' as const,
         options: filterOptions.value.vintages.map(v => ({ value: v, label: v })),
+    },
+    {
+        key: 'issuanceCount',
+        label: t('projects.filters.issuances'),
+        type: 'range' as const,
+        rangeMin: 0,
+        rangePlaceholder: { min: '0', max: 'Max' },
     },
     {
         key: 'sector',
@@ -118,6 +127,21 @@ const filters = computed<FilterOption[]>(() => [
             label: `SDG ${s.id}: ${s.name}`,
             icon: `/sdgs/E-WEB-Goal-${String(s.id).padStart(2, '0')}.png`,
         })),
+    },
+    {
+        key: 'developer',
+        label: t('projects.filters.developer'),
+        options: filterOptions.value.developers.map(d => ({ value: d, label: d })),
+    },
+    {
+        key: 'country',
+        label: t('projects.filters.country'),
+        options: filterOptions.value.countries.map(c => ({ value: c, label: c })),
+    },
+    {
+        key: 'methodology',
+        label: t('projects.filters.methodology'),
+        options: filterOptions.value.methodologies.map(m => ({ value: m, label: m })),
     },
 ]);
 
