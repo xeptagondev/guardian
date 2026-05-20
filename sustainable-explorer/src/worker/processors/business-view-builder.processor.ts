@@ -8,7 +8,8 @@ import { buildMintProjectLinks } from "../project-mapper/mint-project-linker";
 
 /**
  * Builds METHODOLOGY / REGISTRY / CREDIT rows in business_view from raw
- * messages. PROJECT rows are NOT built here — they are produced eagerly by
+ * messages, and populates the users table from Role-Document messages.
+ * PROJECT rows are NOT built here — they are produced eagerly by
  * ProjectMapperService.upsertProjectFromVc as each VC's IPFS document lands
  * in IpfsFetchProcessor.
  *
@@ -141,6 +142,29 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
 
         const totalUpserted = result?.rowCount ?? result?.length ?? 0;
 
+        const usersResult = await this.dataSource.query(`
+            INSERT INTO users (
+                "userDid",
+                "policyTopicId",
+                "policyRole",
+                "consensusTimeStamp"
+            )
+            SELECT
+                m.options->>'issuer',
+                m."topicId",
+                m.options->>'role',
+                m."consensusTimestamp"
+            FROM message m
+            WHERE m.type = 'Role-Document'
+              AND m.options->>'issuer' IS NOT NULL
+              AND m."topicId" IS NOT NULL
+            ON CONFLICT ("userDid", "policyTopicId") DO UPDATE SET
+                "policyRole" = EXCLUDED."policyRole",
+                "consensusTimeStamp" = EXCLUDED."consensusTimeStamp"
+        `);
+
+        const totalUsersUpserted = usersResult?.rowCount ?? usersResult?.length ?? 0;
+
         await buildMintProjectLinks(this.dataSource, this.logger);
 
         await this.redis.publish(
@@ -148,6 +172,7 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
             JSON.stringify({
                 type: "business-views-updated",
                 totalUpserted,
+                totalUsersUpserted,
                 timestamp: new Date().toISOString(),
             }),
         );
@@ -155,6 +180,7 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
         this.logger.log(
             `Business views built: ${totalUpserted} records upserted`,
         );
+        this.logger.log(`Users built: ${totalUsersUpserted} records upserted`);
     }
 
     @OnWorkerEvent("failed")

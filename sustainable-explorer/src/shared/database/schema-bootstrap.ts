@@ -92,4 +92,14 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_pml_token_id
             ON project_mint_link (token_id)
     `);
+
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS users (
+            "userDid"         VARCHAR(200) NOT NULL,
+            "policyTopicId"   VARCHAR(30)  NOT NULL,
+            "policyRole"      VARCHAR(100),
+            "consensusTimeStamp" VARCHAR(30) NOT NULL,
+            PRIMARY KEY ("userDid", "policyTopicId")
+        )
+    `);
 }
