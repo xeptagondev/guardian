@@ -62,4 +62,9 @@ export enum PolicyEvents {
     GET_ALL_NEW_VERSION_VC_DOCUMENTS = 'policy-event-get-all-new-version-vc-documents',
     GET_MOCK_CONFIG = 'policy-event-get-mock-config',
     SET_MOCK_CONFIG = 'policy-event-set-mock-config',
+
+    GET_POLICY_GRIDS = 'policy-event-get-policy-grids',
+    GET_GRID_ACTIONS = 'policy-event-get-grid-actions',
+    GET_GRID_RECORDS = 'policy-event-get-grid-records',
+    EXECUTE_GRID_ACTION = 'policy-event-execute-grid-action',
 }
