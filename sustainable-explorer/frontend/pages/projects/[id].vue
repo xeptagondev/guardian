@@ -469,11 +469,12 @@ async function triggerRefreshIpfs() {
                         <NuxtLink
                             v-if="project.registry && project.registryDid"
                             :to="`/registries?did=${encodeURIComponent(project.registryDid)}`"
-                            class="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors"
+                            :title="project.registry"
+                            class="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors block truncate"
                         >
                             {{ project.registry }}
                         </NuxtLink>
-                        <div v-else class="text-sm font-medium text-foreground">{{ project.registry || '—' }}</div>
+                        <div v-else :title="project.registry || undefined" class="text-sm font-medium text-foreground truncate">{{ project.registry || '—' }}</div>
                     </div>
                     <div class="px-5 py-4">
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Developer</div>
@@ -538,13 +539,22 @@ async function triggerRefreshIpfs() {
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Instance Topic ID</div>
                         <div class="group flex items-center gap-2">
                             <code class="text-sm font-mono text-foreground">{{ project.topicId ?? '—' }}</code>
+                            <button
+                                v-if="project.topicId"
+                                @click="copyToClipboard(project.topicId)"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                :title="copiedTopicId === project.topicId ? 'Copied!' : 'Copy'"
+                            >
+                                <Check v-if="copiedTopicId === project.topicId" class="h-3.5 w-3.5 text-emerald-500" />
+                                <Copy v-else class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                            </button>
                             <a
                                 v-if="hashscanTopicUrl"
                                 :href="hashscanTopicUrl"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 class="opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="View on HashScan"
+                                title="View Instance Topic on HashScan"
                             >
                                 <ExternalLink class="h-3.5 w-3.5 text-primary" />
                             </a>
@@ -554,13 +564,22 @@ async function triggerRefreshIpfs() {
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Policy Topic ID</div>
                         <div class="group flex items-center gap-2">
                             <code class="text-sm font-mono text-foreground">{{ project.policyTopicId ?? '—' }}</code>
+                            <button
+                                v-if="project.policyTopicId"
+                                @click="copyToClipboard(project.policyTopicId)"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                :title="copiedTopicId === project.policyTopicId ? 'Copied!' : 'Copy'"
+                            >
+                                <Check v-if="copiedTopicId === project.policyTopicId" class="h-3.5 w-3.5 text-emerald-500" />
+                                <Copy v-else class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                            </button>
                             <a
                                 v-if="hashscanPolicyUrl"
                                 :href="hashscanPolicyUrl"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 class="opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="View on HashScan"
+                                title="View Policy Topic on HashScan"
                             >
                                 <ExternalLink class="h-3.5 w-3.5 text-primary" />
                             </a>
@@ -568,36 +587,34 @@ async function triggerRefreshIpfs() {
                     </div>
                     <div class="bg-card px-5 py-4">
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">First VC Anchored At</div>
-                        <div class="text-sm text-foreground">{{ vcTimestamp ?? '—' }}</div>
+                        <div class="group flex items-center gap-2">
+                            <span class="text-sm text-foreground">{{ vcTimestamp ?? '—' }}</span>
+                            <button
+                                v-if="vcTimestamp"
+                                @click="copyToClipboard(vcTimestamp)"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                :title="copiedTopicId === vcTimestamp ? 'Copied!' : 'Copy'"
+                            >
+                                <Check v-if="copiedTopicId === vcTimestamp" class="h-3.5 w-3.5 text-emerald-500" />
+                                <Copy v-else class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                            </button>
+                        </div>
                     </div>
                     <div class="bg-card px-5 py-4">
                         <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Registry DID</div>
-                        <code class="text-xs font-mono text-muted-foreground break-all">{{ project.registryDid ?? '—' }}</code>
+                        <div class="group flex items-start gap-2">
+                            <code class="text-xs font-mono text-muted-foreground break-all">{{ project.registryDid ?? '—' }}</code>
+                            <button
+                                v-if="project.registryDid"
+                                @click="copyToClipboard(project.registryDid)"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5"
+                                :title="copiedTopicId === project.registryDid ? 'Copied!' : 'Copy'"
+                            >
+                                <Check v-if="copiedTopicId === project.registryDid" class="h-3.5 w-3.5 text-emerald-500" />
+                                <Copy v-else class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                            </button>
+                        </div>
                     </div>
-                </div>
-
-                <!-- External links -->
-                <div class="flex flex-wrap items-center gap-4">
-                    <a
-                        v-if="hashscanTopicUrl"
-                        :href="hashscanTopicUrl"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="inline-flex items-center gap-2 text-sm text-primary hover:underline font-medium"
-                    >
-                        <ExternalLink class="h-4 w-4" />
-                        View Instance Topic on HashScan
-                    </a>
-                    <a
-                        v-if="hashscanPolicyUrl"
-                        :href="hashscanPolicyUrl"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="inline-flex items-center gap-2 text-sm text-primary hover:underline font-medium"
-                    >
-                        <ExternalLink class="h-4 w-4" />
-                        View Policy Topic on HashScan
-                    </a>
                 </div>
             </div>
         </div>
