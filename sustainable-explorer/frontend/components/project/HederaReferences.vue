@@ -15,9 +15,9 @@ const hashscanTopicUrl = computed(() => {
     return `https://hashscan.io/${props.network}/topic/${props.project.topicId}`;
 });
 
-const hashscanPolicyUrl = computed(() => {
-    if (!props.project.policyTopicId) return '';
-    return `https://hashscan.io/${props.network}/topic/${props.project.policyTopicId}`;
+const hashscanInstanceUrl = computed(() => {
+    if (!props.project.instanceTopicId) return '';
+    return `https://hashscan.io/${props.network}/topic/${props.project.instanceTopicId}`;
 });
 
 const vcTimestamp = computed(() => {
@@ -59,7 +59,7 @@ async function copyToClipboard(text: string) {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border rounded-lg overflow-hidden border">
                 <!-- Instance Topic ID -->
                 <div class="bg-card px-5 py-4">
-                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Instance Topic ID</div>
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Dynamic Topic ID</div>
                     <div class="flex items-center gap-2 flex-wrap">
                         <code class="text-sm font-mono text-foreground">{{ project.topicId ?? '—' }}</code>
                         <button
@@ -83,22 +83,22 @@ async function copyToClipboard(text: string) {
                     </div>
                 </div>
 
-                <!-- Policy Topic ID -->
+                <!-- Instance Policy Topic ID -->
                 <div class="bg-card px-5 py-4">
-                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Policy Topic ID</div>
+                    <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Instance Policy Topic ID</div>
                     <div class="flex items-center gap-2 flex-wrap">
-                        <code class="text-sm font-mono text-foreground">{{ project.policyTopicId ?? '—' }}</code>
+                        <code class="text-sm font-mono text-foreground">{{ project.instanceTopicId ?? '—' }}</code>
                         <button
-                            v-if="project.policyTopicId"
+                            v-if="project.instanceTopicId"
                             title="Copy"
-                            @click="copyToClipboard(project.policyTopicId)"
+                            @click="copyToClipboard(project.instanceTopicId!)"
                         >
-                            <Check v-if="copiedValue === project.policyTopicId" class="h-3.5 w-3.5 text-emerald-500" />
+                            <Check v-if="copiedValue === project.instanceTopicId" class="h-3.5 w-3.5 text-emerald-500" />
                             <Copy v-else class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
                         </button>
                         <a
-                            v-if="hashscanPolicyUrl"
-                            :href="hashscanPolicyUrl"
+                            v-if="hashscanInstanceUrl"
+                            :href="hashscanInstanceUrl"
                             target="_blank"
                             rel="noopener noreferrer"
                             class="inline-flex items-center gap-1 text-xs text-primary hover:underline"
