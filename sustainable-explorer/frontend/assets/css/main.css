@@ -130,3 +130,6 @@ pre {
         scroll-behavior: auto !important;
     }
 }
+
+/* Match CartoDB light_all tile background so no-tile areas blend seamlessly */
+.leaflet-container { background: #d4dadc !important; }
