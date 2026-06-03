@@ -230,7 +230,7 @@ function onCountryClick(code: string) {
 // circuits on c.code !== 'UNK' before invoking navigate().
 function countryRouteFor(c: { name: string; code: string }) {
     if (c.code === 'UNK') return { path: '/projects' };
-    return { path: '/projects', query: { country: c.name } };
+    return { path: '/projects', query: { countryCode: c.code } };
 }
 
 // Sector legend → projects page filtered by sector. Untranslated label is

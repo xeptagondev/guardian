@@ -17,8 +17,11 @@ onMounted(() => {
     map = L.map(mapContainer.value, {
         center: [props.lat, props.lng],
         zoom: 8,
+        minZoom: 2,
         zoomControl: true,
         scrollWheelZoom: true,
+        maxBounds: [[-90, -180], [90, 180]],
+        maxBoundsViscosity: 1.0,
     });
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {

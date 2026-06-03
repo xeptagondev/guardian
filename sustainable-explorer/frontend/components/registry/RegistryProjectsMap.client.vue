@@ -44,6 +44,9 @@ onMounted(async () => {
         center: [20, 0],
         zoomControl: true,
         scrollWheelZoom: false,
+        minZoom: 2,
+        maxBounds: [[-90, -180], [90, 180]],
+        maxBoundsViscosity: 1.0,
     });
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {

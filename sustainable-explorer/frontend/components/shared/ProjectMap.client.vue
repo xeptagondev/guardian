@@ -62,6 +62,8 @@ async function initMap() {
         scrollWheelZoom: true,
         minZoom: 2,
         maxZoom: 10,
+        maxBounds: [[-90, -180], [90, 180]],
+        maxBoundsViscosity: 1.0,
     });
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
