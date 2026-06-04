@@ -238,7 +238,7 @@ const typeColor: Record<string, string> = { Fungible: 'bg-stat-blue/10 text-stat
                                     <span v-else class="text-muted-foreground/40">-</span>
                                 </td>
                                 <td class="py-3 px-4 max-w-[180px] text-muted-foreground">
-                                    <TruncatedText v-if="c.methodologyDisplay" :text="c.methodologyDisplay" />
+                                    <TruncatedText v-if="c.methodologyDisplay" :text="c.methodologyDisplay" wrap />
                                     <span v-else class="text-muted-foreground/40">-</span>
                                 </td>
                                 <td class="py-3 px-4 whitespace-nowrap">

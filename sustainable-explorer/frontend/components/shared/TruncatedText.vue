@@ -3,6 +3,7 @@ defineProps<{
     text: string | null | undefined;
     fallback?: string;
     class?: string;
+    wrap?: boolean;
 }>();
 
 const show = ref(false);
@@ -48,9 +49,9 @@ function onLeave() {
 <template>
     <span
         ref="triggerRef"
-        class="block truncate cursor-default"
-        @mouseenter="onEnter"
-        @mouseleave="onLeave"
+        :class="wrap ? 'block break-words cursor-default' : 'block truncate cursor-default'"
+        @mouseenter="!wrap && onEnter()"
+        @mouseleave="!wrap && onLeave()"
     >{{ text ?? fallback ?? '-' }}</span>
 
     <Teleport to="body">
