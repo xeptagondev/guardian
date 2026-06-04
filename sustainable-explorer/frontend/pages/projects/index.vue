@@ -9,7 +9,6 @@ import { getMethodologyLongName } from '~/lib/methodologies';
 import type { Project } from '~/types/models';
 
 const { t } = useI18n();
-const route = useRoute();
 const { projects, total, filterOptions } = useProjects();
 const { selectedEntries, canAdd, isSelected, toggleProject, removeProject, clearAll, goToCompare } = useProjectComparison();
 const { resolvedCode, resolvedName } = useGeocodedCountries(projects);
@@ -65,25 +64,11 @@ const { searchQuery, currentPage, paginated: _paginated, filtered: _filtered, to
         pageSize: 10,
         defaultSort: { key: 'createdAt', dir: 'desc' },
         arrayFields: ['sdgs'],
-        excludeFromQuery: ['countryCode'],
     });
 
-// When navigating from the dashboard country table, ?countryCode=UGA is used
-// so the filter matches projects via geocoding (resolvedCode) rather than exact
-// raw country string equality — fixing the Uganda 3-vs-1 discrepancy.
-const countryCodeFilter = computed(() => (route.query.countryCode as string) || null);
-
-const filtered = computed(() => {
-    if (!countryCodeFilter.value) return _filtered.value;
-    return _filtered.value.filter(p => resolvedCode(p) === countryCodeFilter.value);
-});
-
+const filtered = _filtered;
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)));
-
-const paginated = computed(() => {
-    const start = (currentPage.value - 1) * pageSize.value;
-    return filtered.value.slice(start, start + pageSize.value);
-});
+const paginated = _paginated;
 
 const presets = computed(() => [
     { label: t('projects.presets.goldStandard'), filters: { registry: 'Gold Standard' } },
