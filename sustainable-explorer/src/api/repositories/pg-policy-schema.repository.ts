@@ -351,28 +351,35 @@ export class PgPolicySchemaRepository extends PolicySchemaRepository {
             // fields like `country` to a sub-schema field (e.g.,
             // "1.8 Project Location.projectSiteCountryarea") and still see
             // it as the resolved mapping in the editor.
-            const resolvedFields: Record<string, string | null> = {};
+            //
+            // Carries schemaIri alongside fieldPath (not just a bare path
+            // string) so the DTO layer can look up the display label from the
+            // EXACT schema the mapping points to. Several schemas in the same
+            // policy commonly share a bare field key (e.g. multiple schemas
+            // each have their own "name" property with a different title) —
+            // without the schemaIri, label lookup can only guess via a global
+            // first-match across schemas and may show the wrong title even
+            // though the underlying fieldPath is correct.
+            const resolvedFields: Record<string, { schemaIri: string; fieldPath: string } | null> = {};
             for (const [fieldKey, entries] of Object.entries(policyMapping)) {
                 if (!Array.isArray(entries)) continue;
-                let primary: string | null = null;
-                let fallback: string | null = null;
+                let primary: { schemaIri: string; fieldPath: string } | null = null;
+                let fallback: { schemaIri: string; fieldPath: string } | null = null;
                 for (const entry of entries) {
                     if (!entry || typeof entry !== 'object') continue;
                     const e = entry as Record<string, unknown>;
                     const schemaType = e['schemaType'];
                     if (schemaType === 'mintToken' || schemaType === 'standardRegistry') continue;
-                    if (typeof e['fieldPath'] !== 'string') continue;
+                    if (typeof e['fieldPath'] !== 'string' || typeof e['schemaIri'] !== 'string') continue;
+                    const candidate = { schemaIri: e['schemaIri'], fieldPath: e['fieldPath'] };
                     if (e['schemaIri'] === projectSchemaId) {
-                        primary = e['fieldPath'] as string;
+                        primary = candidate;
                         break;
                     }
-                    if (fallback === null) fallback = e['fieldPath'] as string;
+                    if (fallback === null) fallback = candidate;
                 }
-                if (primary !== null) {
-                    resolvedFields[fieldKey] = primary;
-                } else if (fallback !== null) {
-                    resolvedFields[fieldKey] = fallback;
-                }
+                const winner = primary ?? fallback;
+                if (winner) resolvedFields[fieldKey] = winner;
             }
 
             // Determine geoKey: prefer manual override from policyMapping['geo'],

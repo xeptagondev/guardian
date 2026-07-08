@@ -444,7 +444,7 @@ function findOwningSchemaIri(fieldPath: string, defaultIri: string): string {
 
 function enterEditMode() {
   if (!decodedData.value?.projectSchema) return;
-  const resolved = decodedData.value.projectSchema.resolvedFields as Record<string, { fieldKey: string } | null>;
+  const resolved = decodedData.value.projectSchema.resolvedFields as Record<string, { fieldKey: string; schemaIri?: string } | null>;
   const ps = decodedData.value.projectSchema;
   const projectIri = ps.schemaId;
   const state = {} as Record<ResolvedFieldKey, string>;
@@ -460,7 +460,10 @@ function enterEditMode() {
     }
     const rf = resolved[key];
     if (rf) {
-      const iri = findOwningSchemaIri(rf.fieldKey, projectIri);
+      // Prefer the schemaIri the backend actually resolved this field from —
+      // falling back to the by-fieldKey scan only for older cached responses
+      // that predate schemaIri being included in resolvedFields.
+      const iri = rf.schemaIri || findOwningSchemaIri(rf.fieldKey, projectIri);
       state[key] = `${iri}.${rf.fieldKey}`;
     } else {
       state[key] = '';
@@ -478,7 +481,7 @@ function cancelEditMode() {
 // Compute the initial (original) form state so we can diff to find changes.
 const originalFormState = computed<Record<ResolvedFieldKey, string>>(() => {
   if (!decodedData.value?.projectSchema) return {} as Record<ResolvedFieldKey, string>;
-  const resolved = decodedData.value.projectSchema.resolvedFields as Record<string, { fieldKey: string } | null>;
+  const resolved = decodedData.value.projectSchema.resolvedFields as Record<string, { fieldKey: string; schemaIri?: string } | null>;
   const ps = decodedData.value.projectSchema;
   const projectIri = ps.schemaId;
   const state = {} as Record<ResolvedFieldKey, string>;
@@ -494,7 +497,10 @@ const originalFormState = computed<Record<ResolvedFieldKey, string>>(() => {
     }
     const rf = resolved[key];
     if (rf) {
-      const iri = findOwningSchemaIri(rf.fieldKey, projectIri);
+      // Prefer the schemaIri the backend actually resolved this field from —
+      // falling back to the by-fieldKey scan only for older cached responses
+      // that predate schemaIri being included in resolvedFields.
+      const iri = rf.schemaIri || findOwningSchemaIri(rf.fieldKey, projectIri);
       state[key] = `${iri}.${rf.fieldKey}`;
     } else {
       state[key] = '';

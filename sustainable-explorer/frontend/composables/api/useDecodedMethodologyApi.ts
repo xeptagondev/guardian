@@ -6,6 +6,7 @@ export interface ResolvedField {
     fieldKey: string;
     title: string;
     description: string;
+    schemaIri: string;
 }
 
 export interface FieldMapEntry {

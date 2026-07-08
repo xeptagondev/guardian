@@ -13,6 +13,15 @@ export class ResolvedFieldDto {
 
     @ApiProperty({ description: 'Field description from the schema' })
     description: string;
+
+    @ApiProperty({
+        description:
+            'IRI of the schema this field was resolved from. Several schemas in the ' +
+            'same policy commonly share a bare field key (e.g. multiple "name" ' +
+            'properties) — the editor needs this to reselect the exact schema the ' +
+            'mapping points to instead of guessing by fieldKey alone.',
+    })
+    schemaIri: string;
 }
 
 export class ResolvedFieldsDto {
@@ -228,17 +237,30 @@ export class DecodedMethodologyResponseDto {
 
         const config = row.projectSchemaConfig;
         const fieldMap = (config.fieldMap ?? {}) as Record<string, { title: string; description: string; isGeoJson?: boolean }>;
-        const resolvedFields = (config.resolvedFields ?? {}) as Record<string, string | null>;
+        const resolvedFields = (config.resolvedFields ?? {}) as Record<string, { schemaIri: string; fieldPath: string } | null>;
 
         const globalFieldIndex = new Map<string, { title: string; description: string }>();
+        // Per-schema index (schemaId → fieldKey → def) so a resolved field can be
+        // labelled from the EXACT schema it was mapped to. Several schemas in the
+        // same policy commonly share a bare field key (e.g. multiple "name"
+        // properties with different titles) — resolving by schema first avoids
+        // picking whichever schema happens to appear first in globalFieldIndex.
+        const schemaFieldIndex = new Map<string, Map<string, { title: string; description: string }>>();
         for (const s of dto.availableSchemas) {
+            const bySchema = new Map<string, { title: string; description: string }>();
             for (const f of s.fields) {
+                bySchema.set(f.fieldKey, { title: f.title, description: f.description });
                 if (!globalFieldIndex.has(f.fieldKey)) {
                     globalFieldIndex.set(f.fieldKey, { title: f.title, description: f.description });
                 }
             }
+            schemaFieldIndex.set(s.schemaId, bySchema);
         }
-        const lookupFieldDef = (fieldKey: string): { title: string; description: string } | null => {
+        const lookupFieldDef = (fieldKey: string, schemaIri?: string): { title: string; description: string } | null => {
+            if (schemaIri) {
+                const bySchema = schemaFieldIndex.get(schemaIri)?.get(fieldKey);
+                if (bySchema) return { title: bySchema.title || fieldKey, description: bySchema.description || '' };
+            }
             const local = fieldMap[fieldKey];
             if (local) return { title: local.title ?? fieldKey, description: local.description ?? '' };
             const global = globalFieldIndex.get(fieldKey);
@@ -248,20 +270,20 @@ export class DecodedMethodologyResponseDto {
 
         // Build reverse map: fieldKey → resolvedAs name
         const fieldKeyToResolvedAs = new Map<string, string>();
-        for (const [propName, fieldKey] of Object.entries(resolvedFields)) {
-            if (typeof fieldKey === 'string' && fieldKey) {
-                fieldKeyToResolvedAs.set(fieldKey, propName);
+        for (const [propName, resolved] of Object.entries(resolvedFields)) {
+            if (resolved && typeof resolved === 'object' && typeof resolved.fieldPath === 'string') {
+                fieldKeyToResolvedAs.set(resolved.fieldPath, propName);
             }
         }
 
         const geoKey = typeof config.geoKey === 'string' ? config.geoKey : '';
         const geoFieldDef = lookupFieldDef(geoKey);
 
-        const buildResolvedField = (fieldKey: string | null | undefined): ResolvedFieldDto | null => {
-            if (!fieldKey) return null;
-            const def = lookupFieldDef(fieldKey);
+        const buildResolvedField = (resolved: { schemaIri: string; fieldPath: string } | null | undefined): ResolvedFieldDto | null => {
+            if (!resolved) return null;
+            const def = lookupFieldDef(resolved.fieldPath, resolved.schemaIri);
             if (!def) return null;
-            return { fieldKey, title: def.title, description: def.description };
+            return { fieldKey: resolved.fieldPath, title: def.title, description: def.description, schemaIri: resolved.schemaIri };
         };
 
         dto.projectSchema = {

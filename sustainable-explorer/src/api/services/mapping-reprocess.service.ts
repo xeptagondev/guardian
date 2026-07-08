@@ -448,29 +448,57 @@ export class MappingReprocessService {
             if (legacyLabel in mergedMapping) delete mergedMapping[legacyLabel];
         }
 
+        // Whether `schemaIri` is genuinely the policy's project schema — derived
+        // from schemaType==='project', which the DECODE-TIME pipeline
+        // (CrossSchemaFuzzyMapperService / derivePerPolicyProjectMeta) stamps
+        // once and manual entries never set. A manual field mapping must NEVER
+        // promote whichever schema it happens to point at to "project schema"
+        // status — isProjectSchema is a POLICY-WIDE classification consumed by
+        // findDecoded's projectSchemaId majority vote, the worker's
+        // isProjectSchemaVc gate, and resolveViaRef's stop-at-project-schema
+        // chain walk. Unconditionally stamping isProjectSchema:true on every
+        // manual entry (the old behaviour) let an ordinary "map Developer to
+        // this field" edit silently reclassify an unrelated schema as THE
+        // project schema, which broke VC attribution and fragmented projects
+        // into duplicates on the next reparse. Checked against existingMapping
+        // (pre-edit snapshot) so multi-field PATCHes are order-independent.
+        const isKnownProjectSchema = (schemaIri: string): boolean => {
+            for (const entries of Object.values(existingMapping)) {
+                if (!Array.isArray(entries)) continue;
+                for (const entry of entries) {
+                    if (!entry || typeof entry !== 'object') continue;
+                    const e = entry as Record<string, unknown>;
+                    if (e['schemaIri'] === schemaIri && e['schemaType'] === 'project') return true;
+                }
+            }
+            return false;
+        };
+
         for (const [fieldKey, parsed] of keyParsed) {
             const existing = Array.isArray(mergedMapping[fieldKey]) ? [...mergedMapping[fieldKey]] : [];
-            // Replace first non-mintToken/standardRegistry entry, or prepend.
             const manualEntry = {
                 source: 'schema',
                 schemaIri: parsed.schemaIri,
                 fieldPath: parsed.fieldPath,
                 title: parsed.label,
                 description: '',
-                isProjectSchema: true,
+                isProjectSchema: isKnownProjectSchema(parsed.schemaIri),
                 score: 999,
             };
-            const idx = existing.findIndex(e => {
+            // Drop ALL stale auto-detected candidates for this explicitly-edited
+            // key, keeping only mintToken/standardRegistry entries (different
+            // purpose, untouched). Without this, a surviving auto-detected
+            // candidate for a different schema (still flagged isProjectSchema)
+            // can out-vote the user's manual choice in findDecoded.resolvedFields
+            // (display) and the worker's crossSchemaFieldMap (real project
+            // extraction) — the mapping editor would silently revert after every
+            // save. Symmetric with the keysToUnset branch below.
+            const preserved = existing.filter(e => {
                 if (!e || typeof e !== 'object') return false;
                 const schemaType = (e as Record<string, unknown>)['schemaType'];
-                return schemaType !== 'mintToken' && schemaType !== 'standardRegistry';
+                return schemaType === 'mintToken' || schemaType === 'standardRegistry';
             });
-            if (idx >= 0) {
-                existing[idx] = manualEntry;
-            } else {
-                existing.unshift(manualEntry);
-            }
-            mergedMapping[fieldKey] = existing;
+            mergedMapping[fieldKey] = [manualEntry, ...preserved];
         }
 
         for (const fieldKey of keysToUnset) {
