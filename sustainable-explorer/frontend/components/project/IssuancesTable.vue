@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Coins, FileJson } from 'lucide-vue-next';
+import type { SelectOption } from '~/components/ui/Select.vue';
 import type { Project, Credit } from '~/types/models';
 import { formatNumber } from '~/lib/format';
 import { formatDate } from '~/lib/format';
@@ -102,6 +103,11 @@ const tokenTotals = computed<{ symbol: string; total: number }[]>(() => {
     if (![...map.values()].some(t => t.count > 1)) return [];
     return Array.from(map.values()).map(({ symbol, total }) => ({ symbol, total }));
 });
+const { t } = useI18n();
+const yearOptions = computed<SelectOption[]>(() => [
+    { value: 'all', label: t('common.allYears') },
+    ...availableYears.value.map(y => ({ value: String(y), label: String(y) })),
+]);
 </script>
 
 <template>
@@ -112,16 +118,12 @@ const tokenTotals = computed<{ symbol: string; total: number }[]>(() => {
                 Linked Issuances
             </h2>
             <div class="flex items-center gap-2">
-                <select
+                <Select
                     v-if="availableYears.length > 0"
                     v-model="yearFilter"
-                    :title="$t('projects.detail.issuances.yearFilter')"
-                    :aria-label="$t('projects.detail.issuances.yearFilter')"
-                    class="h-8 rounded-md border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                    <option value="all">{{ $t('common.allYears') }}</option>
-                    <option v-for="y in availableYears" :key="y" :value="String(y)">{{ y }}</option>
-                </select>
+                    :options="yearOptions"
+                    class="h-8 text-sm w-32 bg-card"
+                />
                 <span class="text-xs text-muted-foreground">{{ badgeCount }} issuance(s)</span>
             </div>
         </div>
