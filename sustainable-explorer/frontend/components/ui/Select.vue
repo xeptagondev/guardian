@@ -32,13 +32,37 @@ const props = withDefaults(
     { modelValue: undefined, placeholder: 'Select…' },
 );
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
+
+const EMPTY_SENTINEL = '__REKA_EMPTY__';
+
+const safeOptions = computed(() =>
+    props.options.map(opt => ({
+        ...opt,
+        value: opt.value === '' ? EMPTY_SENTINEL : opt.value,
+    })),
+);
+
+const hasEmptyOption = computed(() => props.options.some(o => o.value === ''));
+
+const safeModelValue = computed(() => {
+    if (props.modelValue === '' || (hasEmptyOption.value && (props.modelValue === undefined || props.modelValue === null))) {
+        return EMPTY_SENTINEL;
+    }
+    return props.modelValue;
+});
+
+function onUpdateModelValue(val: unknown) {
+    const strVal = String(val ?? '');
+    const finalVal = strVal === EMPTY_SENTINEL ? '' : strVal;
+    emit('update:modelValue', finalVal);
+}
 </script>
 
 <template>
     <RekaSelectRoot
-        :model-value="modelValue"
+        :model-value="safeModelValue"
         :disabled="disabled"
-        @update:model-value="(value) => emit('update:modelValue', String(value))"
+        @update:model-value="onUpdateModelValue"
     >
         <RekaSelectTrigger
             :class="cn(
@@ -64,7 +88,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
             >
                 <RekaSelectViewport class="p-1">
                     <RekaSelectItem
-                        v-for="option in options"
+                        v-for="option in safeOptions"
                         :key="option.value"
                         :value="option.value"
                         :disabled="option.disabled"
