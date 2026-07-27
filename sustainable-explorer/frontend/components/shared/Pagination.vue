@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next';
-import type { SelectOption } from '~/components/ui/Select.vue';
+import type { SingleSelectOption } from './SingleSelect.vue';
 
 const props = defineProps<{
     currentPage: number;
@@ -15,7 +15,7 @@ const emit = defineEmits<{
 }>();
 
 const pageSizeOptions = [10, 25, 50, 100];
-const pageSizeSelectOptions: SelectOption[] = pageSizeOptions.map(size => ({
+const pageSizeSelectOptions: SingleSelectOption[] = pageSizeOptions.map(size => ({
     value: String(size),
     label: String(size),
 }));
@@ -59,10 +59,10 @@ const visiblePages = computed(() => {
             </span>
             <label class="flex items-center gap-2 text-xs text-muted-foreground">
                 {{ $t('common.rowsPerPage') }}
-                <Select
+                <SingleSelect
                     :model-value="String(pageSize)"
                     :options="pageSizeSelectOptions"
-                    class="h-7 text-xs w-16 bg-card"
+                    class="w-16"
                     @update:model-value="onSelectPageSize"
                 />
             </label>

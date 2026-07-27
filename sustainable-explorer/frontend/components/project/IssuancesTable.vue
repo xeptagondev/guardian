@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Coins, FileJson } from 'lucide-vue-next';
-import type { SelectOption } from '~/components/ui/Select.vue';
+import type { SingleSelectOption } from '~/components/shared/SingleSelect.vue';
 import type { Project, Credit } from '~/types/models';
 import { formatNumber } from '~/lib/format';
 import { formatDate } from '~/lib/format';
@@ -104,7 +104,7 @@ const tokenTotals = computed<{ symbol: string; total: number }[]>(() => {
     return Array.from(map.values()).map(({ symbol, total }) => ({ symbol, total }));
 });
 const { t } = useI18n();
-const yearOptions = computed<SelectOption[]>(() => [
+const yearOptions = computed<SingleSelectOption[]>(() => [
     { value: 'all', label: t('common.allYears') },
     ...availableYears.value.map(y => ({ value: String(y), label: String(y) })),
 ]);
@@ -118,11 +118,11 @@ const yearOptions = computed<SelectOption[]>(() => [
                 Linked Issuances
             </h2>
             <div class="flex items-center gap-2">
-                <Select
+                <SingleSelect
                     v-if="availableYears.length > 0"
                     v-model="yearFilter"
                     :options="yearOptions"
-                    class="h-8 text-sm w-32 bg-card"
+                    class="w-32"
                 />
                 <span class="text-xs text-muted-foreground">{{ badgeCount }} issuance(s)</span>
             </div>

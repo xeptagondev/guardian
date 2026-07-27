@@ -13,7 +13,7 @@ import {
     Settings,
     X,
 } from 'lucide-vue-next';
-import type { SelectOption } from '~/components/ui/Select.vue';
+import type { SingleSelectOption } from '~/components/shared/SingleSelect.vue';
 import type {
     FailedJobDto,
     QueueStatusItemDto,
@@ -106,20 +106,20 @@ function clearTopicFilters() {
 }
 
 // ─── Filter dropdown options ───────────────────────────────────────────────────
-const topicStatusOptions: SelectOption[] = [
+const topicStatusOptions: SingleSelectOption[] = [
     { value: '', label: 'All statuses' },
     { value: 'SYNCED', label: 'Synced' },
     { value: 'NEW', label: 'New' },
     { value: 'DISABLED', label: 'Disabled' },
 ];
 
-const tokenTypeOptions: SelectOption[] = [
+const tokenTypeOptions: SingleSelectOption[] = [
     { value: '', label: 'All types' },
     { value: 'FUNGIBLE_COMMON', label: 'Fungible' },
     { value: 'NON_FUNGIBLE_UNIQUE', label: 'Non-Fungible' },
 ];
 
-const guardianEventOptions: SelectOption[] = [
+const guardianEventOptions: SingleSelectOption[] = [
     { value: '', label: 'All events' },
     { value: 'block_complete', label: 'block_complete' },
     { value: 'token_minted', label: 'token_minted' },
@@ -129,7 +129,7 @@ const guardianEventOptions: SelectOption[] = [
     { value: 'policy-engine-event-publish-policies', label: 'publish-policies' },
 ];
 
-const ipfsMessageTypeOptions: SelectOption[] = [
+const ipfsMessageTypeOptions: SingleSelectOption[] = [
     { value: '', label: 'All types' },
     { value: 'VC-Document', label: 'VC-Document' },
     { value: 'VP-Document', label: 'VP-Document' },
@@ -141,14 +141,14 @@ const ipfsMessageTypeOptions: SelectOption[] = [
     { value: 'DID-Document', label: 'DID-Document' },
 ];
 
-const ipfsStatusOptions: SelectOption[] = [
+const ipfsStatusOptions: SingleSelectOption[] = [
     { value: '', label: 'All statuses' },
     { value: 'fetched', label: 'Fetched' },
     { value: 'failed', label: 'Failed' },
     { value: 'pending', label: 'Pending' },
 ];
 
-const ipfsErrorCategoryOptions: SelectOption[] = [
+const ipfsErrorCategoryOptions: SingleSelectOption[] = [
     { value: '', label: 'All categories' },
     { value: 'transient', label: 'Transient' },
     { value: 'permanent', label: 'Permanent' },
@@ -1125,10 +1125,10 @@ function formatTs(ts: number): string {
                                 placeholder="Search topic ID…"
                                 class="h-8 rounded-md border border-input bg-card px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-48"
                             />
-                            <Select
+                            <SingleSelect
                                 v-model="topicStatusFilter"
                                 :options="topicStatusOptions"
-                                class="h-8 text-sm w-36 bg-card"
+                                class="w-36"
                             />
                             <button
                                 v-if="topicFiltersActive"
@@ -1245,10 +1245,10 @@ function formatTs(ts: number): string {
                                 placeholder="Search token ID…"
                                 class="h-8 rounded-md border border-input bg-card px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring w-48"
                             />
-                            <Select
+                            <SingleSelect
                                 v-model="tokenTypeFilter"
                                 :options="tokenTypeOptions"
-                                class="h-8 text-sm w-36 bg-card"
+                                class="w-36"
                             />
                             <button
                                 v-if="tokenFiltersActive"
@@ -1394,10 +1394,10 @@ function formatTs(ts: number): string {
                             </span>
                         </div>
                         <div class="flex items-center gap-2 flex-wrap mb-2">
-                            <Select
+                            <SingleSelect
                                 v-model="guardianEventSubject"
                                 :options="guardianEventOptions"
-                                class="h-8 text-sm w-44 bg-card"
+                                class="w-44"
                             />
                         </div>
                         <div class="rounded-lg border bg-card overflow-hidden">
@@ -1511,23 +1511,23 @@ function formatTs(ts: number): string {
                             Include child topics
                         </label>
                         <!-- Message type filter -->
-                        <Select
+                        <SingleSelect
                             v-model="ipfsMessageTypeFilter"
                             :options="ipfsMessageTypeOptions"
-                            class="h-9 text-sm w-44 bg-card"
+                            class="w-44"
                         />
                         <!-- Status filter -->
-                        <Select
+                        <SingleSelect
                             v-model="ipfsStatusFilter"
                             :options="ipfsStatusOptions"
-                            class="h-9 text-sm w-36 bg-card"
+                            class="w-36"
                         />
                         <!-- Error category filter — only relevant when showing failed items -->
-                        <Select
+                        <SingleSelect
                             v-if="ipfsStatusFilter === 'failed' || ipfsStatusFilter === ''"
                             v-model="ipfsErrorCategoryFilter"
                             :options="ipfsErrorCategoryOptions"
-                            class="h-9 text-sm w-36 bg-card"
+                            class="w-36"
                         />
                         <button
                             v-if="ipfsFiltersActive"

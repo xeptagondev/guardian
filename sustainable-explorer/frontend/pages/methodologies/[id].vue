@@ -40,7 +40,7 @@ import type {
 import type { DecodedMethodologyResponse, MappingAuditEntry, PaginatedMappingAudit } from "~/composables/api/useDecodedMethodologyApi";
 import { mapApiProject } from "~/composables/useProjects";
 import { meetsDashboardThreshold } from "~/lib/methodology-threshold";
-import type { SelectOption as UiSelectOption } from '~/components/ui/Select.vue';
+import type { SingleSelectOption } from '~/components/shared/SingleSelect.vue';
 import { naturalCompare } from '~/lib/utils';
 
 const { t } = useI18n();
@@ -574,17 +574,17 @@ function cancelEditMode() {
   formIndexState.value = {} as Record<ResolvedFieldKey, string>;
 }
 
-const linkedProjectsYearOptions = computed<UiSelectOption[]>(() => [
+const linkedProjectsYearOptions = computed<SingleSelectOption[]>(() => [
   { value: 'all', label: t('common.allYears') },
   ...linkedProjectsAvailableYears.value.map(y => ({ value: String(y), label: String(y) })),
 ]);
 
-const linkedProjectsStageOptions = computed<UiSelectOption[]>(() => [
+const linkedProjectsStageOptions = computed<SingleSelectOption[]>(() => [
   { value: 'all', label: t('methodologies.detail.linkedProjects.stageFilter.all') },
   ...LIFECYCLE_STAGES.map(stage => ({ value: stage, label: t(`projects.lifecycleStages.${stage}`) })),
 ]);
 
-const compareVersionOptions = computed<UiSelectOption[]>(() => [
+const compareVersionOptions = computed<SingleSelectOption[]>(() => [
   { value: '', label: t('methodologies.detail.actions.selectVersionPlaceholder') },
   ...otherVersions.value.map(v => ({
     value: v.topicId || '',
@@ -2191,11 +2191,11 @@ function getResolvedField(fieldKey: string) {
               {{ $t('methodologies.detail.linkedProjects.title') }}
             </h2>
             <div v-if="!linkedProjectsPending && policyTopicId" class="flex items-center gap-2">
-              <Select
+              <SingleSelect
                 v-if="linkedProjectsAvailableYears.length > 0"
                 v-model="linkedProjectsYearFilter"
                 :options="linkedProjectsYearOptions"
-                class="h-8 text-sm w-32 bg-card"
+                class="w-32"
               />
               <span class="text-xs text-muted-foreground">
                 {{ linkedProjectsFiltered.length }} project{{ linkedProjectsFiltered.length !== 1 ? 's' : '' }}
@@ -2229,10 +2229,10 @@ function getResolvedField(fieldKey: string) {
             <div class="px-5 py-3 border-b bg-muted/10 flex flex-wrap items-center gap-3">
               <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span>{{ $t('methodologies.detail.linkedProjects.stageFilter.label') }}</span>
-                <Select
+                <SingleSelect
                   v-model="linkedProjectsStageFilter"
                   :options="linkedProjectsStageOptions"
-                  class="h-7 text-xs w-36 bg-card"
+                  class="w-36"
                 />
               </div>
             </div>
@@ -2662,11 +2662,11 @@ function getResolvedField(fieldKey: string) {
                 <div v-if="otherVersions.length === 0" class="text-sm text-muted-foreground italic">
                   {{ $t('methodologies.detail.actions.noOtherVersions') }}
                 </div>
-                <Select
+                <SingleSelect
                   v-else
                   :model-value="compareTopicId ?? ''"
                   :options="compareVersionOptions"
-                  class="w-full text-sm bg-card"
+                  class="w-full"
                   @update:model-value="(val) => compareTopicId = val || null"
                 />
               </div>

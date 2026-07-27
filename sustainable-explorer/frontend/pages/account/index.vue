@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { LogOut, Pencil, KeyRound, Loader2, Building2, Briefcase, MapPin, CalendarDays, Activity, ChevronLeft, ChevronRight, X, Eye, EyeOff, Check, AlertCircle } from 'lucide-vue-next';
 import { toast } from 'vue-sonner';
-import type { SelectOption } from '~/components/ui/Select.vue';
+import type { SingleSelectOption } from '~/components/shared/SingleSelect.vue';
 import type { MyActivityResult } from '~/composables/useAuth';
 
 definePageMeta({ middleware: 'auth' });
@@ -200,7 +200,7 @@ function onActFilter() {
     loadActivity();
 }
 
-const actFilterOptions = computed<SelectOption[]>(() => [
+const actFilterOptions = computed<SingleSelectOption[]>(() => [
     { value: '', label: t('account.activity.allTypes') },
     ...(activity.value?.actions ?? []).map(a => ({ value: a, label: actionLabel(a) })),
 ]);
@@ -389,10 +389,10 @@ const memberSince = computed(() =>
                         <Activity class="h-5 w-5 text-primary" />
                         <h2 class="text-base font-medium text-foreground">{{ $t('account.activity.title') }}</h2>
                     </div>
-                    <Select
+                    <SingleSelect
                         :model-value="actFilter"
                         :options="actFilterOptions"
-                        class="h-9 text-sm w-44 bg-background"
+                        class="w-44"
                         @update:model-value="handleActFilterChange"
                     />
                 </div>
