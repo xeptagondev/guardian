@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { MailWarning, Loader2 } from 'lucide-vue-next';
 
-const { isAuthenticated, user, openSignIn, resendVerification } = useAuth();
+const { authStatus, isAuthenticated, user, openSignIn, resendVerification } = useAuth();
 const { t } = useI18n();
 
 const unverified = computed(() => isAuthenticated.value && !!user.value && !user.value.emailVerifiedAt);
@@ -42,7 +42,7 @@ async function resend() {
 <template>
     <!-- Guest — slim green bar with an inline "sign in from here" link -->
     <div
-        v-if="!isAuthenticated"
+        v-if="authStatus === 'unauthenticated'"
         class="border-b border-green-200 bg-green-50 px-6 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300"
     >
         {{ $t('banner.guest') }}

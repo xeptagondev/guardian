@@ -5,11 +5,19 @@
  * visitors are redirected home; on the client the sign-in modal is opened so
  * they can authenticate without losing context.
  */
-export default defineNuxtRouteMiddleware(() => {
-    const { isAuthenticated, openSignIn } = useAuth();
+export default defineNuxtRouteMiddleware(async (to) => {
+    const { authStatus, initAuth, openSignIn } = useAuth();
 
-    if (!isAuthenticated.value) {
-        if (import.meta.client) openSignIn();
-        return navigateTo('/');
+    if (authStatus.value === 'idle' || authStatus.value === 'checking') {
+        await initAuth();
+    }
+
+    if (authStatus.value === 'unauthenticated') {
+        const returnUrl = isSafeRedirect(to.fullPath) ? to.fullPath : '/';
+        if (import.meta.client) openSignIn(returnUrl);
+        return navigateTo({
+            path: '/',
+            query: returnUrl !== '/' ? { redirect: returnUrl } : undefined,
+        });
     }
 });

@@ -2,8 +2,9 @@
 import { X, Loader2, Eye, EyeOff, Check, AlertCircle } from 'lucide-vue-next';
 import type { SignUpPayload } from '~/composables/useAuth';
 
-const { modal, closeModal, openSignIn, openSignUp, login, signup, forgotPassword, passwordPolicy, fetchPasswordPolicy } = useAuth();
+const { modal, closeModal, openSignIn, openSignUp, login, signup, forgotPassword, passwordPolicy, fetchPasswordPolicy, getReturnUrl, clearReturnUrl } = useAuth();
 const { t } = useI18n();
+const route = useRoute();
 // Sign-in resolves here and nowhere else, so this is the only reliable
 // place to offer the first-login guided tour.
 const { maybeAutoStart } = useProductTour();
@@ -184,6 +185,13 @@ async function onSignIn() {
         await login(email.value.trim(), password.value);
         close();
         maybeAutoStart();
+
+        const rawTarget = getReturnUrl() || (route.query.redirect as string);
+        clearReturnUrl();
+        const target = isSafeRedirect(rawTarget) ? rawTarget : null;
+        if (target && target !== route.fullPath && target !== '/' && !target.startsWith('/?')) {
+            await navigateTo(target);
+        }
     } catch (err) {
         error.value = apiError(err);
     } finally {

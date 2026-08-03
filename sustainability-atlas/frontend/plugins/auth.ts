@@ -8,16 +8,23 @@
  * actually present, so guest page loads incur zero extra API round-trips.
  */
 export default defineNuxtPlugin(async () => {
-    const { user, fetchMe } = useAuth();
+    const { user, authStatus, initAuth } = useAuth();
 
     // Already hydrated (client after SSR payload transfer) — nothing to do.
-    if (user.value) return;
+    if (user.value) {
+        authStatus.value = 'authenticated';
+        return;
+    }
 
     if (import.meta.server) {
         const cookie = useRequestHeaders(['cookie']).cookie || '';
-        const hasAuthCookie = /(?:^|;\s*)(access|refresh)=/.test(cookie);
-        if (!hasAuthCookie) return; // guest — skip the API call
+        const hasAuthCookie = /(?:^|;\s*)(access|refresh|csrf)=/.test(cookie);
+        if (!hasAuthCookie) {
+            user.value = null;
+            authStatus.value = 'unauthenticated';
+            return; // guest — skip the API call
+        }
     }
 
-    await fetchMe();
+    await initAuth();
 });

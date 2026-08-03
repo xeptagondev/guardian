@@ -52,6 +52,8 @@ export interface MyActivityResult {
     actions: string[];
 }
 
+export type AuthStatus = 'idle' | 'checking' | 'authenticated' | 'unauthenticated';
+
 export type AuthModalView = 'signin' | 'signup' | null;
 
 /**
@@ -113,8 +115,26 @@ export function isEmailValid(email: string): boolean {
     return /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email.trim());
 }
 
+/**
+ * Security check: validates that a redirect target is a safe, relative URL path.
+ * Protects against Open Redirect vulnerabilities (e.g. //evil.com, /\evil.com, /javascript:).
+ */
+export function isSafeRedirect(target: string | null | undefined): boolean {
+    if (!target) return false;
+    const trimmed = target.trim();
+    if (!trimmed.startsWith('/')) return false;
+    if (trimmed.startsWith('//')) return false;
+    if (trimmed.startsWith('/\\')) return false;
+    if (/^\/[a-z0-9]+:/i.test(trimmed)) return false;
+    return true;
+}
+
+let authInitPromise: Promise<void> | null = null;
+
 export const useAuth = () => {
     const user = useState<AuthUser | null>('auth-user', () => null);
+    const authStatus = useState<AuthStatus>('auth-status', () => 'idle');
+    const returnUrl = useState<string | null>('auth-return-url', () => null);
     const modal = useState<AuthModalView>('auth-modal', () => null);
     // Shared, SSR-safe cache of the server's password policy (fetched once).
     const passwordPolicy = useState<PasswordPolicy>('auth-password-policy', () => DEFAULT_PASSWORD_POLICY);
@@ -122,7 +142,7 @@ export const useAuth = () => {
     const config = useRuntimeConfig();
     const { apiFetch } = useApiFetch();
 
-    const isAuthenticated = computed(() => !!user.value);
+    const isAuthenticated = computed(() => authStatus.value === 'authenticated');
     const isAdmin = computed(() => user.value?.role === 'admin');
     const isSystemUser = computed(() => user.value?.role === 'system_user');
 
@@ -169,15 +189,32 @@ export const useAuth = () => {
 
     /** Loads the current user from /auth/me (with silent refresh-on-401 retry). */
     async function fetchMe(): Promise<void> {
+        authStatus.value = 'checking';
         try {
-            user.value = await apiFetch<AuthUser>('/api/v1/auth/me', {
+            const profile = await apiFetch<AuthUser>('/api/v1/auth/me', {
                 baseURL: baseURL(),
                 credentials: 'include',
                 headers: ssrCookieHeader(),
             });
+            user.value = profile;
+            authStatus.value = profile ? 'authenticated' : 'unauthenticated';
         } catch {
             user.value = null;
+            authStatus.value = 'unauthenticated';
         }
+    }
+
+    /** Deduplicated initialization helper that ensures authStatus is settled. */
+    async function initAuth(): Promise<void> {
+        if (authStatus.value === 'authenticated' || authStatus.value === 'unauthenticated') {
+            return;
+        }
+        if (!authInitPromise) {
+            authInitPromise = fetchMe().finally(() => {
+                authInitPromise = null;
+            });
+        }
+        await authInitPromise;
     }
 
     /** Email + password sign-in. Sets cookies (server-side) and populates user state. */
@@ -189,6 +226,7 @@ export const useAuth = () => {
             body: { email, password },
         });
         user.value = profile;
+        authStatus.value = 'authenticated';
         modal.value = null;
         return profile;
     }
@@ -216,6 +254,9 @@ export const useAuth = () => {
             // Ignore — we clear local state regardless so the UI reflects sign-out.
         } finally {
             user.value = null;
+            authStatus.value = 'unauthenticated';
+            authInitPromise = null;
+            clearReturnUrl();
         }
     }
 
@@ -271,6 +312,7 @@ export const useAuth = () => {
             body: payload,
         });
         user.value = profile;
+        authStatus.value = 'authenticated';
     }
 
     /** Loads the signed-in user's own recent activity (paginated, optional action filter). */
@@ -299,18 +341,50 @@ export const useAuth = () => {
             body: { currentPassword, newPassword },
         });
         user.value = profile;
+        authStatus.value = 'authenticated';
     }
 
-    const openSignIn = (): void => { modal.value = 'signin'; };
+    const openSignIn = (redirectPath?: string): void => {
+        if (redirectPath && isSafeRedirect(redirectPath) && redirectPath !== '/' && !redirectPath.startsWith('/?')) {
+            returnUrl.value = redirectPath;
+            if (import.meta.client) {
+                try { sessionStorage.setItem('auth_return_url', redirectPath); } catch { }
+            }
+        }
+        modal.value = 'signin';
+    };
+
+    const getReturnUrl = (): string | null => {
+        let url = returnUrl.value;
+        if (!url && import.meta.client) {
+            try { url = sessionStorage.getItem('auth_return_url'); } catch { }
+        }
+        if (url && isSafeRedirect(url)) {
+            return url;
+        }
+        clearReturnUrl();
+        return null;
+    };
+
+    const clearReturnUrl = (): void => {
+        returnUrl.value = null;
+        if (import.meta.client) {
+            try { sessionStorage.removeItem('auth_return_url'); } catch { }
+        }
+    };
+
     const openSignUp = (): void => { modal.value = 'signup'; };
     const closeModal = (): void => { modal.value = null; };
 
     return {
         user,
+        authStatus,
         isAuthenticated,
         isAdmin,
         isSystemUser,
         modal,
+        returnUrl,
+        initAuth,
         fetchMe,
         login,
         signup,
@@ -325,6 +399,8 @@ export const useAuth = () => {
         openSignIn,
         openSignUp,
         closeModal,
+        getReturnUrl,
+        clearReturnUrl,
         passwordPolicy,
         fetchPasswordPolicy,
     };
