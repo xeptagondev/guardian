@@ -11,7 +11,7 @@ const country = ref<string | undefined>(undefined);
 const sortKey = ref<DeveloperSortKey | null>('projects');
 const sortDir = ref<DeveloperSortDir | null>('desc');
 
-const { developers, total, totalPages } = useDevelopers({
+const { developers, total, totalPages, pending } = useDevelopers({
     page: currentPage,
     limit: pageSize,
     search: searchQuery,
@@ -19,6 +19,8 @@ const { developers, total, totalPages } = useDevelopers({
     sortBy: sortKey,
     sortDir,
 });
+
+const skeletonRows = computed(() => Array.from({ length: pageSize.value }, (_, i) => i));
 
 function goToProjectsForDeveloper(name: string) {
     return navigateTo({ path: '/projects', query: { developer: name } });
@@ -116,6 +118,16 @@ const statusColor: Record<string, string> = {
                         </tr>
                     </thead>
                     <tbody class="divide-y">
+                        <!-- Loading skeleton -->
+                        <template v-if="pending">
+                            <tr v-for="i in skeletonRows" :key="`sk-${i}`">
+                                <td v-for="col in 9" :key="col" class="py-3 px-4">
+                                    <Skeleton class="h-4 w-full max-w-[120px]" />
+                                </td>
+                            </tr>
+                        </template>
+
+                        <template v-else>
                         <tr
                             v-for="d in rows"
                             :key="d.id"
@@ -176,6 +188,7 @@ const statusColor: Record<string, string> = {
                         <tr v-if="rows.length === 0">
                             <td colspan="9" class="py-12 text-center text-sm text-muted-foreground">{{ $t('developers.noMatch') }}</td>
                         </tr>
+                        </template>
                     </tbody>
                 </table>
             </div>

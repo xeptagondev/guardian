@@ -397,7 +397,7 @@ function viewRegistry(r: RegistryDto) {
                     </thead>
                     <tbody class="divide-y bg-card">
                         <!-- Loading skeleton -->
-                        <template v-if="pending && registries.length === 0">
+                        <template v-if="pending">
                             <tr v-for="i in skeletonRows" :key="`sk-${i}`">
                                 <td v-for="col in 12" :key="col" class="py-3 px-4">
                                     <Skeleton class="h-4 w-full max-w-[120px]" />

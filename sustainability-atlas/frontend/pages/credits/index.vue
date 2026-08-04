@@ -459,7 +459,7 @@ async function downloadCredits() {
                     </thead>
                     <tbody class="divide-y">
                         <!-- Loading skeleton -->
-                        <template v-if="pending && credits.length === 0">
+                        <template v-if="pending">
                             <tr v-for="i in skeletonRows" :key="`sk-${i}`">
                                 <td v-for="col in 9" :key="col" class="py-3 px-4">
                                     <Skeleton class="h-4 w-full max-w-[120px]" />

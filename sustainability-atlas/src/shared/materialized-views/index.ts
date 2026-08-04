@@ -13,6 +13,11 @@ import {
     MV_PROJECT_STATS_CREATE_SQL,
     MV_PROJECT_STATS_INDEX_SQL,
 } from './project-stats.mv';
+import {
+    MV_PROJECT_LIFECYCLE_NAME,
+    MV_PROJECT_LIFECYCLE_CREATE_SQL,
+    MV_PROJECT_LIFECYCLE_INDEX_SQL,
+} from './project-lifecycle.mv';
 
 export interface MaterializedViewDefinition {
     name: string;
@@ -27,13 +32,18 @@ export interface MaterializedViewDefinition {
  *
  * Order is significant: views are created and refreshed top to bottom, so a
  * view that reads another must come after it. mv_registry_stats reads
- * mv_project_stats.
+ * mv_project_stats. mv_project_lifecycle also reads mv_project_stats.
  */
 export const MATERIALIZED_VIEWS: MaterializedViewDefinition[] = [
     {
         name: MV_PROJECT_STATS_NAME,
         createSql: MV_PROJECT_STATS_CREATE_SQL,
         indexSql: MV_PROJECT_STATS_INDEX_SQL,
+    },
+    {
+        name: MV_PROJECT_LIFECYCLE_NAME,
+        createSql: MV_PROJECT_LIFECYCLE_CREATE_SQL,
+        indexSql: MV_PROJECT_LIFECYCLE_INDEX_SQL,
     },
     {
         name: MV_REGISTRY_STATS_NAME,
@@ -47,4 +57,4 @@ export const MATERIALIZED_VIEWS: MaterializedViewDefinition[] = [
     },
 ];
 
-export { MV_REGISTRY_STATS_NAME, MV_METHODOLOGY_STATS_NAME, MV_PROJECT_STATS_NAME };
+export { MV_REGISTRY_STATS_NAME, MV_METHODOLOGY_STATS_NAME, MV_PROJECT_STATS_NAME, MV_PROJECT_LIFECYCLE_NAME };

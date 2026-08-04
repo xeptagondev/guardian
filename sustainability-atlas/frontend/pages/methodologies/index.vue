@@ -526,7 +526,7 @@ async function downloadMethodologies() {
           </thead>
           <tbody class="divide-y">
             <!-- Loading skeleton -->
-            <template v-if="pending && methodologies.length === 0">
+            <template v-if="pending">
               <tr v-for="i in skeletonRows" :key="`sk-${i}`">
                 <td v-for="col in 10" :key="col" class="py-3 px-4">
                   <Skeleton class="h-4 w-full max-w-[120px]" />

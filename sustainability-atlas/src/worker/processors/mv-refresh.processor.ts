@@ -60,6 +60,16 @@ export class MvRefreshProcessor extends WorkerHost implements OnModuleInit {
             }
         }
 
+        // Refreshes planner statistics on the same cadence as the MV/cache TTL,
+        // so a bulk sync can't leave the dashboard's live aggregate queries
+        // running against stale row estimates until autovacuum gets to it.
+        try {
+            await this.dataSource.query('ANALYZE business_view, project_mint_link');
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(`Failed to ANALYZE business_view/project_mint_link: ${message}`);
+        }
+
         await this.redis.publish('se:events', JSON.stringify({
             type: 'materialized-views-refreshed',
             views: results,

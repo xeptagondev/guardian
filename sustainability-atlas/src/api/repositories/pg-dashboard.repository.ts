@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { MV_PROJECT_STATS_NAME } from '@shared/materialized-views';
+import { MV_PROJECT_STATS_NAME, MV_PROJECT_LIFECYCLE_NAME } from '@shared/materialized-views';
 
 export interface MintAggRow {
     sector: string;
@@ -154,28 +154,6 @@ export class PgDashboardRepository {
 
         return { from, where: conditions.join(' AND '), params };
     }
-
-    /**
-     * Document type per (policy topic, bare schema UUID).
-     *
-     * policyMapping carries full IRIs of the form `#<uuid>&<version>` while a
-     * project's linkedVcs entries carry only the uuid, so the IRI is trimmed to
-     * make the two joinable.
-     */
-    private static readonly SCHEMA_DOC_TYPES_SQL = `
-        SELECT DISTINCT
-            p."policyTopicId"                                    AS policy_topic_id,
-            split_part(ltrim(e->>'schemaIri', '#'), '&', 1)      AS schema_uuid,
-            e->>'docType'                                        AS doc_type
-        FROM policy p,
-             LATERAL jsonb_each(COALESCE(p."policyMapping", '{}'::jsonb)) AS kv(k, v),
-             LATERAL jsonb_array_elements(
-                 CASE WHEN jsonb_typeof(kv.v) = 'array' THEN kv.v ELSE '[]'::jsonb END
-             ) AS e
-        WHERE p."decodeStatus" = 'decoded'
-          AND e ? 'schemaIri'
-          AND e ? 'docType'
-    `;
 
     /** Resolves a per_project row's boolean flags into a lifecycle stage label. */
     private static readonly LIFECYCLE_STAGE_CASE = `
@@ -348,35 +326,26 @@ export class PgDashboardRepository {
      *
      * Mirrors ProjectResponseDto.fromRow's derivation. A stage counts only when
      * the project actually holds a VC of that document type — schemas the policy
-     * defines but the project never submitted must not advance it. Document
-     * types come from `policy.policyMapping`, matched to the project's
-     * `linkedVcs` on the bare schema UUID (policyMapping carries full IRIs of
-     * the form `#<uuid>&<version>`, linkedVcs carries just the uuid).
+     * defines but the project never submitted must not advance it. The flags
+     * themselves come from mv_project_lifecycle (see its own doc comment for
+     * why it's keyed by row_id and LEFT JOINed with a false default) rather
+     * than being re-derived live from linkedVcs on every request.
      */
     async getLifecycleStageAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
         const scope = this.buildProjectScope(query);
 
         const sql = `
-            WITH schema_doc_types AS (${PgDashboardRepository.SCHEMA_DOC_TYPES_SQL}),
-            per_project AS (
+            WITH per_project AS (
                 SELECT
-                    bv.id                                                        AS row_id,
-                    COALESCE(ps.total_issued, 0) > 0
-                        OR COALESCE(ps.issuance_count, 0) > 0                    AS issued,
-                    bool_or(sdt.doc_type = 'verificationReport')                 AS has_verification,
-                    bool_or(sdt.doc_type = 'monitoringReport')                   AS has_monitoring,
-                    bool_or(sdt.doc_type = 'validationReport')                   AS has_validation,
-                    MAX(${PgDashboardRepository.CREDITS_EXPR})                   AS credits,
-                    MAX(bv."businessData"->>'methodologyId')                     AS methodology_id
+                    COALESCE(mpl.issued, false)           AS issued,
+                    COALESCE(mpl.has_verification, false) AS has_verification,
+                    COALESCE(mpl.has_monitoring, false)   AS has_monitoring,
+                    COALESCE(mpl.has_validation, false)   AS has_validation,
+                    ${PgDashboardRepository.CREDITS_EXPR}                        AS credits,
+                    bv."businessData"->>'methodologyId'                         AS methodology_id
                 FROM ${scope.from}
-                LEFT JOIN LATERAL jsonb_array_elements(
-                    COALESCE(bv."businessData"->'linkedVcs', '[]'::jsonb)
-                ) AS lv ON true
-                LEFT JOIN schema_doc_types sdt
-                    ON sdt.policy_topic_id = bv."businessData"->>'policyTopicId'
-                   AND sdt.schema_uuid     = lv->>'schemaUuid'
+                LEFT JOIN ${MV_PROJECT_LIFECYCLE_NAME} mpl ON mpl.row_id = bv.id
                 WHERE ${scope.where}
-                GROUP BY bv.id, ps.total_issued, ps.issuance_count
             )
             SELECT
                 ${PgDashboardRepository.LIFECYCLE_STAGE_CASE}    AS label,
@@ -509,25 +478,16 @@ export class PgDashboardRepository {
         const scope = this.buildProjectScope(query);
 
         const sql = `
-            WITH schema_doc_types AS (${PgDashboardRepository.SCHEMA_DOC_TYPES_SQL}),
-            per_project AS (
+            WITH per_project AS (
                 SELECT
-                    bv.id                                                        AS row_id,
-                    MAX(reg.registry_name)                                       AS registry,
-                    COALESCE(ps.total_issued, 0) > 0
-                        OR COALESCE(ps.issuance_count, 0) > 0                    AS issued,
-                    bool_or(sdt.doc_type = 'verificationReport')                 AS has_verification,
-                    bool_or(sdt.doc_type = 'monitoringReport')                   AS has_monitoring,
-                    bool_or(sdt.doc_type = 'validationReport')                   AS has_validation
+                    reg.registry_name                     AS registry,
+                    COALESCE(mpl.issued, false)           AS issued,
+                    COALESCE(mpl.has_verification, false) AS has_verification,
+                    COALESCE(mpl.has_monitoring, false)   AS has_monitoring,
+                    COALESCE(mpl.has_validation, false)   AS has_validation
                 FROM ${scope.from}
-                LEFT JOIN LATERAL jsonb_array_elements(
-                    COALESCE(bv."businessData"->'linkedVcs', '[]'::jsonb)
-                ) AS lv ON true
-                LEFT JOIN schema_doc_types sdt
-                    ON sdt.policy_topic_id = bv."businessData"->>'policyTopicId'
-                   AND sdt.schema_uuid     = lv->>'schemaUuid'
+                LEFT JOIN ${MV_PROJECT_LIFECYCLE_NAME} mpl ON mpl.row_id = bv.id
                 WHERE ${scope.where}
-                GROUP BY bv.id, ps.total_issued, ps.issuance_count
             )
             SELECT
                 registry,

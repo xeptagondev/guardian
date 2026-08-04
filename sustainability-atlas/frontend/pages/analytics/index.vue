@@ -15,9 +15,15 @@ import type { LabelCount } from '~/types/dashboard';
 const { t } = useI18n();
 // Aggregates come from the server-side dashboard summary rather than
 // downloading every project and reducing in the browser.
-const { summary } = useDashboardSummary();
-const { sdgStats } = useSdgStats();
+const { summary, pending: summaryPending } = useDashboardSummary();
+const { sdgStats, pending: sdgPending } = useSdgStats();
 const { network } = useNetwork();
+
+// Both sources refetch on network switch (and summary also on nothing else
+// here, since this page applies no filters) — treat the page as loading
+// until both have landed, so a switch doesn't leave half the widgets showing
+// the previous network's numbers while the rest update.
+const pageLoading = computed(() => summaryPending.value || sdgPending.value);
 
 function translateSector(raw: string): string {
     if (!raw) return '';
@@ -331,16 +337,21 @@ function fmtCompact(n: number): string {
 
         <!-- Headline KPI strip -->
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 px-6 pt-4 pb-6">
-            <div
-                v-for="k in headlineKpis"
-                :key="k.label"
-                class="rounded-xl border bg-card p-4"
-                :title="k.hint"
-            >
-                <div class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{{ k.label }}</div>
-                <div class="text-xl font-bold text-foreground mt-1.5 tabular-nums">{{ k.value }}</div>
-                <div class="text-[11px] text-muted-foreground mt-1 leading-snug">{{ k.hint }}</div>
-            </div>
+            <template v-if="pageLoading">
+                <Skeleton v-for="n in 5" :key="n" class="h-24 rounded-xl" />
+            </template>
+            <template v-else>
+                <div
+                    v-for="k in headlineKpis"
+                    :key="k.label"
+                    class="rounded-xl border bg-card p-4"
+                    :title="k.hint"
+                >
+                    <div class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{{ k.label }}</div>
+                    <div class="text-xl font-bold text-foreground mt-1.5 tabular-nums">{{ k.value }}</div>
+                    <div class="text-[11px] text-muted-foreground mt-1 leading-snug">{{ k.hint }}</div>
+                </div>
+            </template>
         </div>
 
         <!-- Stakeholder tabs -->
@@ -366,6 +377,18 @@ function fmtCompact(n: number): string {
             </div>
         </div>
 
+        <!-- Tab content skeleton while the summary/SDG data (re)loads, e.g. on a network switch -->
+        <template v-if="pageLoading">
+            <div class="p-6 space-y-6">
+                <Skeleton class="h-64 rounded-xl" />
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Skeleton class="h-72 rounded-xl" />
+                    <Skeleton class="h-72 rounded-xl" />
+                </div>
+            </div>
+        </template>
+
+        <template v-else>
         <!-- ── Market Overview ─────────────────────────────────────────────── -->
         <div v-if="tab === 'overview'" class="p-6 space-y-6">
             <!-- Lifecycle funnel -->
@@ -825,5 +848,6 @@ function fmtCompact(n: number): string {
                 </div>
             </div>
         </div>
+        </template>
     </div>
 </template>

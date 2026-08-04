@@ -26,22 +26,39 @@ const CACHE_TTL_SECONDS = 60;
 
 @Injectable()
 export class DashboardService {
+    // Keyed by the same Redis cache key: on a cache miss, concurrent callers
+    // share one in-flight computation instead of each re-running the full
+    // aggregate fan-out. DashboardService is a singleton provider, so this
+    // map is shared across requests within the process.
+    private readonly inFlight = new Map<string, Promise<unknown>>();
+
     constructor(
         private readonly dataSources: NetworkDataSourceRegistry,
         private readonly redis: RedisService,
     ) {}
+
+    private dedupe<T>(key: string, compute: () => Promise<T>): Promise<T> {
+        const existing = this.inFlight.get(key) as Promise<T> | undefined;
+        if (existing) return existing;
+
+        const promise = compute().finally(() => this.inFlight.delete(key));
+        this.inFlight.set(key, promise);
+        return promise;
+    }
 
     async getMintStats(network: string, query: DashboardMintQuery): Promise<DashboardMintStatsDto> {
         const cacheKey = this.cacheKey('mint-stats', network, query);
         const cached = await this.redis.getJson<DashboardMintStatsDto>(cacheKey);
         if (cached) return cached;
 
-        const repo = new PgDashboardRepository(this.dataSources.getDataSource(network));
-        const rows = await repo.getMintAggregations(query);
+        return this.dedupe(cacheKey, async () => {
+            const repo = new PgDashboardRepository(this.dataSources.getDataSource(network));
+            const rows = await repo.getMintAggregations(query);
 
-        const result = this.aggregate(rows);
-        await this.redis.setJson(cacheKey, result, CACHE_TTL_SECONDS);
-        return result;
+            const result = this.aggregate(rows);
+            await this.redis.setJson(cacheKey, result, CACHE_TTL_SECONDS);
+            return result;
+        });
     }
 
     /**
@@ -55,36 +72,38 @@ export class DashboardService {
         const cached = await this.redis.getJson<DashboardSummaryDto>(cacheKey);
         if (cached) return cached;
 
-        const repo = new PgDashboardRepository(this.dataSources.getDataSource(network));
-        const [
-            totals, filterOptions, countries, registries, sectors, vintages, mapPoints,
-            countrySectors, countryRegistries, statuses, methodologies, portfolio,
-            developers, registryStatuses, lifecycleStages,
-        ] = await Promise.all([
-            repo.getTotals(query),
-            repo.getFilterOptions(),
-            repo.getCountryAggregates(query),
-            repo.getRegistryAggregates(query),
-            repo.getSectorAggregates(query),
-            repo.getVintageAggregates(query),
-            repo.getMapPoints(query),
-            repo.getCountrySectorBreakdown(query),
-            repo.getCountryRegistryBreakdown(query),
-            repo.getStatusAggregates(query),
-            repo.getMethodologyAggregates(query),
-            repo.getPortfolioMetrics(query),
-            repo.getDeveloperAggregates(query),
-            repo.getRegistryStatusBreakdown(query),
-            repo.getLifecycleStageAggregates(query),
-        ]);
+        return this.dedupe(cacheKey, async () => {
+            const repo = new PgDashboardRepository(this.dataSources.getDataSource(network));
+            const [
+                totals, filterOptions, countries, registries, sectors, vintages, mapPoints,
+                countrySectors, countryRegistries, statuses, methodologies, portfolio,
+                developers, registryStatuses, lifecycleStages,
+            ] = await Promise.all([
+                repo.getTotals(query),
+                repo.getFilterOptions(),
+                repo.getCountryAggregates(query),
+                repo.getRegistryAggregates(query),
+                repo.getSectorAggregates(query),
+                repo.getVintageAggregates(query),
+                repo.getMapPoints(query),
+                repo.getCountrySectorBreakdown(query),
+                repo.getCountryRegistryBreakdown(query),
+                repo.getStatusAggregates(query),
+                repo.getMethodologyAggregates(query),
+                repo.getPortfolioMetrics(query),
+                repo.getDeveloperAggregates(query),
+                repo.getRegistryStatusBreakdown(query),
+                repo.getLifecycleStageAggregates(query),
+            ]);
 
-        const result = this.buildSummary(
-            totals, filterOptions, countries, registries, sectors, vintages, mapPoints,
-            countrySectors, countryRegistries, statuses, methodologies, portfolio,
-            developers, registryStatuses, lifecycleStages,
-        );
-        await this.redis.setJson(cacheKey, result, CACHE_TTL_SECONDS);
-        return result;
+            const result = this.buildSummary(
+                totals, filterOptions, countries, registries, sectors, vintages, mapPoints,
+                countrySectors, countryRegistries, statuses, methodologies, portfolio,
+                developers, registryStatuses, lifecycleStages,
+            );
+            await this.redis.setJson(cacheKey, result, CACHE_TTL_SECONDS);
+            return result;
+        });
     }
 
     private cacheKey(scope: string, network: string, query: DashboardMintQuery): string {

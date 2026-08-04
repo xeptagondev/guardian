@@ -186,6 +186,16 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         WHERE "viewType" = 'CREDIT'
     `);
 
+    // Expression index on PROJECT rows' businessData->>'developer', backing
+    // the dashboard's developer-filter equality condition (buildProjectScope).
+    // registryDid needs no equivalent index — it's a real column already
+    // covered by the (viewType, registryDid) composite index.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_business_view_project_developer
+        ON business_view ((("businessData"->>'developer')))
+        WHERE "viewType" = 'PROJECT'
+    `);
+
     // Full-precision project boundary geometry, kept OUT of business_view's
     // "businessData" jsonb deliberately — a boundary can run to hundreds of KB
     // (real-world exports have hit tens of thousands of vertices), and that

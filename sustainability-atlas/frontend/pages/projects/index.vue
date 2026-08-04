@@ -665,7 +665,7 @@ async function downloadProjects() {
             </thead>
             <tbody class="divide-y divide-border/60">
               <!-- Loading skeleton -->
-              <template v-if="pending && paginated.length === 0">
+              <template v-if="pending">
                 <tr v-for="i in skeletonRows" :key="`sk-${i}`">
                   <td v-for="col in 12" :key="col" class="py-3.5 px-4">
                     <Skeleton class="h-4 w-full" />
