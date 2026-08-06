@@ -343,28 +343,31 @@ function fmtCompact(n: number): string {
             </div>
         </div>
 
-        <!-- Stakeholder tabs -->
-        <div class="border-y bg-muted/20">
-            <nav class="flex gap-0 overflow-x-auto px-6">
-                <button
-                    v-for="t_ in tabs"
-                    :key="t_.key"
-                    :class="[
-                        tab === t_.key
-                            ? 'border-primary text-primary bg-card'
-                            : 'border-transparent text-muted-foreground hover:text-foreground',
-                        'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
-                    ]"
-                    @click="tab = t_.key"
-                >
-                    <component :is="t_.icon" class="h-4 w-4" />
-                    {{ t_.label }}
-                </button>
-            </nav>
-            <div class="px-6 py-2.5 border-t bg-card">
-                <p class="text-xs text-muted-foreground">{{ tabs.find(t_ => t_.key === tab)?.desc }}</p>
+        <!-- Tabbed card -->
+        <div class="px-6 pb-6">
+        <div class="rounded-xl border bg-card overflow-hidden">
+            <!-- Stakeholder tabs -->
+            <div class="border-b bg-muted/30">
+                <nav class="flex gap-0 -mb-px overflow-x-auto">
+                    <button
+                        v-for="t_ in tabs"
+                        :key="t_.key"
+                        :class="[
+                            tab === t_.key
+                                ? 'border-primary text-primary bg-card'
+                                : 'border-transparent text-muted-foreground hover:text-foreground',
+                            'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
+                        ]"
+                        @click="tab = t_.key"
+                    >
+                        <component :is="t_.icon" class="h-4 w-4" />
+                        {{ t_.label }}
+                    </button>
+                </nav>
+                <div class="px-6 py-2.5 border-t bg-card">
+                    <p class="text-xs text-muted-foreground">{{ tabs.find(t_ => t_.key === tab)?.desc }}</p>
+                </div>
             </div>
-        </div>
 
         <!-- ── Market Overview ─────────────────────────────────────────────── -->
         <div v-if="tab === 'overview'" class="p-6 space-y-6">
@@ -824,6 +827,8 @@ function fmtCompact(n: number): string {
                     </div>
                 </div>
             </div>
+        </div>
+        </div>
         </div>
     </div>
 </template>
