@@ -212,7 +212,7 @@ export class ProjectQueryDto extends PaginationQueryDto {
     @IsString()
     policyTopicId?: string;
 
-    @ApiPropertyOptional({ description: 'Filter by instance topic ID (exact match) — returns only projects registered against this specific version of the methodology' })
+    @ApiPropertyOptional({ description: 'Filter by instance topic ID (exact match) — returns only projects registered against this specific version of the methodology. Supports a `|`-delimited list to match any of several versions.' })
     @IsOptional()
     @IsString()
     instanceTopicId?: string;
@@ -258,6 +258,17 @@ export class ProjectQueryDto extends PaginationQueryDto {
     isPipeline?: string;
 }
 
+export class MethodologyFilterOptionDto {
+    @ApiProperty({ description: "Methodology instance topic ID — matches a project's instanceTopicId" })
+    topicId: string;
+
+    @ApiProperty({ nullable: true, description: 'Methodology display name' })
+    name: string | null;
+
+    @ApiProperty({ nullable: true, description: 'Methodology version' })
+    version: string | null;
+}
+
 export class ProjectFilterOptionsDto {
     @ApiProperty({ type: [String] })
     registries: string[];
@@ -279,6 +290,9 @@ export class ProjectFilterOptionsDto {
 
     @ApiProperty({ type: [String], description: 'Raw stored country values (not geocoded/display-resolved)' })
     countries: string[];
+
+    @ApiProperty({ type: [MethodologyFilterOptionDto], description: 'All methodologies (name + version) available in the system, for filter dropdowns' })
+    methodologies: MethodologyFilterOptionDto[];
 }
 
 export class ProjectListSummaryDto {

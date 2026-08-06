@@ -522,6 +522,7 @@
         "filters": {
             "status": "Status",
             "registry": "Registry",
+            "methodology": "Methodology",
             "country": "Country",
             "vintage": "Vintage",
             "sector": "Sector",

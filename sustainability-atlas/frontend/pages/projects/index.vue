@@ -181,6 +181,7 @@ const apiFilters = computed<Record<string, any>>(() => {
   const a = activeFilters.value;
   const f: Record<string, any> = {};
   if (a.registry) f.registry = a.registry;
+  if (a.instanceTopicId) f.instanceTopicId = a.instanceTopicId;
   if (a.country) f.country = a.country;
   if (a.vintage) f.vintageRange = a.vintage;
   if (a.sector) f.sector = a.sector;
@@ -337,6 +338,18 @@ const filters = computed<FilterOption[]>(() => [
     })),
   },
   {
+    key: "instanceTopicId",
+    label: t("projects.filters.methodology"),
+    multiSelect: true,
+    searchable: true,
+    options: filterOptions.value.methodologies
+      .map((m) => ({
+        value: m.topicId,
+        label: m.name ? (m.version ? `${m.name} - ${m.version}` : m.name) : m.topicId,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  },
+  {
     key: "country",
     label: t("projects.filters.country"),
     multiSelect: true,
@@ -462,6 +475,7 @@ async function downloadProjects() {
     const search = searchQuery.value?.trim();
     if (search) query.search = search;
     if (af.registry) query.registry = af.registry;
+    if (af.instanceTopicId) query.instanceTopicId = af.instanceTopicId;
     if (af.country) query.country = af.country;
     if (af.developer) query.developer = af.developer;
     if (af.sector) query.sector = af.sector;
