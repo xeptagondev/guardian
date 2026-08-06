@@ -570,13 +570,10 @@
         "projectedIssuance": {
             "title": "Projected Information",
             "subtitle": "Forecast emission reductions & credit issuance",
-            "reductionSectionTitle": "Projected Emission Reduction",
             "totalReductionLabel": "Total Projected tCO2e Reduction",
-            "totalCreditsLabel": "Proj. Volume (Credits)",
             "periodLabel": "Expected Issuance Year(s)",
             "baselineLabel": "Baseline",
-            "emptyTitle": "No projection data available",
-            "emptyDescription": "Map an Estimated Annual Credits field in the methodology's decode mapping to populate this section."
+            "emptyTitle": "No projection available"
         },
         "notFound": "Project not found",
         "details": {

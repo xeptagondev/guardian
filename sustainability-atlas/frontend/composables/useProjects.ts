@@ -1,4 +1,4 @@
-import type { Project, ProjectIssuance, IssuanceEvent, LinkedSchema, LinkedVc, Milestone } from '~/types/models';
+import type { Project, ProjectIssuance, IssuanceEvent, LinkedSchema, LinkedVc, Milestone, ProjectedIssuance } from '~/types/models';
 
 // country display name → ISO 3166-1 alpha-3 for CountryFlag component
 export const COUNTRY_ALPHA3: Record<string, string> = {
@@ -129,6 +129,17 @@ function mapLinkedSchema(s: Record<string, any>): LinkedSchema {
     };
 }
 
+function mapProjectedIssuance(raw: unknown): ProjectedIssuance | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, any>;
+    return {
+        totalTco2e: typeof r['totalTco2e'] === 'number' ? r['totalTco2e'] : null,
+        periodStart: typeof r['periodStart'] === 'number' ? r['periodStart'] : null,
+        periodEnd: typeof r['periodEnd'] === 'number' ? r['periodEnd'] : null,
+        baselineDescription: typeof r['baselineDescription'] === 'string' ? r['baselineDescription'] : null,
+    };
+}
+
 function parseSdgs(sdgs: unknown): number[] {
     if (Array.isArray(sdgs)) return (sdgs as unknown[]).map(Number).filter(Boolean);
     if (typeof sdgs === 'string' && sdgs.trim()) {
@@ -209,6 +220,7 @@ export function mapApiProject(raw: Record<string, any>): Project {
         lifecycleStage: typeof raw.lifecycleStage === 'string' ? raw.lifecycleStage : ((raw.totalIssued ?? 0) > 0 ? 'Issued' : 'Registered'),
         expectedIssuanceYear: typeof raw.expectedIssuanceYear === 'string' ? raw.expectedIssuanceYear : null,
         projectedVolume: typeof raw.projectedVolume === 'number' ? raw.projectedVolume : null,
+        projectedIssuance: mapProjectedIssuance(raw.projectedIssuance),
         milestones: Array.isArray(raw.milestones)
             ? (raw.milestones as Array<Record<string, any>>).map((m): Milestone => ({
                 key: typeof m['key'] === 'string' ? m['key'] : '',

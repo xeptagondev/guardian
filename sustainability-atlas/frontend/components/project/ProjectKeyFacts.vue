@@ -6,6 +6,7 @@ import { formatDate } from '~/lib/format';
 import { useMethodologyApi } from '~/composables/api/useMethodologiesApi';
 import { IWA_TO_CADTRUST, IWA_TO_CDOP } from '~/lib/standard-field-mappings.generated';
 import { SECTOR_I18N_KEYS } from '~/types/enums';
+import { formatNumber } from '~/lib/format';
 
 const props = defineProps<{
     project: Project;
@@ -47,6 +48,10 @@ const creditingPeriodEnd = computed(() => {
     const yr = parseInt(props.project.vintage);
     return isNaN(yr) ? '—' : formatDate(`${yr + 9}-12-31`);
 });
+
+const totalCreditsValue = computed(() => props.project.projectedIssuance?.totalTco2e != null
+    ? `${formatNumber(props.project.projectedIssuance?.totalTco2e)}`
+    : t('projects.notEstimated'));
 
 function tip(iwaPaths: string): string {
     const paths = iwaPaths.split(',');
@@ -198,9 +203,9 @@ function tip(iwaPaths: string): string {
             <div class="bg-card px-5 py-4">
                 <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
                     {{ $t('projects.details.estimatedTotalCredits') }}
-                    <InfoTooltip :text="tip('ImpactClaim.quantity')" />
+                    <InfoTooltip :text="tip('OriginationProcessAgreement.estimatedAnnualCredits')" />
                 </div>
-                <div class="text-sm font-semibold text-foreground tabular-nums">{{ formatCredits(project.credits) }}</div>
+                <div class="text-sm font-semibold text-foreground tabular-nums">{{ formatCredits(totalCreditsValue) }}</div>
             </div>
         </div>
     </div>

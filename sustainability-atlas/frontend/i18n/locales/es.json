@@ -570,13 +570,10 @@
         "projectedIssuance": {
             "title": "Información proyectada",
             "subtitle": "Previsión de reducciones de emisiones y emisión de créditos",
-            "reductionSectionTitle": "Reducción de emisiones proyectada",
             "totalReductionLabel": "Reducción total proyectada (tCO2e)",
-            "totalCreditsLabel": "Vol. proyectado (créditos)",
             "periodLabel": "Año(s) de emisión esperado",
             "baselineLabel": "Línea base",
-            "emptyTitle": "No hay datos de proyección disponibles",
-            "emptyDescription": "Asigne un campo de Créditos Anuales Estimados en el mapeo de decodificación de la metodología para completar esta sección."
+            "emptyTitle": "No hay proyección disponible"
         },
         "notFound": "Proyecto no encontrado",
         "details": {

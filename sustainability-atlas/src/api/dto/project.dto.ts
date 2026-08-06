@@ -144,6 +144,27 @@ export class MilestoneDto {
     dateType: string | null;
 }
 
+export class ProjectedIssuanceDto {
+    @ApiProperty({
+        nullable: true,
+        description:
+            'Total projected emission reduction (tCO2e) — the mapped Estimated Annual Credits value as-is, ' +
+            'never multiplied out across the crediting period (a single figure cannot honestly stand in ' +
+            'for every year). Null when no amount is mapped/extracted, in which case periodStart/periodEnd ' +
+            'may still be populated on their own.',
+    })
+    totalTco2e: number | null;
+
+    @ApiProperty({ nullable: true, description: 'First year of the crediting period, when resolvable' })
+    periodStart: number | null;
+
+    @ApiProperty({ nullable: true, description: 'Last year of the crediting period, when resolvable' })
+    periodEnd: number | null;
+
+    @ApiProperty({ nullable: true, description: 'Project/baseline description shown alongside the projection, when available' })
+    baselineDescription: string | null;
+}
+
 export class LinkedSchemaDto {
     @ApiProperty({ description: 'Schema UUID from the VC type field, or literal "MintToken" for mint VCs' })
     schemaUuid: string;
@@ -472,6 +493,15 @@ export class ProjectResponseDto {
     @ApiProperty({ nullable: true, description: 'Projected/actual credit volume: totalIssued when Issued, otherwise null ("Not estimated")' })
     projectedVolume: number | null;
 
+    @ApiProperty({
+        type: ProjectedIssuanceDto,
+        nullable: true,
+        description:
+            'Detail-page-only (full=true) projected issuance breakdown for pipeline (non-Issued) projects, ' +
+            'built from the mapped Estimated Annual Credits field. Null when Issued or when no estimate is mapped.',
+    })
+    projectedIssuance: ProjectedIssuanceDto | null;
+
     @ApiProperty({ type: [MilestoneDto], description: 'Registration → Validation → MRV Submission → Verification → Issuance milestone tracker' })
     milestones: MilestoneDto[];
 
@@ -661,7 +691,34 @@ export class ProjectResponseDto {
         }
 
         // §3.4 — credits is reported-to-date, never a forward projection (F5); only totalIssued qualifies.
-        const projectedVolume = isIssued ? totalIssued : null;
+        let projectedVolume = isIssued ? totalIssued : null;
+
+        let projectedIssuance: ProjectedIssuanceDto | null = null;
+        if (full) {
+            const rawAmount = typeof data['estimatedAnnualCredits'] === 'number' ? data['estimatedAnnualCredits']
+                : typeof data['estimatedAnnualCredits'] === 'string' ? parseFloat(data['estimatedAnnualCredits']) : null;
+            const estimatedAmount = rawAmount && rawAmount > 0 ? rawAmount : null;
+
+            const startYear = typeof data['creditingPeriodStart'] === 'string'
+                ? parseInt(data['creditingPeriodStart'].match(/\d{4}/)?.[0] ?? '', 10)
+                : (typeof data['vintage'] === 'string' ? parseInt(data['vintage'].match(/\d{4}/)?.[0] ?? '', 10) : NaN);
+            const endYear = typeof data['creditingPeriodEnd'] === 'string'
+                ? parseInt(data['creditingPeriodEnd'].match(/\d{4}/)?.[0] ?? '', 10)
+                : NaN;
+            const periodStart = Number.isFinite(startYear) ? startYear : null;
+            const periodEnd = Number.isFinite(endYear) ? endYear : null;
+
+            if (estimatedAmount !== null || periodStart !== null || periodEnd !== null) {
+                projectedIssuance = {
+                    totalTco2e: estimatedAmount,
+                    periodStart,
+                    periodEnd,
+                    baselineDescription: typeof data['description'] === 'string' ? data['description'] : null,
+                };
+            }
+
+            if (projectedIssuance?.totalTco2e != null && !isIssued) projectedVolume = projectedIssuance.totalTco2e;
+        }
 
         // Milestones are only rendered on the detail page — skip building them
         // (and the earliest-VC lookups they need) on list rows.
@@ -772,6 +829,7 @@ export class ProjectResponseDto {
             lifecycleStage,
             expectedIssuanceYear,
             projectedVolume,
+            projectedIssuance,
             milestones,
         };
     }

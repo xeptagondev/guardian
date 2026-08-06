@@ -4,11 +4,10 @@ import {
     Globe, MapPin,
     Network, FileText, ChevronDown,
     FolderKanban, BarChart3, RotateCcw, CloudDownload, Download,
-    ListChecks, TrendingUp, GitBranch, ArrowRight, Radio,
+    ListChecks, GitBranch, ArrowRight, Radio,
 } from 'lucide-vue-next';
 import type { Component } from 'vue';
 import type { Credit, VcDocData } from '~/types/models';
-import { formatCredits } from '~/lib/format';
 import { exportProject, type ExportFormat } from '~/lib/project-export';
 import { getSDG, getLocalizedSDGName } from '~/lib/sdgs';
 import { useDecodedMethodologyApi } from '~/composables/api/useDecodedMethodologyApi';
@@ -526,30 +525,9 @@ const emissions = computed(() => {
             <div v-else-if="activeTab === 'issuances'" class="p-6 space-y-6">
                 <CreditLifecycle :project="project" />
 
-                <!-- Projected Issuance (pipeline projects only — issued projects show actuals above) -->
-                <div v-if="project.lifecycleStage !== 'Issued'" class="rounded-xl border bg-card overflow-hidden">
-                    <div class="px-5 py-3.5 border-b bg-muted/30">
-                        <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
-                            <TrendingUp class="h-4 w-4 text-primary" />
-                            {{ $t('projects.projectedEstimate.title') }}
-                        </h2>
-                        <p class="text-[11px] text-muted-foreground mt-0.5">{{ $t('projects.projectedEstimate.subtitle') }}</p>
-                    </div>
-                    <div class="grid grid-cols-2 gap-px bg-border">
-                        <div class="bg-card px-5 py-4 text-center">
-                            <div class="text-lg font-semibold text-foreground tabular-nums">
-                                {{ project.projectedVolume != null ? formatCredits(project.projectedVolume) : $t('projects.notEstimated') }}
-                            </div>
-                            <div class="text-[11px] text-muted-foreground">{{ $t('projects.columns.projectedVolume') }}</div>
-                        </div>
-                        <div class="bg-card px-5 py-4 text-center">
-                            <div class="text-lg font-semibold text-foreground tabular-nums">
-                                {{ project.expectedIssuanceYear ?? $t('projects.tbd') }}
-                            </div>
-                            <div class="text-[11px] text-muted-foreground">{{ $t('projects.columns.expectedIssuanceYear') }}</div>
-                        </div>
-                    </div>
-                </div>
+                <!-- Projected Information — shown for both pipeline and Issued projects; the
+                     estimate remains a useful reference point after issuance. -->
+                <ProjectedIssuance :data="project.projectedIssuance" />
 
                 <IssuancesTable
                     :project="project"
