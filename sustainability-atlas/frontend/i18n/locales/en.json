@@ -572,7 +572,6 @@
             "subtitle": "Forecast emission reductions & credit issuance",
             "totalReductionLabel": "Total Projected tCO2e Reduction",
             "periodLabel": "Expected Issuance Year(s)",
-            "baselineLabel": "Baseline",
             "emptyTitle": "No projection available"
         },
         "notFound": "Project not found",

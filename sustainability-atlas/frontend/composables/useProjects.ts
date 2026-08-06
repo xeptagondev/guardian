@@ -136,7 +136,6 @@ function mapProjectedIssuance(raw: unknown): ProjectedIssuance | null {
         totalTco2e: typeof r['totalTco2e'] === 'number' ? r['totalTco2e'] : null,
         periodStart: typeof r['periodStart'] === 'number' ? r['periodStart'] : null,
         periodEnd: typeof r['periodEnd'] === 'number' ? r['periodEnd'] : null,
-        baselineDescription: typeof r['baselineDescription'] === 'string' ? r['baselineDescription'] : null,
     };
 }
 

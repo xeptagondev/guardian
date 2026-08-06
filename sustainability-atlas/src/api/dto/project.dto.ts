@@ -160,9 +160,6 @@ export class ProjectedIssuanceDto {
 
     @ApiProperty({ nullable: true, description: 'Last year of the crediting period, when resolvable' })
     periodEnd: number | null;
-
-    @ApiProperty({ nullable: true, description: 'Project/baseline description shown alongside the projection, when available' })
-    baselineDescription: string | null;
 }
 
 export class LinkedSchemaDto {
@@ -709,12 +706,7 @@ export class ProjectResponseDto {
             const periodEnd = Number.isFinite(endYear) ? endYear : null;
 
             if (estimatedAmount !== null || periodStart !== null || periodEnd !== null) {
-                projectedIssuance = {
-                    totalTco2e: estimatedAmount,
-                    periodStart,
-                    periodEnd,
-                    baselineDescription: typeof data['description'] === 'string' ? data['description'] : null,
-                };
+                projectedIssuance = { totalTco2e: estimatedAmount, periodStart, periodEnd };
             }
 
             if (projectedIssuance?.totalTco2e != null && !isIssued) projectedVolume = projectedIssuance.totalTco2e;

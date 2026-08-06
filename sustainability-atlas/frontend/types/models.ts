@@ -71,7 +71,6 @@ export interface ProjectedIssuance {
     totalTco2e: number | null;
     periodStart: number | null;
     periodEnd: number | null;
-    baselineDescription: string | null;
 }
 
 export interface Project {

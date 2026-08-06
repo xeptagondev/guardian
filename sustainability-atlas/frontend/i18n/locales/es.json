@@ -572,7 +572,6 @@
             "subtitle": "Previsión de reducciones de emisiones y emisión de créditos",
             "totalReductionLabel": "Reducción total proyectada (tCO2e)",
             "periodLabel": "Año(s) de emisión esperado",
-            "baselineLabel": "Línea base",
             "emptyTitle": "No hay proyección disponible"
         },
         "notFound": "Proyecto no encontrado",
