@@ -325,6 +325,8 @@
         "refresh": "Actualizar",
         "cancel": "Cancelar",
         "unknownError": "Error desconocido",
+        "showMore": "Mostrar más",
+        "showLess": "Mostrar menos",
         "status": {
             "Active": "Activo",
             "Inactive": "Inactivo"
@@ -565,9 +567,16 @@
         },
         "tbd": "Por definir",
         "notEstimated": "No estimado",
-        "projectedEstimate": {
-            "title": "Emisión proyectada",
-            "subtitle": "Volumen previsto y año de emisión esperado"
+        "projectedIssuance": {
+            "title": "Información proyectada",
+            "subtitle": "Previsión de reducciones de emisiones y emisión de créditos",
+            "reductionSectionTitle": "Reducción de emisiones proyectada",
+            "totalReductionLabel": "Reducción total proyectada (tCO2e)",
+            "totalCreditsLabel": "Vol. proyectado (créditos)",
+            "periodLabel": "Año(s) de emisión esperado",
+            "baselineLabel": "Línea base",
+            "emptyTitle": "No hay datos de proyección disponibles",
+            "emptyDescription": "Asigne un campo de Créditos Anuales Estimados en el mapeo de decodificación de la metodología para completar esta sección."
         },
         "notFound": "Proyecto no encontrado",
         "details": {
@@ -1020,7 +1029,8 @@
                     "creditingPeriodStart": "Inicio del período de acreditación",
                     "creditingPeriodEnd": "Fin del período de acreditación",
                     "vintageRaw": "Fecha de cosecha",
-                    "sdgOrCobenefits": "ODS / Cobeneficios"
+                    "sdgOrCobenefits": "ODS / Cobeneficios",
+                    "estimatedAnnualCredits": "Créditos anuales estimados"
                 },
                 "fetchError": "No se pudo cargar el mapeo decodificado.",
                 "unresolved": "—",

@@ -325,6 +325,8 @@
         "refresh": "Refresh",
         "cancel": "Cancel",
         "unknownError": "Unknown error",
+        "showMore": "Show more",
+        "showLess": "Show less",
         "status": {
             "Active": "Active",
             "Inactive": "Inactive"
@@ -565,9 +567,16 @@
         },
         "tbd": "TBD",
         "notEstimated": "No Estimations Available",
-        "projectedEstimate": {
-            "title": "Projected Issuance",
-            "subtitle": "Forecast volume & expected issuance year"
+        "projectedIssuance": {
+            "title": "Projected Information",
+            "subtitle": "Forecast emission reductions & credit issuance",
+            "reductionSectionTitle": "Projected Emission Reduction",
+            "totalReductionLabel": "Total Projected tCO2e Reduction",
+            "totalCreditsLabel": "Proj. Volume (Credits)",
+            "periodLabel": "Expected Issuance Year(s)",
+            "baselineLabel": "Baseline",
+            "emptyTitle": "No projection data available",
+            "emptyDescription": "Map an Estimated Annual Credits field in the methodology's decode mapping to populate this section."
         },
         "notFound": "Project not found",
         "details": {
@@ -1020,7 +1029,8 @@
                     "creditingPeriodStart": "Crediting Period Start",
                     "creditingPeriodEnd": "Crediting Period End",
                     "vintageRaw": "Vintage Date",
-                    "sdgOrCobenefits": "SDG / Co-benefits"
+                    "sdgOrCobenefits": "SDG / Co-benefits",
+                    "estimatedAnnualCredits": "Estimated Annual Credits"
                 },
                 "fetchError": "Failed to load decoded mapping.",
                 "unresolved": "—",
