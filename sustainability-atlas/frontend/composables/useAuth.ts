@@ -119,6 +119,9 @@ export const useAuth = () => {
     // Shared, SSR-safe cache of the server's password policy (fetched once).
     const passwordPolicy = useState<PasswordPolicy>('auth-password-policy', () => DEFAULT_PASSWORD_POLICY);
     const passwordPolicyLoaded = useState<boolean>('auth-password-policy-loaded', () => false);
+    // Becomes true on the client once fetchMe() completes (success or failure).
+    // UI components read this to avoid showing guest state during the auth check.
+    const isAuthResolved = useState<boolean>('auth-resolved', () => false);
     const config = useRuntimeConfig();
     const { apiFetch } = useApiFetch();
 
@@ -177,6 +180,9 @@ export const useAuth = () => {
             });
         } catch {
             user.value = null;
+        } finally {
+            // Always mark auth as resolved so UI can transition out of loading state.
+            isAuthResolved.value = true;
         }
     }
 
@@ -310,6 +316,7 @@ export const useAuth = () => {
         isAuthenticated,
         isAdmin,
         isSystemUser,
+        isAuthResolved,
         modal,
         fetchMe,
         login,
