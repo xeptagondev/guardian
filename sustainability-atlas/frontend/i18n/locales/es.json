@@ -618,7 +618,10 @@
                 "polygon": "Límite del proyecto (polígono)"
             },
             "documents": {
-                "empty": "No se encontraron documentos vinculados para este proyecto."
+                "empty": "No se encontraron documentos vinculados para este proyecto.",
+                "hiddenEmptySchemas": "{count} sección no tiene registros | {count} secciones no tienen registros",
+                "showAllEmpty": "Mostrar todo",
+                "hideEmptySchemas": "Ocultar secciones vacías"
             },
             "mrv": {
                 "description": "Registros enviados mediante el mecanismo de ingestión de datos externo/IoT de esta metodología (dMRV), separados de los documentos enviados por humanos.",

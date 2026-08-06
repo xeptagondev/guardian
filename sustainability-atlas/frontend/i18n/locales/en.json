@@ -618,7 +618,10 @@
                 "polygon": "Project boundary (polygon)"
             },
             "documents": {
-                "empty": "No linked documents found for this project."
+                "empty": "No linked documents found for this project.",
+                "hiddenEmptySchemas": "{count} section has no records | {count} sections have no records",
+                "showAllEmpty": "Show all",
+                "hideEmptySchemas": "Hide empty sections"
             },
             "mrv": {
                 "description": "Records submitted through this methodology's external/IoT data-ingestion mechanism (dMRV), separate from human-submitted documents.",

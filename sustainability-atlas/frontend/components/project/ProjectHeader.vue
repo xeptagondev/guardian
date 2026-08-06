@@ -19,6 +19,19 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+// Long descriptions are truncated with
+// a show more/less toggle so they don't push the tabs and key facts down.
+const DESCRIPTION_TRUNCATE_LENGTH = 320;
+const descriptionExpanded = ref(false);
+
+const isDescriptionTruncatable = computed(() => (props.project.description?.length ?? 0) > DESCRIPTION_TRUNCATE_LENGTH);
+
+const displayedDescription = computed(() => {
+    const desc = props.project.description ?? '';
+    if (!isDescriptionTruncatable.value || descriptionExpanded.value) return desc;
+    return `${desc.slice(0, DESCRIPTION_TRUNCATE_LENGTH)}…`;
+});
 </script>
 
 <template>
@@ -64,8 +77,15 @@ const { t } = useI18n();
         </div>
 
         <!-- Description (full width, below title and buttons) -->
-        <p v-if="project.description" class="text-sm text-muted-foreground leading-relaxed">
-            {{ project.description }}
-        </p>
+        <div v-if="project.description" class="text-sm text-muted-foreground leading-relaxed">
+            <p>{{ displayedDescription }}</p>
+            <button
+                v-if="isDescriptionTruncatable"
+                class="mt-1 text-xs font-medium text-primary hover:underline"
+                @click="descriptionExpanded = !descriptionExpanded"
+            >
+                {{ descriptionExpanded ? $t('common.showLess') : $t('common.showMore') }}
+            </button>
+        </div>
     </div>
 </template>
