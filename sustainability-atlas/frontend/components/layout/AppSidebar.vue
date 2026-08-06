@@ -17,7 +17,8 @@ import {
 
 const { t, locale } = useI18n();
 const { network } = useNetwork();
-const { isAuthenticated } = useAuth();
+const { isAuthenticated, isAuthResolved } = useAuth();
+const route = useRoute();
 
 const collapsed = useState('sidebar-collapsed', () => false);
 
@@ -55,6 +56,23 @@ const authedItems = computed(() => [
     { label: t('nav.portfolio'), icon: Briefcase, to: '/portfolio' },
     { label: t('nav.reports'), icon: FileText, to: '/reports' },
 ]);
+
+// Paths that require authentication — used for optimistic tab rendering.
+const protectedPaths = ['/portfolio', '/reports', '/account', '/admin'];
+const isProtectedPath = computed(() =>
+    protectedPaths.some(p => route.path.startsWith(p))
+);
+
+// Show authed nav if:
+//   - user is confirmed authenticated, OR
+//   - auth hasn't resolved yet AND we're on a protected path.
+//     (middleware allowed SSR render here → user must have had session cookies)
+// This prevents the Portfolio/Reports tabs from popping in after a refresh.
+// Guests on public pages (/,/projects,etc.) never satisfy isProtectedPath so
+// they will never see these tabs even momentarily.
+const showAuthedNav = computed(() =>
+    isAuthenticated.value || (!isAuthResolved.value && isProtectedPath.value)
+);
 </script>
 
 <template>
@@ -129,7 +147,7 @@ const authedItems = computed(() => [
             <!-- Divider + authenticated-only items (Portfolio, then Reports)
                  pinned below all main nav items — per-user tools, so guests
                  never see these tabs. -->
-            <template v-if="isAuthenticated">
+            <template v-if="showAuthedNav">
                 <div class="mx-1 my-1.5 h-px bg-border/60" />
                 <AppLink
                     v-for="item in authedItems"
