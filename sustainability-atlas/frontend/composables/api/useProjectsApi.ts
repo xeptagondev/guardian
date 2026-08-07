@@ -45,6 +45,7 @@ export interface ProjectFilterOptions {
     sectoralScopes: string[];
     vintages: string[];
     countries: string[];
+    methodologies: { topicId: string; name: string | null; version: string | null }[];
 }
 
 export interface UseProjectsApiOptions {
@@ -137,7 +138,7 @@ export const useProjectsApi = (opts: UseProjectsApiOptions) => {
 };
 
 const emptyFilterOptions: ProjectFilterOptions = {
-    registries: [], developers: [], statuses: [], sectors: [], sectoralScopes: [], vintages: [], countries: [],
+    registries: [], developers: [], statuses: [], sectors: [], sectoralScopes: [], vintages: [], countries: [], methodologies: [],
 };
 
 /** Distinct filter-dropdown option values across the whole project set — fetched once per network. */

@@ -524,6 +524,7 @@
         "filters": {
             "status": "Estado",
             "registry": "Registro",
+            "methodology": "Metodología",
             "country": "País",
             "vintage": "Añada",
             "sector": "Sector",
