@@ -571,7 +571,7 @@
         "projectedIssuance": {
             "title": "Projected Information",
             "subtitle": "Forecast emission reductions & credit issuance",
-            "totalReductionLabel": "Total Projected tCO2e Reduction",
+            "totalReductionLabel": "Estimated Average Annual Emission Reductions (tCO₂e)",
             "periodLabel": "Expected Issuance Year(s)",
             "emptyTitle": "No projection available"
         },
