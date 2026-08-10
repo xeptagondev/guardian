@@ -325,6 +325,8 @@
         "refresh": "Actualizar",
         "cancel": "Cancelar",
         "unknownError": "Error desconocido",
+        "showMore": "Mostrar más",
+        "showLess": "Mostrar menos",
         "status": {
             "Active": "Activo",
             "Inactive": "Inactivo"
@@ -522,6 +524,7 @@
         "filters": {
             "status": "Estado",
             "registry": "Registro",
+            "methodology": "Metodología",
             "country": "País",
             "vintage": "Añada",
             "sector": "Sector",
@@ -565,9 +568,12 @@
         },
         "tbd": "Por definir",
         "notEstimated": "No estimado",
-        "projectedEstimate": {
-            "title": "Emisión proyectada",
-            "subtitle": "Volumen previsto y año de emisión esperado"
+        "projectedIssuance": {
+            "title": "Información proyectada",
+            "subtitle": "Previsión de reducciones de emisiones y emisión de créditos",
+            "totalReductionLabel": "Reducción total proyectada (tCO2e)",
+            "periodLabel": "Año(s) de emisión esperado",
+            "emptyTitle": "No hay proyección disponible"
         },
         "notFound": "Proyecto no encontrado",
         "details": {
@@ -618,7 +624,10 @@
                 "polygon": "Límite del proyecto (polígono)"
             },
             "documents": {
-                "empty": "No se encontraron documentos vinculados para este proyecto."
+                "empty": "No se encontraron documentos vinculados para este proyecto.",
+                "hiddenEmptySchemas": "{count} sección no tiene registros | {count} secciones no tienen registros",
+                "showAllEmpty": "Mostrar todo",
+                "hideEmptySchemas": "Ocultar secciones vacías"
             },
             "mrv": {
                 "description": "Registros enviados mediante el mecanismo de ingestión de datos externo/IoT de esta metodología (dMRV), separados de los documentos enviados por humanos.",
@@ -1017,7 +1026,8 @@
                     "creditingPeriodStart": "Inicio del período de acreditación",
                     "creditingPeriodEnd": "Fin del período de acreditación",
                     "vintageRaw": "Fecha de cosecha",
-                    "sdgOrCobenefits": "ODS / Cobeneficios"
+                    "sdgOrCobenefits": "ODS / Cobeneficios",
+                    "estimatedAnnualCredits": "Créditos anuales estimados"
                 },
                 "fetchError": "No se pudo cargar el mapeo decodificado.",
                 "unresolved": "—",

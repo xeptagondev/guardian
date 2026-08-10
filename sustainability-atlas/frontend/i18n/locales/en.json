@@ -325,6 +325,8 @@
         "refresh": "Refresh",
         "cancel": "Cancel",
         "unknownError": "Unknown error",
+        "showMore": "Show more",
+        "showLess": "Show less",
         "status": {
             "Active": "Active",
             "Inactive": "Inactive"
@@ -522,6 +524,7 @@
         "filters": {
             "status": "Status",
             "registry": "Registry",
+            "methodology": "Methodology",
             "country": "Country",
             "vintage": "Vintage",
             "sector": "Sector",
@@ -565,9 +568,12 @@
         },
         "tbd": "TBD",
         "notEstimated": "No Estimations Available",
-        "projectedEstimate": {
-            "title": "Projected Issuance",
-            "subtitle": "Forecast volume & expected issuance year"
+        "projectedIssuance": {
+            "title": "Projected Information",
+            "subtitle": "Forecast emission reductions & credit issuance",
+            "totalReductionLabel": "Total Projected tCO2e Reduction",
+            "periodLabel": "Expected Issuance Year(s)",
+            "emptyTitle": "No projection available"
         },
         "notFound": "Project not found",
         "details": {
@@ -618,7 +624,10 @@
                 "polygon": "Project boundary (polygon)"
             },
             "documents": {
-                "empty": "No linked documents found for this project."
+                "empty": "No linked documents found for this project.",
+                "hiddenEmptySchemas": "{count} section has no records | {count} sections have no records",
+                "showAllEmpty": "Show all",
+                "hideEmptySchemas": "Hide empty sections"
             },
             "mrv": {
                 "description": "Records submitted through this methodology's external/IoT data-ingestion mechanism (dMRV), separate from human-submitted documents.",
@@ -1017,7 +1026,8 @@
                     "creditingPeriodStart": "Crediting Period Start",
                     "creditingPeriodEnd": "Crediting Period End",
                     "vintageRaw": "Vintage Date",
-                    "sdgOrCobenefits": "SDG / Co-benefits"
+                    "sdgOrCobenefits": "SDG / Co-benefits",
+                    "estimatedAnnualCredits": "Estimated Annual Credits"
                 },
                 "fetchError": "Failed to load decoded mapping.",
                 "unresolved": "—",

@@ -471,6 +471,7 @@ const EDITABLE_FIELD_KEYS: ResolvedFieldKey[] = [
   'creditingPeriodEnd',
   'sdgOrCobenefits',
   'geo',
+  'estimatedAnnualCredits',
 ];
 
 const FIELD_LABELS: Record<ResolvedFieldKey, string> = {
@@ -486,6 +487,7 @@ const FIELD_LABELS: Record<ResolvedFieldKey, string> = {
   creditingPeriodEnd: 'Crediting Period End',
   sdgOrCobenefits: 'SDG / Co-benefits',
   geo: 'Project Location',
+  estimatedAnnualCredits: 'Estimated Annual Credits',
 };
 
 const editingMapping = ref(false);
@@ -781,7 +783,7 @@ const formatLastAttempt = (ts: string | null | undefined): string => {
   }
 };
 
-type ResolvedFieldKey = 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo';
+type ResolvedFieldKey = 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo' | 'estimatedAnnualCredits';
 
 interface ProjectFieldRow {
   labelKey: string;
@@ -800,6 +802,7 @@ const PROJECT_FIELD_ROWS: ProjectFieldRow[] = [
   { labelKey: 'creditingPeriod', fieldKey: 'creditingPeriod' },
   { labelKey: 'vintageRaw', fieldKey: 'vintageRaw' },
   { labelKey: 'sdgOrCobenefits', fieldKey: 'sdgOrCobenefits' },
+  { labelKey: 'estimatedAnnualCredits', fieldKey: 'estimatedAnnualCredits' },
 ];
 
 // Version comparison

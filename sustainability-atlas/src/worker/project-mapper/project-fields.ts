@@ -10,7 +10,7 @@
 
 export interface ProjectExtractField {
     /** Stable key used everywhere (DB, API, frontend). */
-    key: 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriod' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo';
+    key: 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriod' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo' | 'estimatedAnnualCredits';
     /** Human-readable label shown in the UI. */
     label: string;
     /** Keywords matched against schema field title + description (lowercase). */
@@ -76,7 +76,7 @@ export const PROJECT_EXTRACT_FIELDS: ProjectExtractField[] = [
     {
         key: 'vintageRaw',
         label: 'Vintage / Start Date',
-        keywords: ['start date', 'commencement', 'vintage'],
+        keywords: ['start date', 'commencement', 'vintage', 'vintage year', 'first year issuance', 'baseline year', 'project start year'],
         iwaField: 'ActivityImpactModule.firstYearIssuance',
     },
     {
@@ -88,16 +88,27 @@ export const PROJECT_EXTRACT_FIELDS: ProjectExtractField[] = [
     {
         key: 'creditingPeriodStart',
         label: 'Crediting Period Start',
-        keywords: ['crediting period start', 'start date', 'commencement date'],
+        keywords: ['crediting period start', 'start date', 'commencement date', 'project start', 'crediting term start'],
         exclude: ['end', 'expiry'],
         iwaField: 'ImpactClaim.startDate',
     },
     {
         key: 'creditingPeriodEnd',
         label: 'Crediting Period End',
-        keywords: ['crediting period end', 'end date', 'expiry date'],
+        keywords: ['crediting period end', 'end date', 'expiry date', 'crediting term end'],
         exclude: ['start', 'commencement'],
         iwaField: 'ImpactClaim.endDate',
+    },
+    {
+        key: 'estimatedAnnualCredits',
+        label: 'Estimated Annual Credits',
+        keywords: [
+            'estimated annual credit', 'estimated annual reduction', 'estimated annual issuance',
+            'forecast annual issuance', 'projected annual credit', 'projected annual issuance',
+            'projected annual emission reduction', 'estimated emission reduction', 'ex-ante estimate',
+            'annual estimated credit',
+        ],
+        iwaField: 'OriginationProcessAgreement.estimatedAnnualCredits',
     },
     {
         key: 'sdgOrCobenefits',

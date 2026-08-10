@@ -54,6 +54,9 @@ export class ResolvedFieldsDto {
 
     @ApiPropertyOptional({ type: ResolvedFieldDto, nullable: true })
     sdgOrCobenefits: ResolvedFieldDto | null;
+
+    @ApiPropertyOptional({ type: ResolvedFieldDto, nullable: true })
+    estimatedAnnualCredits: ResolvedFieldDto | null;
 }
 
 export class FieldMapEntryDto {
@@ -313,6 +316,7 @@ export class DecodedMethodologyResponseDto {
                 creditingPeriodStart: buildResolvedField(resolvedFields['creditingPeriodStart']),
                 creditingPeriodEnd: buildResolvedField(resolvedFields['creditingPeriodEnd']),
                 sdgOrCobenefits: buildResolvedField(resolvedFields['sdgOrCobenefits']),
+                estimatedAnnualCredits: buildResolvedField(resolvedFields['estimatedAnnualCredits']),
             },
             fieldMap: Object.entries(fieldMap)
                 .filter(([, def]) => !def.isGeoJson)

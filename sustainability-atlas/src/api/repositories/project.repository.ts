@@ -113,6 +113,12 @@ export interface ProjectListResult {
     summary: ProjectListSummary;
 }
 
+export interface MethodologyFilterOptionRow {
+    topicId: string;
+    name: string | null;
+    version: string | null;
+}
+
 export interface ProjectFilterOptionsRow {
     registries: string[];
     developers: string[];
@@ -121,6 +127,7 @@ export interface ProjectFilterOptionsRow {
     sectoralScopes: string[];
     vintages: string[];
     countries: string[];
+    methodologies: MethodologyFilterOptionRow[];
 }
 
 /** Filter shape for `findAllForExport` — same filterable fields as `ProjectListQuery` minus pagination/sort. */

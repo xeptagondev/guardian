@@ -258,6 +258,7 @@ export class ProjectMapperService {
         const extracted: Record<string, string | null> = {};
         let geoLngLat: [number, number] | null = null;
         let geoPolygon: ParsedGeoPolygon | null = null;
+        let estimatedAmount: number | null = null;
 
         for (const field of PROJECT_EXTRACT_FIELDS) {
             // `name` is always allowed (it only ever GAP-FILLS via the merge SQL —
@@ -280,6 +281,8 @@ export class ProjectMapperService {
             } else if (field.key === 'creditingPeriodEnd' && raw && typeof raw === 'object' && !Array.isArray(raw) && 'to' in (raw as object)) {
                 const to = (raw as Record<string, unknown>)['to'];
                 if (typeof to === 'string') extracted[field.key] = to;
+            } else if (field.key === 'estimatedAnnualCredits') {
+                estimatedAmount = parseEstimatedAnnualCredits(raw);
             } else {
                 const s = unwrapValue(raw);
                 if (s) extracted[field.key] = s;
@@ -546,6 +549,10 @@ export class ProjectMapperService {
             if (explicitOverrideFields.has('creditingPeriodEnd') && extracted['creditingPeriodEnd']) {
                 overrideBusinessKeys.add('creditingPeriodEnd');
             }
+        }
+        if (estimatedAmount !== null) {
+            newFields.estimatedAnnualCredits = estimatedAmount;
+            if (explicitOverrideFields.has('estimatedAnnualCredits')) overrideBusinessKeys.add('estimatedAnnualCredits');
         }
         newFields.status = 'Issuing';
         newFields.decodeMethod = resolvedProject.method;
@@ -984,6 +991,20 @@ function parseGeoPolygon(raw: unknown): ParsedGeoPolygon | null {
     const coords = obj['coordinates'];
     if (!Array.isArray(coords)) return null;
     return { type, coordinates: coords };
+}
+
+/**
+ * Coerces the mapped "Estimated Annual Credits" field into a flat annual rate
+ * (a bare number/numeric string) — the only shape real VC schemas expose
+ * (see project-fields.ts).
+ */
+function parseEstimatedAnnualCredits(raw: unknown): number | null {
+    if (typeof raw === 'number' && isFinite(raw) && raw > 0) return raw;
+    if (typeof raw === 'string') {
+        const n = parseFloat(raw.replace(/[,\s]/g, ''));
+        return isFinite(n) && n > 0 ? n : null;
+    }
+    return null;
 }
 
 /**
