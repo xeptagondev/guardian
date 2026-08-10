@@ -570,8 +570,8 @@
         "notEstimated": "No estimado",
         "projectedIssuance": {
             "title": "Información proyectada",
-            "subtitle": "Previsión de reducciones de emisiones y emisión de créditos",
-            "totalReductionLabel": "Reducción estimada promedio anual de emisiones (tCO₂e)",
+            "subtitle": "Reducciones/Remociones de emisiones previstas",
+            "totalReductionLabel": "Reducciones/Remociones estimadas promedio anual de emisiones",
             "periodLabel": "Año(s) de emisión esperado",
             "emptyTitle": "No hay proyección disponible"
         },
