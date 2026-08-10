@@ -6,6 +6,9 @@
  */
 export const BASE_QUEUE_NAMES = {
     TOPIC_SYNC: 'mirror-node-topics',
+    // Separate from TOPIC_SYNC (which can hold 100k+ routine re-poll jobs) —
+    // carries only the root/registry topic and guardian-sync's event syncs.
+    TOPIC_SYNC_PRIORITY: 'mirror-node-topics-priority',
     MESSAGE_PARSE: 'mirror-node-messages',
     IPFS_FETCH: 'ipfs-files',
     POLICY_DECODE: 'policy-decode',
@@ -38,6 +41,7 @@ export function qname(base: BaseQueueName, network?: string): string {
  */
 export const QUEUE_NAMES = {
     TOPIC_SYNC: qname(BASE_QUEUE_NAMES.TOPIC_SYNC),
+    TOPIC_SYNC_PRIORITY: qname(BASE_QUEUE_NAMES.TOPIC_SYNC_PRIORITY),
     MESSAGE_PARSE: qname(BASE_QUEUE_NAMES.MESSAGE_PARSE),
     IPFS_FETCH: qname(BASE_QUEUE_NAMES.IPFS_FETCH),
     POLICY_DECODE: qname(BASE_QUEUE_NAMES.POLICY_DECODE),
@@ -83,6 +87,18 @@ export function getQueueConfigs(): QueueDefinition[] {
                 removeOnFail: envInt('TOPIC_SYNC_REMOVE_ON_FAIL', 5000),
             },
             concurrency: envInt('WORKER_TOPIC_CONCURRENCY', 5),
+        },
+        {
+            name: QUEUE_NAMES.TOPIC_SYNC_PRIORITY,
+            defaultJobOptions: {
+                attempts: 5,
+                backoff: { type: 'exponential', delay: 3000 },
+                timeout: 120000,
+                removeOnComplete: envInt('TOPIC_SYNC_PRIORITY_REMOVE_ON_COMPLETE', 500),
+                removeOnFail: envInt('TOPIC_SYNC_PRIORITY_REMOVE_ON_FAIL', 1000),
+            },
+            // Queue stays small by construction — 2 is sufficient.
+            concurrency: envInt('WORKER_TOPIC_PRIORITY_CONCURRENCY', 2),
         },
         {
             name: QUEUE_NAMES.MESSAGE_PARSE,
