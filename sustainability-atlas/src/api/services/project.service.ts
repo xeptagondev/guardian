@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { RedisService } from '@shared/redis/redis.service';
 import {
     ProjectQueryDto,
     ProjectResponseDto,
@@ -15,11 +16,17 @@ import { PolicyWorkflowGraph } from './policy-graph.builder';
 import { AdditionalDetailsSchemaDto } from '../dto/additional-details.dto';
 import { MrvDataQueryDto, MrvDataResponseDto } from '../dto/mrv-data.dto';
 
+// Short TTL — unlike the MV-backed dashboard/portfolio caches, project detail
+// data changes on ingest and on admin re-extract/refresh-ipfs actions, not on
+// a fixed refresh cadence, so this stays short to keep those changes visible quickly.
+const FIND_BY_ID_CACHE_TTL_SECONDS = 30;
+
 @Injectable()
 export class ProjectsService {
     constructor(
         private readonly dataSources: NetworkDataSourceRegistry,
         private readonly mappingReprocessService: MappingReprocessService,
+        private readonly redis: RedisService,
     ) {}
 
     async findAll(
@@ -138,10 +145,17 @@ export class ProjectsService {
     }
 
     async findById(network: string, id: string): Promise<ProjectResponseDto | null> {
+        const cacheKey = `project-detail:${network}:${id}`;
+        const cached = await this.redis.getJson<ProjectResponseDto>(cacheKey);
+        if (cached) return cached;
+
         const repo = this.getRepository(network);
         const row = await repo.findById(id);
         if (!row) return null;
-        return ProjectResponseDto.fromRow(row, network, true);
+
+        const result = ProjectResponseDto.fromRow(row, network, true);
+        await this.redis.setJson(cacheKey, result, FIND_BY_ID_CACHE_TTL_SECONDS);
+        return result;
     }
 
     async findActivity(network: string, id: string): Promise<ActivityEventDto[]> {
