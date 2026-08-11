@@ -560,8 +560,60 @@ export class PgCreditRepository extends CreditRepository {
 
     /** Returns the underlying HCS messages backing a credit: the original Token message and any MintToken VC documents that minted credits against this token, used by the raw-data viewer. */
     async findRaw(tokenId: string): Promise<CreditRawDetail | null> {
-        // 1. The full credit row (reusing the same JOINs as findAll).
-        const creditRows: RawRow[] = await this.dataSource.query(
+        // Steps 1-4 below share no data dependency on each other — only the
+        // policy chain (2b) depends on the credit row's projectId — so they
+        // run concurrently instead of as a 5-deep sequential chain (each was
+        // previously await'ed one after another purely by code placement).
+        const [creditRows, tokenMessageRows, mintRows, projectRows] = await Promise.all([
+            this.findRawCreditRow(tokenId),
+            this.findRawTokenMessage(tokenId),
+            this.findRawMintRows(tokenId),
+            this.findRawProjectRows(tokenId),
+        ]);
+
+        const credit: CreditRow | null = creditRows[0] ? {
+            tokenId: creditRows[0].tokenId,
+            name: creditRows[0].name,
+            symbol: creditRows[0].symbol,
+            type: PgCreditRepository.normaliseType(creditRows[0].raw_type, creditRows[0].options_token_type),
+            supply: parseFloat(creditRows[0].total_supply ?? '0') || 0,
+            projectId: creditRows[0].project_id ?? null,
+            project: creditRows[0].project_name ?? null,
+            methodologyId: creditRows[0].methodology_id ?? null,
+            methodology: creditRows[0].methodology_name ?? null,
+            registry: creditRows[0].registry_name ?? null,
+            registryDid: creditRows[0].registryDid,
+            mintDate: creditRows[0].mint_date instanceof Date
+                ? creditRows[0].mint_date.toISOString()
+                : (creditRows[0].mint_date ?? null),
+            mintConsensusTimestamp: null,
+        } : null;
+
+        const tokenMessage = tokenMessageRows[0] ?? null;
+
+        const { policyId, policyName, policyTopicId } = await this.resolveCreditPolicy(credit?.projectId ?? null);
+
+        const projects: CreditProjectLink[] = projectRows.map(r => ({
+            projectId: r.project_id ?? null,
+            project: r.project_name ?? null,
+        }));
+
+        if (!credit && !tokenMessage && mintRows.length === 0 && projects.length === 0) return null;
+
+        return {
+            credit,
+            projects,
+            tokenMessage,
+            policyId,
+            policyName,
+            policyTopicId,
+            mintEvents: mintRows,
+        };
+    }
+
+    /** 1. The full credit row (reusing the same JOINs as findAll). */
+    private async findRawCreditRow(tokenId: string): Promise<RawRow[]> {
+        return this.dataSource.query(
             `SELECT
                 COALESCE(bv."businessData"->>'tokenId', tc."tokenId") AS "tokenId",
                 COALESCE(bv."displayName", bv."businessData"->'options'->>'tokenName', tc.name) AS name,
@@ -620,27 +672,11 @@ export class PgCreditRepository extends CreditRepository {
              LIMIT 1`,
             [tokenId],
         );
+    }
 
-        const credit: CreditRow | null = creditRows[0] ? {
-            tokenId: creditRows[0].tokenId,
-            name: creditRows[0].name,
-            symbol: creditRows[0].symbol,
-            type: PgCreditRepository.normaliseType(creditRows[0].raw_type, creditRows[0].options_token_type),
-            supply: parseFloat(creditRows[0].total_supply ?? '0') || 0,
-            projectId: creditRows[0].project_id ?? null,
-            project: creditRows[0].project_name ?? null,
-            methodologyId: creditRows[0].methodology_id ?? null,
-            methodology: creditRows[0].methodology_name ?? null,
-            registry: creditRows[0].registry_name ?? null,
-            registryDid: creditRows[0].registryDid,
-            mintDate: creditRows[0].mint_date instanceof Date
-                ? creditRows[0].mint_date.toISOString()
-                : (creditRows[0].mint_date ?? null),
-            mintConsensusTimestamp: null,
-        } : null;
-
-        // 2. The raw Token message from HCS.
-        const tokenMessageRows: Array<Record<string, unknown>> = await this.dataSource.query(
+    /** 2. The raw Token message from HCS. */
+    private async findRawTokenMessage(tokenId: string): Promise<Array<Record<string, unknown>>> {
+        return this.dataSource.query(
             `SELECT "consensusTimestamp", "topicId", owner, uuid, type, action, status, options, files, topics, tokens, "sequenceNumber", "lastUpdate", "createdAt"
              FROM message
              WHERE type = 'Token' AND options->>'tokenId' = $1
@@ -648,53 +684,19 @@ export class PgCreditRepository extends CreditRepository {
              LIMIT 1`,
             [tokenId],
         );
-        const tokenMessage = tokenMessageRows[0] ?? null;
+    }
 
-        // 2b. Resolve the policy governing this token via its linked project's originating VC message: neither
-        //     the Token-creation message nor MintToken VCs carry a policyId, so join back through
-        //     business_view.sourceTimestamp -> message.consensusTimestamp to recover it.
-        let policyId: string | null = null;
-        let policyName: string | null = null;
-        let policyTopicId: string | null = null;
-        if (credit?.projectId) {
-            const projectPolicyRows: Array<{ policyId: string | null }> = await this.dataSource.query(
-                `SELECT m."policyId"
-                 FROM business_view bv
-                 JOIN message m ON m."consensusTimestamp" = bv."sourceTimestamp"
-                 WHERE bv."viewType" = 'PROJECT' AND bv."projectKey" = $1
-                 LIMIT 1`,
-                [credit.projectId],
-            );
-            policyId = projectPolicyRows[0]?.policyId ?? null;
-        }
-        if (policyId) {
-            const policyNameRows: Array<{ policyName: string | null; policyTopicId: string | null }> = await this.dataSource.query(
-                `SELECT ip.options->>'name' AS "policyName",
-                        p."policyTopicId"   AS "policyTopicId"
-                 FROM policy p
-                 JOIN message ip
-                     ON ip.type = 'Instance-Policy'
-                    AND ip.action = 'publish-policy'
-                    AND ip."topicId" = p."policyTopicId"
-                 WHERE p."policyId" = $1
-                 ORDER BY ip."consensusTimestamp" DESC
-                 LIMIT 1`,
-                [policyId],
-            );
-            policyName = policyNameRows[0]?.policyName ?? null;
-            policyTopicId = policyNameRows[0]?.policyTopicId ?? null;
-        }
-
-        // 3. MintToken VC documents that minted credits for this tokenId.
-        const mintRows: Array<{
-            consensusTimestamp: string;
-            topicId: string;
-            amount: string | null;
-            date: string | null;
-            document: Record<string, unknown> | null;
-            projectKey: string | null;
-            type: string | null;
-        }> = await this.dataSource.query(
+    /** 3. MintToken VC documents that minted credits for this tokenId. */
+    private async findRawMintRows(tokenId: string): Promise<Array<{
+        consensusTimestamp: string;
+        topicId: string;
+        amount: string | null;
+        date: string | null;
+        document: Record<string, unknown> | null;
+        projectKey: string | null;
+        type: string | null;
+    }>> {
+        return this.dataSource.query(
             `SELECT
                 m."consensusTimestamp",
                 m."topicId",
@@ -715,37 +717,62 @@ export class PgCreditRepository extends CreditRepository {
              LIMIT 200`,
             [tokenId],
         );
+    }
 
-        // 4. All distinct projects linked to this tokenId (not just the most recent).
-        const projectRows: Array<{ project_id: string | null; project_name: string | null }> =
-            await this.dataSource.query(
-                `SELECT DISTINCT
-                     bv_proj."projectKey"  AS project_id,
-                     bv_proj."displayName" AS project_name
-                 FROM project_mint_link pml
-                 JOIN business_view bv_proj
-                     ON bv_proj."projectKey" = pml.project_key
-                    AND bv_proj."viewType" = 'PROJECT'
-                 WHERE pml.token_id = $1
-                 ORDER BY bv_proj."displayName" ASC NULLS LAST`,
-                [tokenId],
-            );
+    /** 4. All distinct projects linked to this tokenId (not just the most recent). */
+    private async findRawProjectRows(tokenId: string): Promise<Array<{ project_id: string | null; project_name: string | null }>> {
+        return this.dataSource.query(
+            `SELECT DISTINCT
+                 bv_proj."projectKey"  AS project_id,
+                 bv_proj."displayName" AS project_name
+             FROM project_mint_link pml
+             JOIN business_view bv_proj
+                 ON bv_proj."projectKey" = pml.project_key
+                AND bv_proj."viewType" = 'PROJECT'
+             WHERE pml.token_id = $1
+             ORDER BY bv_proj."displayName" ASC NULLS LAST`,
+            [tokenId],
+        );
+    }
 
-        const projects: CreditProjectLink[] = projectRows.map(r => ({
-            projectId: r.project_id ?? null,
-            project: r.project_name ?? null,
-        }));
+    /**
+     * 2b. Resolve the policy governing this token via its linked project's originating VC message: neither
+     * the Token-creation message nor MintToken VCs carry a policyId, so join back through
+     * business_view.sourceTimestamp -> message.consensusTimestamp to recover it. A genuine two-step
+     * dependency chain (policyId must be known before policyName can be looked up), so it stays sequential,
+     * but runs concurrently with the four independent queries above rather than after them.
+     */
+    private async resolveCreditPolicy(projectId: string | null): Promise<{ policyId: string | null; policyName: string | null; policyTopicId: string | null }> {
+        if (!projectId) return { policyId: null, policyName: null, policyTopicId: null };
 
-        if (!credit && !tokenMessage && mintRows.length === 0 && projects.length === 0) return null;
+        const projectPolicyRows: Array<{ policyId: string | null }> = await this.dataSource.query(
+            `SELECT m."policyId"
+             FROM business_view bv
+             JOIN message m ON m."consensusTimestamp" = bv."sourceTimestamp"
+             WHERE bv."viewType" = 'PROJECT' AND bv."projectKey" = $1
+             LIMIT 1`,
+            [projectId],
+        );
+        const policyId = projectPolicyRows[0]?.policyId ?? null;
+        if (!policyId) return { policyId: null, policyName: null, policyTopicId: null };
 
+        const policyNameRows: Array<{ policyName: string | null; policyTopicId: string | null }> = await this.dataSource.query(
+            `SELECT ip.options->>'name' AS "policyName",
+                    p."policyTopicId"   AS "policyTopicId"
+             FROM policy p
+             JOIN message ip
+                 ON ip.type = 'Instance-Policy'
+                AND ip.action = 'publish-policy'
+                AND ip."topicId" = p."policyTopicId"
+             WHERE p."policyId" = $1
+             ORDER BY ip."consensusTimestamp" DESC
+             LIMIT 1`,
+            [policyId],
+        );
         return {
-            credit,
-            projects,
-            tokenMessage,
             policyId,
-            policyName,
-            policyTopicId,
-            mintEvents: mintRows,
+            policyName: policyNameRows[0]?.policyName ?? null,
+            policyTopicId: policyNameRows[0]?.policyTopicId ?? null,
         };
     }
 }

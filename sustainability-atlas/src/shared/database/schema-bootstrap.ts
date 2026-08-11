@@ -82,6 +82,18 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
           AND (documents->'credentialSubject'->0->>'type') LIKE 'MintToken%'
     `);
 
+    // Partial expression index on Token-message options->>'tokenId'. Without
+    // this, the raw-data viewer's Token-message lookup (ORDER BY
+    // consensusTimestamp LIMIT 1 with no supporting index on the JSONB
+    // predicate) makes the planner walk the consensusTimestamp index and
+    // filter row-by-row — effectively a full scan of the whole message table
+    // to find one match. With this index it's a direct bitmap lookup.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_token_tokenid
+        ON message ((options->>'tokenId'))
+        WHERE type = 'Token'
+    `);
+
     // Pre-computed MintToken → project attribution table.
     // Eliminates the grouped-project double-counting bug where a topic-scope
     // join would assign every MintToken in a shared instance topic to all
