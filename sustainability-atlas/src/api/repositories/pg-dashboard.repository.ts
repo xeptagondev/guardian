@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { MV_PROJECT_STATS_NAME } from '@shared/materialized-views';
+import { MV_PROJECT_STATS_NAME, MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 import { SCHEMA_DOC_TYPES_SQL, LIFECYCLE_STAGE_CASE } from '@shared/sql/lifecycle-classification.sql';
 
 export interface MintAggRow {
@@ -103,23 +103,6 @@ export interface MapPointRow {
     credits: string | null;
 }
 
-/**
- * Registry display names, resolved once for the whole aggregation.
- *
- * Non-correlated `DISTINCT ON` derived table over the small REGISTRY row set —
- * the same shape used by getMintAggregations and PgProjectRepository, and
- * deliberately not a per-row LATERAL: these aggregates scan every PROJECT row,
- * so a correlated lookup would re-run once per project.
- */
-const REGISTRY_NAME_SOURCE = `
-    SELECT DISTINCT ON ("registryDid")
-           "registryDid",
-           "displayName" AS registry_name
-    FROM business_view
-    WHERE "viewType" = 'REGISTRY'
-    ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-`;
-
 export class PgDashboardRepository {
     constructor(private readonly dataSource: DataSource) {}
 
@@ -149,7 +132,7 @@ export class PgDashboardRepository {
 
         const from = `
             business_view bv
-            LEFT JOIN (${REGISTRY_NAME_SOURCE}) reg ON reg."registryDid" = bv."registryDid"
+            LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
             LEFT JOIN ${MV_PROJECT_STATS_NAME} ps ON ps."projectKey" = bv."projectKey"
         `;
 
@@ -242,7 +225,7 @@ export class PgDashboardRepository {
                     COALESCE(bv."businessData"->>'developer', '') AS developer,
                     COALESCE(reg.registry_name, '')               AS registry_name
                 FROM business_view bv
-                LEFT JOIN (${REGISTRY_NAME_SOURCE}) reg ON reg."registryDid" = bv."registryDid"
+                LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
                 WHERE bv."viewType" = 'PROJECT'
             ) opts
         `;

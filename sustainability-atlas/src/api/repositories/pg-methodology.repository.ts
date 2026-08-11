@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { MV_METHODOLOGY_STATS_NAME, MV_PROJECT_STATS_NAME } from '@shared/materialized-views';
+import { MV_METHODOLOGY_STATS_NAME, MV_PROJECT_STATS_NAME, MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 import {
     MethodologyRepository,
     MethodologyListQuery,
@@ -61,23 +61,13 @@ interface RawRow {
 }
 
 /**
- * Looks up the publishing registry's display name.
- *
- * A non-correlated `DISTINCT ON` derived table (computed once over the small
- * REGISTRY row set) picks the latest row per registryDid, handling the rare
- * case of multiple REGISTRY rows for one DID — cheaper than the per-row
- * correlated LATERAL this replaces, which re-ran the lookup for every
- * METHODOLOGY row. Mirrors PgProjectRepository's REGISTRY_NAME_JOIN.
+ * Looks up the publishing registry's display name from `mv_registry_stats`,
+ * which resolves the latest REGISTRY row per registryDid once per MV refresh
+ * instead of per request. Keyed by registryDid (unique index), so the join is
+ * a cheap lookup. Mirrors PgProjectRepository's REGISTRY_NAME_JOIN.
  */
 const REGISTRY_NAME_JOIN = `
-    LEFT JOIN (
-        SELECT DISTINCT ON ("registryDid")
-               "registryDid",
-               "displayName" AS registry_name
-        FROM business_view
-        WHERE "viewType" = 'REGISTRY'
-        ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-    ) reg ON reg."registryDid" = bv."registryDid"
+    LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
 `;
 
 /** Brings in the decode status for the methodology's policy topic (businessData->>'topicId'); collapses via LATERAL — prefer the latest decoded row, fall back to the latest row of any status — since a policyTopicId can have N policy rows. */

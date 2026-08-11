@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { MV_PROJECT_STATS_NAME, MV_PROJECT_LIFECYCLE_NAME } from '@shared/materialized-views';
+import { MV_PROJECT_STATS_NAME, MV_PROJECT_LIFECYCLE_NAME, MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 import {
     ProjectRepository,
     ProjectListQuery,
@@ -74,21 +74,13 @@ const SEARCH_TSVECTOR = `(
 )`;
 
 /**
- * Derived table joined into both findAll and findById to look up the
- * publishing registry's display name. A non-correlated `DISTINCT ON`
- * (computed once, over the small REGISTRY row set) picks the latest row per
- * registryDid to handle the (rare) case of multiple REGISTRY rows for one
- * DID — cheaper than a per-row correlated LATERAL subquery.
+ * Joined into both findAll and findById to look up the publishing registry's
+ * display name. Read from `mv_registry_stats`, which resolves the latest
+ * REGISTRY row per registryDid once per MV refresh; keyed by registryDid
+ * (unique index), so this is a cheap lookup rather than a per-request scan.
  */
 const REGISTRY_NAME_JOIN = `
-    LEFT JOIN (
-        SELECT DISTINCT ON ("registryDid")
-               "registryDid",
-               "displayName" AS registry_name
-        FROM business_view
-        WHERE "viewType" = 'REGISTRY'
-        ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-    ) reg ON reg."registryDid" = bv."registryDid"
+    LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
 `;
 
 /** Per-project lifecycle aggregates (issuance count, total issued, total retired) are read from the mv_project_stats materialized view instead of being computed live per row; the MV is keyed by projectKey and refreshed by MvRefreshProcessor. */
