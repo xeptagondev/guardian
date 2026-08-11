@@ -9,8 +9,8 @@ Three deployable Node processes off one `src/`: **worker** (`src/worker/main.ts`
 
 ## Worker — ingest pipeline
 
-- `src/worker/processors/` — 8 BullMQ processors: topic-sync, message-process, ipfs-fetch,
-  policy-decode, token-sync, business-view-builder, mv-refresh, project-reparse.
+- `src/worker/processors/` — 9 BullMQ processors: topic-sync, topic-sync-priority, message-process,
+  ipfs-fetch, policy-decode, token-sync, business-view-builder, mv-refresh, project-reparse.
 - `src/worker/services/` — hedera, ipfs, project-mapper, reverse-geo, queue-autoscaler,
   `storage/` (PolicyZipStorage; local FS behind an interface).
 - `src/worker/schedulers/sync-scheduler.service.ts` — onModuleInit scheduling, leader election.
@@ -48,10 +48,12 @@ Design write-up: `docs/architecture/decode-method.md`.
 `src/guardian-sync/` — guardian-event-subscriber.service.ts (AEM HTTP chunked stream via axios),
 guardian-event-router.ts, guardian-event-log.service.ts, guardian-instance.types.ts,
 guardian-sync.module.ts, main.ts. Runs only when `GUARDIAN_INSTANCES` is set.
-**Trigger-only**: events enqueue targeted IPFS_FETCH / TOKEN_SYNC / TOPIC_SYNC jobs; no Guardian
-event carries a Hedera `consensusTimestamp`, so the normal pipeline still materialises canonical
-rows. Runs with `synchronize:false` (the worker owns schema sync). Writes an append-only audit to
-`guardian_event_log`, surfaced via `GET /:network/guardian-sync/events`.
+**Trigger-only**: events enqueue targeted IPFS_FETCH / TOKEN_SYNC / TOPIC_SYNC_PRIORITY jobs; no
+Guardian event carries a Hedera `consensusTimestamp`, so the normal pipeline still materialises
+canonical rows. Runs with `synchronize:false` (the worker owns schema sync). Writes an append-only
+audit to `guardian_event_log`, surfaced via `GET /:network/guardian-sync/events`.
+Requires `HEDERA_NET` to match one of `GUARDIAN_INSTANCES`' networks or it boots IDLE (logs a clear
+warning but doesn't fail) — same as the worker, one process per network.
 
 ## API
 
@@ -92,9 +94,26 @@ The 3 failing suites are pre-existing and unrelated to current work — gate on
 
 - Any uniquely-named recurring BullMQ job **must** set `removeOnComplete` — a keep-alive job
   re-enqueued per poll cycle grew the completed set past 600k and OOM'd Redict.
-- Do **not** set `priority` on topic-discovery enqueues. BullMQ's blocking worker drains the
-  always-non-empty `wait` list and never falls through to `prioritized`, starving discovery —
-  which presents as "0 projects after hours" with the rest of the pipeline healthy.
+- Do **not** set `priority` or `lifo` on TOPIC_SYNC to fast-track a job. Confirmed twice now (once
+  as "0 projects after hours", once as a lone job stuck in `state: prioritized` for 10+ min): the
+  worker drains the always-non-empty plain `wait` list and never/rarely falls through to
+  `prioritized`; `lifo` jumps forward once but its queue position then grows again as routine churn
+  keeps landing at the same end. The actual fix is a **physically separate queue**
+  (`TOPIC_SYNC_PRIORITY` — root/registry topic + guardian-sync event syncs only, always small by
+  construction) instead of ordering tricks inside the 100k+-job bulk queue.
+- `topic_cache` rows that keep returning empty polls back off exponentially
+  (`emptyPollStreak` in topic-sync job data, capped by `MIRROR_NODE_MAX_POLL_DELAY`) — a flat
+  interval across 100k+ testnet topics is not sustainable and 429s the mirror node.
+- Two `nest start --watch` processes (e.g. worker for mainnet + worker for testnet) compile into
+  the **same shared `dist/`** and can ping-pong-restart each other on every recompile, occasionally
+  racing a `bootstrapSchema()` DDL statement into a crash. For running multiple network instances
+  side by side, prefer `yarn build` once + `start:worker`/`start:api`/`start:guardian-sync`
+  (compiled, no watch) over multiple concurrent `dev:*` watchers.
+- `schema-bootstrap.ts` runs on every process boot (api + every worker) — any `ALTER TABLE` there
+  must be guarded by an `information_schema.columns` existence check (not just
+  `IF NOT EXISTS`, which still needs the `ACCESS EXCLUSIVE` lock) or concurrent boots queue behind
+  each other's lock, and any `DROP INDEX` + `CREATE INDEX` pair needs `IF NOT EXISTS` on the
+  create too or a concurrent winner's index causes a duplicate-key crash on boot.
 - Resolver/linker changes need a worker restart; existing rows keep their old key and
   `decodeMethod` until reparsed (`BACKFILL_PROJECTS_ON_BOOT=true` once, or the reparse endpoint).
 - For client-only DOM libs in Nuxt, `nuxi build` passing is not a sufficient gate — `.client.vue`

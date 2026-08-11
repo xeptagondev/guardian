@@ -471,6 +471,7 @@ const EDITABLE_FIELD_KEYS: ResolvedFieldKey[] = [
   'creditingPeriodEnd',
   'sdgOrCobenefits',
   'geo',
+  'estimatedAnnualCredits',
 ];
 
 const FIELD_LABELS: Record<ResolvedFieldKey, string> = {
@@ -486,6 +487,7 @@ const FIELD_LABELS: Record<ResolvedFieldKey, string> = {
   creditingPeriodEnd: 'Crediting Period End',
   sdgOrCobenefits: 'SDG / Co-benefits',
   geo: 'Project Location',
+  estimatedAnnualCredits: 'Estimated Annual Credits',
 };
 
 const editingMapping = ref(false);
@@ -781,7 +783,7 @@ const formatLastAttempt = (ts: string | null | undefined): string => {
   }
 };
 
-type ResolvedFieldKey = 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo';
+type ResolvedFieldKey = 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo' | 'estimatedAnnualCredits';
 
 interface ProjectFieldRow {
   labelKey: string;
@@ -800,6 +802,7 @@ const PROJECT_FIELD_ROWS: ProjectFieldRow[] = [
   { labelKey: 'creditingPeriod', fieldKey: 'creditingPeriod' },
   { labelKey: 'vintageRaw', fieldKey: 'vintageRaw' },
   { labelKey: 'sdgOrCobenefits', fieldKey: 'sdgOrCobenefits' },
+  { labelKey: 'estimatedAnnualCredits', fieldKey: 'estimatedAnnualCredits' },
 ];
 
 // Version comparison
@@ -1403,15 +1406,15 @@ function getResolvedField(fieldKey: string) {
       </div>
 
       <!-- Tab Navigation -->
-      <div class="border-b">
+      <div class="border-b bg-muted/30">
         <nav class="flex gap-0 -mb-px overflow-x-auto">
           <button
             v-for="tab in tabs"
             :key="tab.key"
             :class="[
               activeTab === tab.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
+                ? 'border-primary text-primary bg-card'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
               'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
             ]"
             @click="activeTab = tab.key"

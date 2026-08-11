@@ -29,6 +29,7 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         private readonly projectMapperService: ProjectMapperService,
         @Inject('REDICT_PUB') private readonly redis: Redis,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly topicPriorityQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
         @InjectQueue(QUEUE_NAMES.MV_REFRESH) private readonly mvRefreshQueue: Queue,
         @InjectQueue(QUEUE_NAMES.BUSINESS_VIEW_BUILD) private readonly businessViewQueue: Queue,
@@ -171,22 +172,30 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
             `SELECT "topicId", messages, "hasNext" FROM topic_cache WHERE status != 'DISABLED'`,
         );
 
+        // Root/seed topic is how every new policy gets discovered — routed onto
+        // TOPIC_SYNC_PRIORITY instead of the bulk backlog (see bullmq.config.ts).
+        const network = this.configService.get<string>('app.hedera.network') || 'testnet';
+        const seedTopicId = this.configService.get<string>('app.seedTopicId')
+            || ROOT_TOPICS[network];
+
         let enqueued = 0;
         for (const topic of topics) {
+            const isOrgTopic = topic.topicId === seedTopicId;
+            const queue = isOrgTopic ? this.topicPriorityQueue : this.topicQueue;
             // Stable jobId on (topicId, watermark) so concurrent worker boots dedupe
             // to a single job. Pre-remove clears any completed/failed job from a prior
             // boot at the same watermark so this boot still re-runs the sync.
             const fromSeq = topic.messages || 0;
             const jobId = `topic-${topic.topicId}-${fromSeq}`;
             try {
-                await this.topicQueue.remove(jobId);
+                await queue.remove(jobId);
             } catch {
                 // Job didn't exist — fine.
             }
-            await this.topicQueue.add('sync', {
+            await queue.add('sync', {
                 topicId: topic.topicId,
                 fromSequenceNumber: fromSeq,
-                isOrgTopic: false,
+                isOrgTopic,
             }, { jobId });
             enqueued++;
         }

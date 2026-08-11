@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 
 export type ActivityCategory =
     | 'project_registered'
@@ -28,18 +29,6 @@ export interface ActivityFilters {
     developer?: string;
 }
 
-// Registry display names, resolved once — mirrors PgDashboardRepository's
-// REGISTRY_NAME_SOURCE so "registry" filtering matches the same canonical
-// name the rest of the dashboard filters against.
-const REGISTRY_NAME_SOURCE = `
-    SELECT DISTINCT ON ("registryDid")
-           "registryDid",
-           "displayName" AS registry_name
-    FROM business_view
-    WHERE "viewType" = 'REGISTRY'
-    ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-`;
-
 /**
  * Network Activity feed — the latest N real Guardian events, newest first.
  *
@@ -60,7 +49,9 @@ const REGISTRY_NAME_SOURCE = `
  *    project_retirement_link yet); Methodology/Registry Registered resolve
  *    via the watchlisted projects' own instanceTopicId/registryDid.
  *  - `registry`/`developer` (Dashboard dropdowns): same idea, matched against
- *    the canonical registry name / businessData.developer.
+ *    the canonical registry name / businessData.developer. The name comes from
+ *    `mv_registry_stats` — the same source PgDashboardRepository reads — so
+ *    the feed filters against exactly the name the dropdown offers.
  *  - The "Other" bucket (Token/DID-Document/VP-Document/Role-Document) has no
  *    reliable project/registry/developer attribution, so it is EXCLUDED
  *    entirely whenever any filter is active, rather than guessing.
@@ -113,7 +104,7 @@ export class PgActivityRepository {
                         bv."relatedTopicId"              AS "topicId",
                         NULL::varchar                     AS "messageType"
                     FROM business_view bv
-                    LEFT JOIN (${REGISTRY_NAME_SOURCE}) regname ON regname."registryDid" = bv."registryDid"
+                    LEFT JOIN ${MV_REGISTRY_STATS_NAME} regname ON regname."registryDid" = bv."registryDid"
                     WHERE bv."viewType" = 'PROJECT'
                     ${hasProjectFilter ? `AND bv."projectKey" = ANY(${pk}::text[])` : ''}
                     ${hasRegistryFilter ? `AND regname.registry_name = ${registryP}` : ''}
@@ -128,7 +119,7 @@ export class PgActivityRepository {
                         COALESCE(m.options->>'name', 'Methodology'), NULL,
                         NULL, NULL, m."topicId", NULL
                     FROM message m
-                    LEFT JOIN (${REGISTRY_NAME_SOURCE}) regname
+                    LEFT JOIN ${MV_REGISTRY_STATS_NAME} regname
                         ON regname."registryDid" = COALESCE(m.owner, m.options->>'did')
                     WHERE m.type = 'Instance-Policy' AND m.action = 'publish-policy'
                     ${hasProjectFilter ? `AND m.options->>'instanceTopicId' = ANY(
@@ -148,7 +139,7 @@ export class PgActivityRepository {
                         COALESCE(m.options->>'name', 'Registry'), NULL,
                         NULL, NULL, m."topicId", NULL
                     FROM message m
-                    LEFT JOIN (${REGISTRY_NAME_SOURCE}) regname
+                    LEFT JOIN ${MV_REGISTRY_STATS_NAME} regname
                         ON regname."registryDid" = COALESCE(m.owner, m.options->>'did')
                     WHERE m.type = 'Standard Registry'
                     ${hasProjectFilter ? `AND COALESCE(m.owner, m.options->>'did') = ANY(
@@ -173,7 +164,7 @@ export class PgActivityRepository {
                     LEFT JOIN project_mint_link pml ON pml.mint_consensus_timestamp = m."consensusTimestamp"
                     LEFT JOIN token_cache tc ON tc."tokenId" = m.documents->'credentialSubject'->0->>'tokenId'
                     LEFT JOIN business_view bv ON bv."viewType" = 'PROJECT' AND bv."projectKey" = pml.project_key
-                    LEFT JOIN (${REGISTRY_NAME_SOURCE}) regname ON regname."registryDid" = bv."registryDid"
+                    LEFT JOIN ${MV_REGISTRY_STATS_NAME} regname ON regname."registryDid" = bv."registryDid"
                     WHERE m.type = 'VC-Document'
                       AND m.documents IS NOT NULL
                       AND (m.documents->'credentialSubject'->0->>'type') LIKE 'MintToken%'
@@ -205,7 +196,7 @@ export class PgActivityRepository {
                         LIMIT 1
                     ) pk3 ON true
                     LEFT JOIN business_view bv ON bv."viewType" = 'PROJECT' AND bv."projectKey" = pk3.project_key
-                    LEFT JOIN (${REGISTRY_NAME_SOURCE}) regname ON regname."registryDid" = bv."registryDid"
+                    LEFT JOIN ${MV_REGISTRY_STATS_NAME} regname ON regname."registryDid" = bv."registryDid"
                     WHERE m.type = 'VC-Document'
                       AND m.documents IS NOT NULL
                       AND (m.documents->'credentialSubject'->0->>'type') LIKE 'WipeToken%'

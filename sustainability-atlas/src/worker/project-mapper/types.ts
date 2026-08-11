@@ -20,6 +20,7 @@ export type ResolvedFieldPaths = {
     creditingPeriodStart: string | null;
     creditingPeriodEnd: string | null;
     sdgOrCobenefits: string | null;
+    estimatedAnnualCredits: string | null;
 };
 
 export type SchemaEntry = {

@@ -139,7 +139,8 @@ Hedera Mirror Node REST API          IPFS Gateways
 
 | Queue | Concurrency | Purpose |
 |-------|-------------|---------|
-| `mirror-node-topics` | 5 | Fetch HCS messages from Mirror Node by topic ID |
+| `mirror-node-topics` | 5 | Fetch HCS messages from Mirror Node by topic ID (bulk crawl — every tracked topic) |
+| `mirror-node-topics-priority` | 2 | Same job, separate queue: root/registry topic + guardian-sync's event-triggered syncs only. Kept physically apart from the bulk queue so these never queue behind it — `priority`/`lifo` job options were tried and don't reliably jump a job forward once the bulk queue has 100k+ entries. |
 | `mirror-node-messages` | 10 | Decode, parse, and classify raw messages |
 | `mirror-node-tokens` | 2 | Fetch token metadata and NFT serials |
 | `ipfs-files` | 3 | Fetch documents from IPFS gateways |
@@ -278,8 +279,10 @@ Each worker instance can be configured to process only specific queues via the `
 # Process all queues (default, single-instance mode)
 WORKER_QUEUES=
 
-# Process only topic and message queues
-WORKER_QUEUES=mirror-node-topics,mirror-node-messages
+# Process only topic and message queues — note: mirror-node-topics-priority
+# needs listing explicitly too, or that instance never gets root-topic /
+# guardian-sync-triggered syncs (mirror-node-* covers both, see below)
+WORKER_QUEUES=mirror-node-topics,mirror-node-topics-priority,mirror-node-messages
 
 # Process only IPFS fetching
 WORKER_QUEUES=ipfs-files

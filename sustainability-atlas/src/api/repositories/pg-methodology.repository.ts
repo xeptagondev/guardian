@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { MV_METHODOLOGY_STATS_NAME, MV_PROJECT_STATS_NAME } from '@shared/materialized-views';
+import { MV_METHODOLOGY_STATS_NAME, MV_PROJECT_STATS_NAME, MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 import {
     MethodologyRepository,
     MethodologyListQuery,
@@ -61,23 +61,13 @@ interface RawRow {
 }
 
 /**
- * Looks up the publishing registry's display name.
- *
- * A non-correlated `DISTINCT ON` derived table (computed once over the small
- * REGISTRY row set) picks the latest row per registryDid, handling the rare
- * case of multiple REGISTRY rows for one DID — cheaper than the per-row
- * correlated LATERAL this replaces, which re-ran the lookup for every
- * METHODOLOGY row. Mirrors PgProjectRepository's REGISTRY_NAME_JOIN.
+ * Looks up the publishing registry's display name from `mv_registry_stats`,
+ * which resolves the latest REGISTRY row per registryDid once per MV refresh
+ * instead of per request. Keyed by registryDid (unique index), so the join is
+ * a cheap lookup. Mirrors PgProjectRepository's REGISTRY_NAME_JOIN.
  */
 const REGISTRY_NAME_JOIN = `
-    LEFT JOIN (
-        SELECT DISTINCT ON ("registryDid")
-               "registryDid",
-               "displayName" AS registry_name
-        FROM business_view
-        WHERE "viewType" = 'REGISTRY'
-        ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-    ) reg ON reg."registryDid" = bv."registryDid"
+    LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
 `;
 
 /** Brings in the decode status for the methodology's policy topic (businessData->>'topicId'); collapses via LATERAL — prefer the latest decoded row, fall back to the latest row of any status — since a policyTopicId can have N policy rows. */
@@ -195,6 +185,70 @@ const METHODOLOGY_CANDIDATE_CTE = `
     )
 `;
 
+/**
+ * Fast path for the unfiltered, unsearched, default-sorted list view (page 1+
+ * of `/methodologies` with no query params) — the common case, and the one
+ * measured at 408ms in the SE-177 perf audit. Unlike METHODOLOGY_CANDIDATE_CTE,
+ * this pushes ORDER BY + LIMIT into each UNION branch (mirroring
+ * PgActivityRepository's pattern), so Postgres can walk
+ * idx_mv_methodology_stats_created_at in createdAt order and stop at the inner
+ * limit instead of joining the full ~20k-row candidate set to business_view
+ * and sorting it before LIMIT is applied — that full join+sort (a Seq Scan of
+ * business_view feeding a Hash Join) was the actual measured cost, not the
+ * "no relatedTopicId" fallback branch, which is already index-backed and
+ * empty in practice.
+ *
+ * Only valid with no WHERE clause beyond each branch's own — any filter or
+ * search term must go through METHODOLOGY_CANDIDATE_CTE + findAll's general
+ * path below, since pushing a LIMIT before a filter is applied could drop
+ * rows that would otherwise match.
+ */
+const methodologyCandidateCteFast = (innerLimitParam: string): string => `
+    WITH candidate AS (
+        (
+            SELECT
+                bv.*,
+                canon.project_count,
+                canon.instance_project_count,
+                canon.issuance_count,
+                canon.instance_issuance_count,
+                canon.schema_count,
+                canon.registry_name,
+                (${EFFECTIVE_DECODE_STATUS}) AS decode_status,
+                canon.sectoral_scopes,
+                canon.emission_reduction_approach,
+                canon.total_issued,
+                canon.total_retired
+            FROM ${MV_METHODOLOGY_STATS_NAME} canon
+            JOIN business_view bv ON bv.id = canon.canonical_id
+            ORDER BY canon."createdAt" DESC NULLS LAST
+            LIMIT ${innerLimitParam}
+        )
+        UNION ALL
+        (
+            SELECT
+                bv.*,
+                NULL::bigint AS project_count,
+                NULL::bigint AS instance_project_count,
+                NULL::bigint AS issuance_count,
+                NULL::bigint AS instance_issuance_count,
+                NULL::bigint AS schema_count,
+                reg.registry_name,
+                (${EFFECTIVE_DECODE_STATUS_LIVE}) AS decode_status,
+                p."policyMapping"->'sectoralScopes' AS sectoral_scopes,
+                p."policyMapping"->'emissionReductionApproach' AS emission_reduction_approach,
+                NULL::bigint AS total_issued,
+                NULL::bigint AS total_retired
+            FROM business_view bv
+            ${REGISTRY_NAME_JOIN}
+            ${POLICY_DECODE_STATUS_JOIN}
+            WHERE bv."viewType" = 'METHODOLOGY' AND bv."relatedTopicId" IS NULL
+            ORDER BY bv."createdAt" DESC NULLS LAST
+            LIMIT ${innerLimitParam}
+        )
+    )
+`;
+
 /** Over the candidate CTE's already-effective-mapped decode_status column — used by findAll/findAllForExport's decodeStatus filter (no need to re-wrap in the success/pending/failed CASE). */
 const CANDIDATE_DECODE_STATUS = `bv."decode_status"`;
 
@@ -246,6 +300,25 @@ export class PgMethodologyRepository extends MethodologyRepository {
     async findAll(query: MethodologyListQuery): Promise<MethodologyListResult> {
         const { page, limit, search, sortBy, sortDir } = query;
         const offset = (page - 1) * limit;
+
+        // `createdAt` descending counts as the default sort: it's what the list
+        // view's initial state always sends (so `sortBy` is never actually
+        // absent on a real default page load), and it's the order the fast path
+        // hard-codes anyway. Direction follows buildOrderBy's convention —
+        // anything that isn't case-insensitively 'ASC' is DESC.
+        const isDefaultSort = !sortBy
+            || (sortBy === 'createdAt' && String(sortDir || '').toUpperCase() !== 'ASC');
+
+        // No filters, no search, default sort => safe to take the indexed fast
+        // path (see methodologyCandidateCteFast's doc comment for why).
+        const isDefaultView = !search && isDefaultSort
+            && !query.name && !query.id && !query.description
+            && !query.decodeStatus?.length
+            && !query.registryDid && !query.registryName && !query.version && !query.policyTopicId;
+
+        if (isDefaultView) {
+            return this.findAllDefaultView(offset, limit);
+        }
 
         const builder = new QueryBuilder(METHODOLOGY_FIELD_SCHEMA);
 
@@ -340,6 +413,43 @@ export class PgMethodologyRepository extends MethodologyRepository {
         const [rawRows, countResult]: [RawRow[], Array<{ total: number }>] = await Promise.all([
             this.dataSource.query(rowsSql, params),
             this.dataSource.query(countSql, countParams),
+        ]);
+
+        return {
+            rows: rawRows.map(row => PgMethodologyRepository.mapRow(row)),
+            total: countResult[0]?.total ?? 0,
+        };
+    }
+
+    /**
+     * Indexed fast path for findAll's default view (see methodologyCandidateCteFast).
+     * The count is likewise computed without touching business_view's full
+     * METHODOLOGY row set: mv_methodology_stats has exactly one row per
+     * canonical methodology (unique index on relatedTopicId), so its row
+     * count alone gives the canonical total; the fallback-branch count is a
+     * single index-backed lookup.
+     */
+    private async findAllDefaultView(offset: number, limit: number): Promise<MethodologyListResult> {
+        const innerLimit = offset + limit;
+
+        const rowsSql = `
+            ${methodologyCandidateCteFast('$1')}
+            SELECT bv.*
+            FROM candidate bv
+            ORDER BY bv."createdAt" DESC NULLS LAST
+            LIMIT $2 OFFSET $3
+        `;
+
+        const countSql = `
+            SELECT
+                (SELECT COUNT(*) FROM ${MV_METHODOLOGY_STATS_NAME})::int +
+                (SELECT COUNT(*) FROM business_view WHERE "viewType" = 'METHODOLOGY' AND "relatedTopicId" IS NULL)::int
+                AS total
+        `;
+
+        const [rawRows, countResult]: [RawRow[], Array<{ total: number }>] = await Promise.all([
+            this.dataSource.query(rowsSql, [innerLimit, limit, offset]),
+            this.dataSource.query(countSql),
         ]);
 
         return {

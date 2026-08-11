@@ -67,6 +67,12 @@ export interface Milestone {
     dateType: 'actual' | 'expected' | null;
 }
 
+export interface ProjectedIssuance {
+    totalTco2e: number | null;
+    periodStart: number | null;
+    periodEnd: number | null;
+}
+
 export interface Project {
     id: string;
     name: string;
@@ -112,6 +118,7 @@ export interface Project {
     lifecycleStage?: string;
     expectedIssuanceYear?: string | null;
     projectedVolume?: number | null;
+    projectedIssuance?: ProjectedIssuance | null;
     milestones?: Milestone[];
 }
 

@@ -373,15 +373,15 @@ function openRawData() {
             <!-- ── Details / Advanced Tab Card ──────────────────────── -->
             <div class="rounded-xl border bg-card overflow-hidden">
                 <!-- Tab nav -->
-                <div class="border-b">
+                <div class="border-b bg-muted/30">
                     <nav class="flex gap-0 -mb-px overflow-x-auto">
                         <button
                             v-for="tab in tabs"
                             :key="tab.key"
                             :class="[
                                 activeTab === tab.key
-                                    ? 'border-primary text-primary'
-                                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border',
+                                    ? 'border-primary text-primary bg-card'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground',
                                 'flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
                             ]"
                             @click="setTab(tab.key)"

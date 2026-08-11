@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { MV_PROJECT_STATS_NAME, MV_PROJECT_LIFECYCLE_NAME } from '@shared/materialized-views';
+import { MV_PROJECT_STATS_NAME, MV_PROJECT_LIFECYCLE_NAME, MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 import {
     ProjectRepository,
     ProjectListQuery,
@@ -13,6 +13,7 @@ import {
     ProjectExportFilters,
     ProjectExportRow,
     ProjectFilterOptionsRow,
+    MethodologyFilterOptionRow,
 } from './project.repository';
 import { QueryBuilder } from './query-builder';
 import { PROJECT_FIELD_SCHEMA } from './schemas/project.schema';
@@ -73,21 +74,13 @@ const SEARCH_TSVECTOR = `(
 )`;
 
 /**
- * Derived table joined into both findAll and findById to look up the
- * publishing registry's display name. A non-correlated `DISTINCT ON`
- * (computed once, over the small REGISTRY row set) picks the latest row per
- * registryDid to handle the (rare) case of multiple REGISTRY rows for one
- * DID — cheaper than a per-row correlated LATERAL subquery.
+ * Joined into both findAll and findById to look up the publishing registry's
+ * display name. Read from `mv_registry_stats`, which resolves the latest
+ * REGISTRY row per registryDid once per MV refresh; keyed by registryDid
+ * (unique index), so this is a cheap lookup rather than a per-request scan.
  */
 const REGISTRY_NAME_JOIN = `
-    LEFT JOIN (
-        SELECT DISTINCT ON ("registryDid")
-               "registryDid",
-               "displayName" AS registry_name
-        FROM business_view
-        WHERE "viewType" = 'REGISTRY'
-        ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-    ) reg ON reg."registryDid" = bv."registryDid"
+    LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
 `;
 
 /** Per-project lifecycle aggregates (issuance count, total issued, total retired) are read from the mv_project_stats materialized view instead of being computed live per row; the MV is keyed by projectKey and refreshed by MvRefreshProcessor. */
@@ -189,7 +182,7 @@ export class PgProjectRepository extends ProjectRepository {
         if (query.isPipeline === 'true') {
             builder.addClause(`lc.lifecycle_stage != 'Issued'`);
         } else if (query.isPipeline === 'false') {
-            builder.addClause(`lc.lifecycle_stage = 'Issued'`);
+            builder.addClause(`lc.lifecycle_stage = 'Issued'`); 
         }
 
         // Full-text search with ranking: tsvector covers displayName/registryDid/searchText, ILIKE is a fast
@@ -232,7 +225,18 @@ export class PgProjectRepository extends ProjectRepository {
 
         const rowsSql = `
             SELECT
-                bv.*,
+                bv."id",
+                bv."viewType",
+                bv."sourceTimestamp",
+                bv."registryDid",
+                bv."relatedTopicId",
+                bv."displayName",
+                bv."businessData" - 'metadata' - 'decodeMethod' - 'topicId' - 'vcCount' - 'policyTopicId' - 'instanceTopicId' AS "businessData",
+                bv."searchText",
+                bv."projectKey",
+                bv."lastUpdate",
+                bv."createdAt",
+                bv."updatedAt",
                 reg.registry_name,
                 COALESCE(ps.issuance_count, 0) AS issuance_count,
                 COALESCE(ps.total_issued, 0)   AS total_issued,
@@ -866,10 +870,30 @@ export class PgProjectRepository extends ProjectRepository {
             ) opts
         `;
 
-        const rows: ProjectFilterOptionsRow[] = await this.dataSource.query(sql);
-        return rows[0] ?? {
+        // METHODOLOGY rows can have multiple historical entries per relatedTopicId
+        // (re-decode events) — DISTINCT ON with this ordering picks the latest one
+        // per methodology, mirroring PgMethodologyRepository.findById's identical
+        // "latest row wins" convention.
+        const methodologiesSql = `
+            SELECT DISTINCT ON (bv."relatedTopicId")
+                bv."relatedTopicId" AS "topicId",
+                bv."displayName"    AS "name",
+                bv."businessData"->'options'->>'version' AS "version"
+            FROM business_view bv
+            WHERE bv."viewType" = 'METHODOLOGY'
+              AND bv."relatedTopicId" IS NOT NULL
+            ORDER BY bv."relatedTopicId", bv."sourceTimestamp"::numeric DESC NULLS LAST, bv.id DESC
+        `;
+
+        const [rows, methodologyRows]: [ProjectFilterOptionsRow[], MethodologyFilterOptionRow[]] = await Promise.all([
+            this.dataSource.query(sql),
+            this.dataSource.query(methodologiesSql),
+        ]);
+
+        const base = rows[0] ?? {
             registries: [], developers: [], statuses: [], sectors: [], sectoralScopes: [], vintages: [], countries: [],
         };
+        return { ...base, methodologies: methodologyRows ?? [] };
     }
 
     private static mapExportRow(row: RawExportRow): ProjectExportRow {

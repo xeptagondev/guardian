@@ -443,7 +443,7 @@ if (import.meta.client) {
                                 </svg>
                             </span>
                             <img v-if="opt.icon" :src="opt.icon" :alt="opt.label" class="h-4 w-4 rounded-sm shrink-0" />
-                            <span class="text-left whitespace-normal break-words">{{ opt.label }}</span>
+                            <span class="min-w-0 flex-1 text-left whitespace-normal break-words">{{ opt.label }}</span>
                         </button>
                     </div>
                 </div>
