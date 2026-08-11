@@ -11,9 +11,12 @@ import {
     BatchProjectsDto,
     ProjectIdsDto,
     ProjectFilterOptionsDto,
+    MintSerialsResponseDto,
+    MintTransactionsResponseDto,
 } from '../dto/project.dto';
 import { AdditionalDetailsSchemaDto } from '../dto/additional-details.dto';
 import { MrvDataQueryDto, MrvDataResponseDto } from '../dto/mrv-data.dto';
+import { PaginationQueryDto } from '../dto/pagination.dto';
 import { AdminWrite } from '../auth/decorators/admin-write.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -236,6 +239,89 @@ export class ProjectsController {
         @Param('consensusTimestamp') consensusTimestamp: string,
     ): Promise<Record<string, unknown>> {
         return this.projectsService.getLinkedVcDocument(network, id, consensusTimestamp);
+    }
+
+    @Get(':id/issuances/:mintTimestamp/serials')
+    @ApiOperation({
+        summary: 'Get the NFT serials minted by one issuance event',
+        description:
+            'Returns the serials produced by a single MintToken event as **contiguous ranges** rather ' +
+            'than one entry per serial. A range is lossless — every serial\'s status is implied by the ' +
+            'range containing it — and the volume difference is decisive: a 42,000-serial issuance is ' +
+            'one range. Serials are attributed via Guardian\'s NFT-metadata convention: the mint ' +
+            'VP-Document\'s consensus timestamp is base64-encoded into every NFT minted for that VP. ' +
+            'Check mintMatchStatus before relying on it — only "verified" means the serial count ' +
+            'exactly matches the MintToken VC\'s amount. The mint must belong to the given project. ' +
+            'Fungible mints return no ranges: fungible units are interchangeable and cannot be ' +
+            'enumerated — use the issuance event\'s mintedAmount instead. Pagination counts ranges.',
+    })
+    @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'], description: 'Hedera network' })
+    @ApiParam({ name: 'id', description: 'HCS consensus timestamp (sourceTimestamp) or projectKey of the project' })
+    @ApiParam({
+        name: 'mintTimestamp',
+        description: 'HCS consensus timestamp of the MintToken VC (issuanceEvents[].mintConsensusTimestamp)',
+    })
+    @ApiResponse({ status: 200, type: MintSerialsResponseDto })
+    @ApiResponse({ status: 404, description: 'Mint not found or not linked to this project' })
+    async getMintSerials(
+        @Param('network') network: string,
+        @Param('id') id: string,
+        @Param('mintTimestamp') mintTimestamp: string,
+        @Query() query: PaginationQueryDto,
+    ): Promise<MintSerialsResponseDto> {
+        // No sort options: ranges are only meaningful in serial order.
+        return this.projectsService.findMintSerials(
+            network, id, mintTimestamp, query.page ?? 1, query.limit ?? 20,
+        );
+    }
+
+    @Get(':id/transactions')
+    @ApiOperation({
+        summary: 'Get retirement and transfer transactions for a project',
+        description:
+            "Same as the per-issuance endpoint, across every one of the project's issuances — backs the " +
+            'Credit Lifecycle view. Newest first. Only credits attributable to this project\'s mint ' +
+            'events are included, so a token shared with another project does not leak its activity here.',
+    })
+    @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'], description: 'Hedera network' })
+    @ApiParam({ name: 'id', description: 'HCS consensus timestamp (sourceTimestamp) or projectKey of the project' })
+    @ApiResponse({ status: 200, type: MintTransactionsResponseDto })
+    @ApiResponse({ status: 404, description: 'Project has no linked issuances' })
+    async getProjectTransactions(
+        @Param('network') network: string,
+        @Param('id') id: string,
+        @Query() query: PaginationQueryDto,
+    ): Promise<MintTransactionsResponseDto> {
+        return this.projectsService.findMintTransactions(
+            network, id, null, query.page ?? 1, query.limit ?? 20, query.sortBy, query.sortDir,
+        );
+    }
+
+    @Get(':id/issuances/:mintTimestamp/transactions')
+    @ApiOperation({
+        summary: 'Get retirement and transfer transactions for one issuance event',
+        description:
+            "Lists the on-chain transactions that affected the credits produced by a single mint event, " +
+            'newest first. Retirements come from Guardian\'s retirement contract and name the retiring ' +
+            'account and exact serials; transfers come from the Hedera CRYPTOTRANSFER itself, since ' +
+            'Guardian writes no transfer document. Each row is one transaction — a retirement or ' +
+            'distribution typically moves many serials at once. Transfer coverage is the treasury hop ' +
+            '(registry to first holder); onward trades between holders are not indexed.',
+    })
+    @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'], description: 'Hedera network' })
+    @ApiParam({ name: 'id', description: 'HCS consensus timestamp (sourceTimestamp) or projectKey of the project' })
+    @ApiParam({ name: 'mintTimestamp', description: 'HCS consensus timestamp of the MintToken VC' })
+    @ApiResponse({ status: 200, type: MintTransactionsResponseDto })
+    @ApiResponse({ status: 404, description: 'Mint not found or not linked to this project' })
+    async getMintTransactions(
+        @Param('network') network: string,
+        @Param('id') id: string,
+        @Param('mintTimestamp') mintTimestamp: string,
+        @Query() query: PaginationQueryDto,
+    ): Promise<MintTransactionsResponseDto> {
+        return this.projectsService.findMintTransactions(
+            network, id, mintTimestamp, query.page ?? 1, query.limit ?? 20, query.sortBy, query.sortDir,
+        );
     }
 
     @Get(':id/vc-evidence/:consensusTimestamp')

@@ -30,6 +30,7 @@ import { TopicSyncProcessor } from './processors/topic-sync.processor';
 import { TopicSyncPriorityProcessor } from './processors/topic-sync-priority.processor';
 import { MessageProcessProcessor } from './processors/message-process.processor';
 import { TokenSyncProcessor } from './processors/token-sync.processor';
+import { RetireSyncProcessor } from './processors/retire-sync.processor';
 import { IpfsFetchProcessor } from './processors/ipfs-fetch.processor';
 import { PolicyDecodeProcessor } from './processors/policy-decode.processor';
 import { MvRefreshProcessor } from './processors/mv-refresh.processor';
@@ -51,6 +52,7 @@ const PROCESSOR_MAP: Record<string, any> = {
     [QUEUE_NAMES.TOPIC_SYNC_PRIORITY]: TopicSyncPriorityProcessor,
     [QUEUE_NAMES.MESSAGE_PARSE]: MessageProcessProcessor,
     [QUEUE_NAMES.TOKEN_SYNC]: TokenSyncProcessor,
+    [QUEUE_NAMES.RETIRE_SYNC]: RetireSyncProcessor,
     [QUEUE_NAMES.IPFS_FETCH]: IpfsFetchProcessor,
     [QUEUE_NAMES.POLICY_DECODE]: PolicyDecodeProcessor,
     [QUEUE_NAMES.MV_REFRESH]: MvRefreshProcessor,

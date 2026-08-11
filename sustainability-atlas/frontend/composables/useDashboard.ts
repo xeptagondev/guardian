@@ -7,7 +7,7 @@ import { useNetworkActivity } from './useNetworkActivity';
 
 export function useDashboard(filters?: Ref<{ developer?: string; registry?: string }>) {
     const { summary, pending } = useDashboardSummary(filters);
-    const { mintStats, buildMintSeries, mintedBySector, mintedByRegistry } = useMintStats(filters);
+    const { mintStats, buildMintSeries, buildRetirementSeries, mintedBySector, mintedByRegistry } = useMintStats(filters);
     const { activityItems: recentActivity } = useNetworkActivity(undefined, filters);
     const { t, locale } = useI18n();
 
@@ -138,10 +138,6 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         return buildMintSeries(period);
     }
 
-    // No retirement data source — always returns empty
-    function buildRetirementSeries(_period: 'monthly' | 'quarterly' | 'yearly'): { label: string; value: number }[] {
-        return [];
-    }
 
     // Keep backward-compat computed values (default monthly)
     const issuanceMonths = computed(() => buildIssuanceSeries('monthly'));
@@ -305,11 +301,18 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
         };
     }
 
-    // Retirement — no data source available
-    const totalRetired = computed(() => 0);
+    // Retirement — a real figure, from the same /dashboard/summary payload the
+    // rest of this composable already reads. It combines Guardian retirement
+    // contract events with retired NFT serials; see the impact-summary
+    // methodology note for how documented and inferred evidence are layered.
+    //
+    // Retirement events carry a date, but the summary endpoint aggregates them,
+    // so there is still no per-month series to chart — the trend stays empty
+    // rather than being faked from the issuance curve.
+    const totalRetired = computed(() => summary.value.portfolio.totalRetired ?? 0);
     const retirementMonths = computed(() => [] as { month: string; value: number }[]);
     const retirementMax = computed(() => 1);
-    const retirementTotal = computed(() => 0);
+    const retirementTotal = computed(() => totalRetired.value);
 
     // Vintage distribution
     const vintageDistribution = computed(() => {

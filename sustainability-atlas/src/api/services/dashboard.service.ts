@@ -37,9 +37,12 @@ export class DashboardService {
         if (cached) return cached;
 
         const repo = new PgDashboardRepository(this.dataSources.getDataSource(network));
-        const rows = await repo.getMintAggregations(query);
+        const [rows, retirementRows] = await Promise.all([
+            repo.getMintAggregations(query),
+            repo.getRetirementAggregations(query),
+        ]);
 
-        const result = this.aggregate(rows);
+        const result = this.aggregate(rows, retirementRows);
         await this.redis.setJson(cacheKey, result, CACHE_TTL_SECONDS);
         return result;
     }
@@ -192,21 +195,42 @@ export class DashboardService {
         };
     }
 
-    private aggregate(rows: Awaited<ReturnType<PgDashboardRepository['getMintAggregations']>>): DashboardMintStatsDto {
+    /** Groups a row's month into the ISO key 'YYYY-MM-01' the series uses. */
+    private static monthKey(month: Date | string | null): string | null {
+        if (!month) return null;
+        return (month instanceof Date
+            ? month.toISOString().slice(0, 7)
+            : String(month).slice(0, 7)) + '-01';
+    }
+
+    private aggregate(
+        rows: Awaited<ReturnType<PgDashboardRepository['getMintAggregations']>>,
+        retirementRows: Awaited<ReturnType<PgDashboardRepository['getRetirementAggregations']>>,
+    ): DashboardMintStatsDto {
         let totalMinted = 0;
         const monthMap = new Map<string, number>();
         const sectorMap = new Map<string, number>();
         const registryMap = new Map<string, number>();
+
+        let totalRetired = 0;
+        const retirementMonthMap = new Map<string, number>();
+
+        for (const row of retirementRows) {
+            const amount = Number(row.amount) || 0;
+            totalRetired += amount;
+            const key = DashboardService.monthKey(row.month);
+            if (key) {
+                retirementMonthMap.set(key, (retirementMonthMap.get(key) ?? 0) + amount);
+            }
+        }
 
         for (const row of rows) {
             const amount = Number(row.amount) || 0;
             totalMinted += amount;
 
             // Monthly series — key is ISO month string 'YYYY-MM-01'
-            if (row.month) {
-                const monthKey = row.month instanceof Date
-                    ? row.month.toISOString().slice(0, 7) + '-01'
-                    : String(row.month).slice(0, 7) + '-01';
+            const monthKey = DashboardService.monthKey(row.month);
+            if (monthKey) {
                 monthMap.set(monthKey, (monthMap.get(monthKey) ?? 0) + amount);
             }
 
@@ -230,6 +254,10 @@ export class DashboardService {
             byRegistry: [...registryMap.entries()]
                 .sort(([, a], [, b]) => b - a)
                 .map(([label, amount]) => ({ label, amount })),
+            totalRetired,
+            retirementSeries: [...retirementMonthMap.entries()]
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([month, amount]) => ({ month, amount })),
         };
     }
 }

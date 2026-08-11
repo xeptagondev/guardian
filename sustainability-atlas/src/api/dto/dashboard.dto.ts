@@ -46,6 +46,22 @@ export class DashboardMintStatsDto {
 
     @ApiProperty({ type: [MintBreakdownEntryDto], description: 'Minted amounts grouped by registry' })
     byRegistry: MintBreakdownEntryDto[];
+
+    @ApiProperty({
+        description:
+            'Total retired credits. Counts the same credits as the retired totals shown elsewhere, ' +
+            'so the two agree.',
+    })
+    totalRetired: number;
+
+    @ApiProperty({
+        type: [MintSeriesEntryDto],
+        description:
+            'Monthly retired amounts, sorted ascending. Each credit is dated by its retirement ' +
+            'contract record where one exists, and otherwise by its last movement — the point at ' +
+            'which it left circulation. The series therefore sums to totalRetired.',
+    })
+    retirementSeries: MintSeriesEntryDto[];
 }
 
 export class DashboardTotalsDto {
