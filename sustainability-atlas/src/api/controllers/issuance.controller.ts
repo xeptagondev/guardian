@@ -82,7 +82,9 @@ export class IssuanceController {
         @Param('mintTimestamp') mintTimestamp: string,
         @Query() query: PaginationQueryDto,
     ): Promise<MintTransactionsResponseDto> {
-        return this.issuanceService.findTransactions(network, mintTimestamp, query.page ?? 1, query.limit ?? 20);
+        return this.issuanceService.findTransactions(
+            network, mintTimestamp, query.page ?? 1, query.limit ?? 20, query.sortBy, query.sortDir,
+        );
     }
 
     @Get(':mintTimestamp/token')
