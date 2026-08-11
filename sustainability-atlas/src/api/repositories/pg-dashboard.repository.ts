@@ -1,6 +1,5 @@
 import { DataSource } from 'typeorm';
 import { MV_PROJECT_STATS_NAME, MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
-import { SCHEMA_DOC_TYPES_SQL, LIFECYCLE_STAGE_CASE } from '@shared/sql/lifecycle-classification.sql';
 
 export interface MintAggRow {
     sector: string;
@@ -166,24 +165,21 @@ export class PgDashboardRepository {
         const sql = `
             SELECT
                 (
-                    SELECT (
-                        COUNT(*) FILTER (WHERE bv2."registryDid" IS NULL)
-                      + COUNT(DISTINCT bv2."registryDid") FILTER (WHERE bv2."registryDid" IS NOT NULL)
-                    )::bigint
-                    FROM business_view bv2
-                    LEFT JOIN mv_registry_stats s ON s."registryDid" = bv2."registryDid"
-                    WHERE bv2."viewType" = 'REGISTRY'
-                      AND COALESCE(
-                            s.policy_count + s.project_count + s.issuance_count + s.user_count, 0
-                          ) > 0
+                    -- mv_registry_stats is already one row per registryDid (canonical),
+                    -- so this reads the count directly instead of deduplicating the raw
+                    -- REGISTRY population in business_view on every call.
+                    SELECT COUNT(*)::bigint
+                    FROM mv_registry_stats
+                    WHERE COALESCE(policy_count, 0) + COALESCE(project_count, 0)
+                        + COALESCE(issuance_count, 0) + COALESCE(user_count, 0) > 0
                 )                                                       AS registries,
                 (
-                    SELECT (
-                        COUNT(*) FILTER (WHERE "relatedTopicId" IS NULL)
-                      + COUNT(DISTINCT "relatedTopicId") FILTER (WHERE "relatedTopicId" IS NOT NULL)
-                    )::bigint
-                    FROM business_view
-                    WHERE "viewType" = 'METHODOLOGY'
+                    -- mv_methodology_stats is keyed by relatedTopicId (WHERE relatedTopicId
+                    -- IS NOT NULL), so it already equals COUNT(DISTINCT relatedTopicId);
+                    -- only the relatedTopicId IS NULL standalone rows still need a scan.
+                    (SELECT COUNT(*)::bigint FROM business_view
+                     WHERE "viewType" = 'METHODOLOGY' AND "relatedTopicId" IS NULL)
+                  + (SELECT COUNT(*)::bigint FROM mv_methodology_stats)
                 )                                                       AS methodologies,
                 agg.projects,
                 agg.filtered_registries,
@@ -297,45 +293,26 @@ export class PgDashboardRepository {
      * Projects grouped by derived lifecycle stage:
      * Registered -> Validation -> Monitoring -> Verified -> Issued.
      *
-     * Mirrors ProjectResponseDto.fromRow's derivation. A stage counts only when
-     * the project actually holds a VC of that document type — schemas the policy
-     * defines but the project never submitted must not advance it. Document
-     * types come from `policy.policyMapping`, matched to the project's
-     * `linkedVcs` on the bare schema UUID (policyMapping carries full IRIs of
-     * the form `#<uuid>&<version>`, linkedVcs carries just the uuid).
+     * Reads the stage off mv_project_lifecycle instead of re-deriving it from
+     * policy.policyMapping x linkedVcs — that MV already computes this exact
+     * classification (see src/shared/materialized-views/project-lifecycle.mv.ts)
+     * on the same 60s refresh cadence this endpoint's cache TTL assumes.
+     * Re-deriving it live here cost ~520ms per call (EXPLAIN ANALYZE against
+     * the testnet dump); joining the MV costs ~7ms.
      */
     async getLifecycleStageAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
         const scope = this.buildProjectScope(query);
 
         const sql = `
-            WITH schema_doc_types AS (${SCHEMA_DOC_TYPES_SQL}),
-            per_project AS (
-                SELECT
-                    bv.id                                                        AS row_id,
-                    COALESCE(ps.total_issued, 0) > 0
-                        OR COALESCE(ps.issuance_count, 0) > 0                    AS issued,
-                    bool_or(sdt.doc_type = 'verificationReport')                 AS has_verification,
-                    bool_or(sdt.doc_type = 'monitoringReport')                   AS has_monitoring,
-                    bool_or(sdt.doc_type = 'validationReport')                   AS has_validation,
-                    MAX(${PgDashboardRepository.CREDITS_EXPR})                   AS credits,
-                    MAX(bv."businessData"->>'methodologyId')                     AS methodology_id
-                FROM ${scope.from}
-                LEFT JOIN LATERAL jsonb_array_elements(
-                    COALESCE(bv."businessData"->'linkedVcs', '[]'::jsonb)
-                ) AS lv ON true
-                LEFT JOIN schema_doc_types sdt
-                    ON sdt.policy_topic_id = bv."businessData"->>'policyTopicId'
-                   AND sdt.schema_uuid     = lv->>'schemaUuid'
-                WHERE ${scope.where}
-                GROUP BY bv.id, ps.total_issued, ps.issuance_count
-            )
             SELECT
-                ${LIFECYCLE_STAGE_CASE}    AS label,
-                COUNT(*)::bigint                                 AS projects,
-                COALESCE(SUM(credits), 0)::bigint                AS credits,
-                COUNT(DISTINCT methodology_id)::bigint           AS methodologies
-            FROM per_project
-            GROUP BY label
+                COALESCE(ml.lifecycle_stage, 'Registered')                    AS label,
+                COUNT(*)::bigint                                              AS projects,
+                COALESCE(SUM(${PgDashboardRepository.CREDITS_EXPR}), 0)::bigint AS credits,
+                COUNT(DISTINCT bv."businessData"->>'methodologyId')::bigint   AS methodologies
+            FROM ${scope.from}
+            LEFT JOIN mv_project_lifecycle ml ON ml."projectKey" = bv."projectKey"
+            WHERE ${scope.where}
+            GROUP BY COALESCE(ml.lifecycle_stage, 'Registered')
         `;
 
         return this.dataSource.query(sql, scope.params);
@@ -455,37 +432,25 @@ export class PgDashboardRepository {
         return this.dataSource.query(sql, scope.params);
     }
 
-    /** (registry, lifecycle stage) cross-tab for the analytics registry throughput heatmap. */
+    /**
+     * (registry, lifecycle stage) cross-tab for the analytics registry throughput heatmap.
+     *
+     * Same mv_project_lifecycle join as getLifecycleStageAggregates, for the
+     * same reason — re-deriving the stage live here cost ~850ms per call
+     * (EXPLAIN ANALYZE against the testnet dump); the MV join costs ~16ms.
+     */
     async getRegistryStatusBreakdown(query: DashboardMintQuery = {}): Promise<RegistryStatusRow[]> {
         const scope = this.buildProjectScope(query);
 
         const sql = `
-            WITH schema_doc_types AS (${SCHEMA_DOC_TYPES_SQL}),
-            per_project AS (
-                SELECT
-                    bv.id                                                        AS row_id,
-                    MAX(reg.registry_name)                                       AS registry,
-                    COALESCE(ps.total_issued, 0) > 0
-                        OR COALESCE(ps.issuance_count, 0) > 0                    AS issued,
-                    bool_or(sdt.doc_type = 'verificationReport')                 AS has_verification,
-                    bool_or(sdt.doc_type = 'monitoringReport')                   AS has_monitoring,
-                    bool_or(sdt.doc_type = 'validationReport')                   AS has_validation
-                FROM ${scope.from}
-                LEFT JOIN LATERAL jsonb_array_elements(
-                    COALESCE(bv."businessData"->'linkedVcs', '[]'::jsonb)
-                ) AS lv ON true
-                LEFT JOIN schema_doc_types sdt
-                    ON sdt.policy_topic_id = bv."businessData"->>'policyTopicId'
-                   AND sdt.schema_uuid     = lv->>'schemaUuid'
-                WHERE ${scope.where}
-                GROUP BY bv.id, ps.total_issued, ps.issuance_count
-            )
             SELECT
-                registry,
-                ${LIFECYCLE_STAGE_CASE} AS status,
-                COUNT(*)::bigint                              AS projects
-            FROM per_project
-            GROUP BY registry, status
+                reg.registry_name                                          AS registry,
+                COALESCE(ml.lifecycle_stage, 'Registered')                  AS status,
+                COUNT(*)::bigint                                           AS projects
+            FROM ${scope.from}
+            LEFT JOIN mv_project_lifecycle ml ON ml."projectKey" = bv."projectKey"
+            WHERE ${scope.where}
+            GROUP BY reg.registry_name, COALESCE(ml.lifecycle_stage, 'Registered')
         `;
 
         return this.dataSource.query(sql, scope.params);
