@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 import {
     CreditRepository,
     CreditListQuery,
@@ -150,19 +151,17 @@ const METHODOLOGY_JOIN = `
 `;
 
 /**
- * LATERAL: resolve registry display name from the project's registryDid,
- * falling back to the token's own registryDid (cred) for mints not yet
- * attributed to a project, so unlinked mints still show their registry.
+ * Registry display name for the project's registryDid, falling back to the
+ * token's own registryDid (cred) for mints not yet attributed to a project,
+ * so unlinked mints still show their registry.
+ *
+ * Read from `mv_registry_stats` (uniquely keyed by registryDid), so no LATERAL
+ * is needed: both `proj` and `cred` are joined earlier, making the COALESCE a
+ * plain scalar by the time this join runs.
  */
 const REGISTRY_JOIN = `
-    LEFT JOIN LATERAL (
-        SELECT bv_reg."displayName" AS registry_name
-        FROM business_view bv_reg
-        WHERE bv_reg."viewType"    = 'REGISTRY'
-          AND bv_reg."registryDid" = COALESCE(proj.registry_did, cred.registry_did)
-        ORDER BY bv_reg."createdAt" DESC NULLS LAST
-        LIMIT 1
-    ) reg ON true
+    LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg
+        ON reg."registryDid" = COALESCE(proj.registry_did, cred.registry_did)
 `;
 
 /** Which optional joins a given filter set actually requires. */

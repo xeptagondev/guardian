@@ -74,16 +74,9 @@ interface RawProjectBreakdownRow {
 const METHODOLOGY_BREAKDOWN_LIMIT = 10;
 const PROJECT_BREAKDOWN_LIMIT = 12;
 
-/** Same LATERAL pattern as PgMethodologyRepository's/PgProjectRepository's REGISTRY_NAME_JOIN, duplicated locally since neither file exports its join fragment for reuse. */
+/** Registry display name from `mv_registry_stats`, the shared source every repository resolves names through. Uniquely keyed by registryDid, so this is a plain join rather than the per-row LATERAL it replaces. */
 const REGISTRY_NAME_JOIN = `
-    LEFT JOIN LATERAL (
-        SELECT "displayName" AS registry_name
-        FROM business_view
-        WHERE "viewType" = 'REGISTRY'
-          AND "registryDid" = bv."registryDid"
-        ORDER BY "createdAt" DESC NULLS LAST
-        LIMIT 1
-    ) reg ON true
+    LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
 `;
 
 /** PostgreSQL implementation of the ImpactSummaryRepository; reuses existing aggregate sources (mv_project_stats, mv_registry_stats, PgSdgRepository) rather than re-deriving them, and computes geographic distribution + totals from one query so they can never disagree — see getGeoAndTotals(). getRegistryBreakdown/getMethodologyBreakdown drive from their stats MV's small canonical set (joined to business_view by primary key) rather than scanning+deduping every REGISTRY/METHODOLOGY row, mirroring PgRegistryRepository/PgMethodologyRepository's own findAll fix. */

@@ -24,6 +24,10 @@ export type PolicyPackageResult =
 /** Matches MV_REFRESH_INTERVAL. */
 const OPTIONS_CACHE_TTL_SECONDS = 60;
 
+// Matches MV_REFRESH_INTERVAL, so a cached page is never staler than the
+// materialized view its stats are read from.
+const FIND_ALL_CACHE_TTL_SECONDS = 60;
+
 @Injectable()
 export class MethodologiesService {
     private readonly logger = new Logger(MethodologiesService.name);
@@ -55,10 +59,14 @@ export class MethodologiesService {
         network: string,
         query: MethodologyQueryDto,
     ): Promise<PaginatedResponse<MethodologyResponseDto>> {
-        const repo = this.getRepository(network);
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
 
+        const cacheKey = this.listCacheKey(network, query, page, limit);
+        const cached = await this.redis.getJson<PaginatedResponse<MethodologyResponseDto>>(cacheKey);
+        if (cached) return cached;
+
+        const repo = this.getRepository(network);
         const result = await repo.findAll({
             page,
             limit,
@@ -78,7 +86,29 @@ export class MethodologiesService {
         const data = result.rows.map(row =>
             MethodologyResponseDto.fromRow(row, network, row.stats),
         );
-        return new PaginatedResponse(data, result.total, page, limit);
+        const response = new PaginatedResponse(data, result.total, page, limit);
+        await this.redis.setJson(cacheKey, response, FIND_ALL_CACHE_TTL_SECONDS);
+        return response;
+    }
+
+    /**
+     * Encodes every field that can change the listing result, so two requests
+     * share a cache entry only when they would produce the same page.
+     * Multi-value filters are pipe-joined, matching the wire format the query
+     * builder decodes them from.
+     */
+    private listCacheKey(
+        network: string,
+        query: MethodologyQueryDto,
+        page: number,
+        limit: number,
+    ): string {
+        return `methodologies:list:${network}:${page}:${limit}` +
+            `:${query.search ?? ''}:${query.name ?? ''}:${query.id ?? ''}` +
+            `:${query.description ?? ''}:${query.decodeStatus?.join('|') ?? ''}` +
+            `:${query.registryDid ?? ''}:${query.registryName ?? ''}` +
+            `:${query.version ?? ''}:${query.policyTopicId ?? ''}` +
+            `:${query.sortBy ?? ''}:${query.sortDir ?? ''}`;
     }
 
     async findById(network: string, id: string): Promise<MethodologyResponseDto | null> {
