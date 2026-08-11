@@ -135,6 +135,10 @@ export const MV_METHODOLOGY_STATS_INDEX_SQL = `
     -- Backs PgMethodologyRepository's findAllDefaultView fast path: lets the
     -- default (unfiltered/unsearched) /methodologies list order by createdAt
     -- via an index scan instead of joining+sorting the full candidate set.
+    -- NULLS LAST is required: the column has no NOT NULL constraint (an MV does
+    -- not inherit one from its source), so the planner only matches this index
+    -- to the query's "createdAt" DESC NULLS LAST ordering if it declares the
+    -- same null placement -- a bare DESC index defaults to NULLS FIRST.
     CREATE INDEX IF NOT EXISTS idx_${MV_METHODOLOGY_STATS_NAME}_created_at
-    ON ${MV_METHODOLOGY_STATS_NAME} ("createdAt" DESC);
+    ON ${MV_METHODOLOGY_STATS_NAME} ("createdAt" DESC NULLS LAST);
 `;
