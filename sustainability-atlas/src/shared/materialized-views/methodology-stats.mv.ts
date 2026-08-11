@@ -28,7 +28,7 @@ export const MV_METHODOLOGY_STATS_CREATE_SQL = `
     -- column they already join, instead of deduplicating every METHODOLOGY row
     -- on each request.
     canonical AS (
-        SELECT DISTINCT ON ("relatedTopicId") "relatedTopicId", id
+        SELECT DISTINCT ON ("relatedTopicId") "relatedTopicId", id, "createdAt"
         FROM business_view
         WHERE "viewType" = 'METHODOLOGY' AND "relatedTopicId" IS NOT NULL
         ORDER BY "relatedTopicId", "sourceTimestamp"::numeric DESC, id DESC
@@ -36,6 +36,7 @@ export const MV_METHODOLOGY_STATS_CREATE_SQL = `
     SELECT
         mb."relatedTopicId",
         c.id AS canonical_id,
+        c."createdAt",
         COALESCE((
             SELECT COUNT(*)
             FROM business_view p
@@ -131,4 +132,9 @@ export const MV_METHODOLOGY_STATS_INDEX_SQL = `
     ON ${MV_METHODOLOGY_STATS_NAME} ("relatedTopicId");
     CREATE INDEX IF NOT EXISTS idx_${MV_METHODOLOGY_STATS_NAME}_canonical_id
     ON ${MV_METHODOLOGY_STATS_NAME} (canonical_id);
+    -- Backs PgMethodologyRepository's findAllDefaultView fast path: lets the
+    -- default (unfiltered/unsearched) /methodologies list order by createdAt
+    -- via an index scan instead of joining+sorting the full candidate set.
+    CREATE INDEX IF NOT EXISTS idx_${MV_METHODOLOGY_STATS_NAME}_created_at
+    ON ${MV_METHODOLOGY_STATS_NAME} ("createdAt" DESC);
 `;
