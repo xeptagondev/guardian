@@ -17,7 +17,7 @@ import {
 
 const { t, locale } = useI18n();
 const { network } = useNetwork();
-const { isAuthenticated, isAuthResolved } = useAuth();
+const { isAuthenticated, isAuthResolved, hasSessionCookies } = useAuth();
 const route = useRoute();
 
 const collapsed = useState('sidebar-collapsed', () => false);
@@ -57,21 +57,15 @@ const authedItems = computed(() => [
     { label: t('nav.reports'), icon: FileText, to: '/reports' },
 ]);
 
-// Paths that require authentication — used for optimistic tab rendering.
-const protectedPaths = ['/portfolio', '/reports', '/account', '/admin'];
-const isProtectedPath = computed(() =>
-    protectedPaths.some(p => route.path.startsWith(p))
-);
-
 // Show authed nav if:
 //   - user is confirmed authenticated, OR
-//   - auth hasn't resolved yet AND we're on a protected path.
-//     (middleware allowed SSR render here → user must have had session cookies)
-// This prevents the Portfolio/Reports tabs from popping in after a refresh.
-// Guests on public pages (/,/projects,etc.) never satisfy isProtectedPath so
-// they will never see these tabs even momentarily.
+//   - auth hasn't resolved yet AND session cookies were detected in the SSR request.
+// hasSessionCookies is computed on the server from request Cookie headers and transferred
+// to the client via window.__NUXT__, so this condition stays true on ANY page (including
+// Dashboard '/') throughout the hydration window. Guests with no session cookies always
+// get false here, keeping Portfolio & Reports strictly hidden.
 const showAuthedNav = computed(() =>
-    isAuthenticated.value || (!isAuthResolved.value && isProtectedPath.value)
+    isAuthenticated.value || (!isAuthResolved.value && hasSessionCookies.value)
 );
 </script>
 
