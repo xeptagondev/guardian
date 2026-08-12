@@ -486,6 +486,17 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         WHERE "viewType" = 'METHODOLOGY' AND "relatedTopicId" IS NOT NULL
     `);
 
+    // Same LATERAL's displayName fallback branch (relatedTopicId not yet
+    // linked) was falling through to the trigram GIN index on displayName
+    // (built for ILIKE/similarity), which serves an exact `=` match at ~24ms
+    // via a bitmap scan instead of microseconds. A plain partial btree gives
+    // the planner a cheap exact-match path for this branch.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_business_view_methodology_display_name
+        ON business_view ("displayName")
+        WHERE "viewType" = 'METHODOLOGY'
+    `);
+
     // GIN index backing the linkedVcs @> containment lookups used by
     // mint-project-linker (topic-keyed projects) and findActivity.
     await dataSource.query(`
@@ -615,6 +626,22 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     await dataSource.query(`
         CREATE INDEX IF NOT EXISTS idx_message_mint_token_cts
         ON message ("consensusTimestamp" DESC)
+        WHERE type = 'VC-Document'
+          AND documents IS NOT NULL
+          AND (documents->'credentialSubject'->0->>'type') LIKE 'MintToken%'
+    `);
+
+    // Backs the raw-data viewer's findRawMintRows: WHERE tokenId = $1 ORDER BY
+    // consensusTimestamp ASC. Without this, the planner walks
+    // idx_message_mint_token_cts (ordered by consensusTimestamp only) and
+    // discards every other token's MintToken rows one by one to find this
+    // token's — measured discarding 2,627 of 2,633 rows for a single lookup.
+    // Composite so the equality filter and the ORDER BY are served by one
+    // index scan, with cost bounded by this token's own mint count rather
+    // than total MintToken volume.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_mint_token_tokenid_cts
+        ON message ((documents->'credentialSubject'->0->>'tokenId'), "consensusTimestamp")
         WHERE type = 'VC-Document'
           AND documents IS NOT NULL
           AND (documents->'credentialSubject'->0->>'type') LIKE 'MintToken%'
