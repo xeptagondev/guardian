@@ -7,6 +7,7 @@ import Redis from 'ioredis';
 import { QUEUE_NAMES, getWorkerNetwork } from '@shared/config/bullmq.config';
 import { ROOT_TOPICS } from '@shared/config/configuration';
 import { PolicyDecodeJobData } from '../processors/policy-decode.processor';
+import { TREASURY_TRANSFERS_JOB } from '../processors/token-sync.processor';
 import { ProjectMapperService } from '../services/project-mapper.service';
 
 /**
@@ -31,6 +32,7 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly topicPriorityQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.RETIRE_SYNC) private readonly retireQueue: Queue,
         @InjectQueue(QUEUE_NAMES.MV_REFRESH) private readonly mvRefreshQueue: Queue,
         @InjectQueue(QUEUE_NAMES.BUSINESS_VIEW_BUILD) private readonly businessViewQueue: Queue,
         @InjectQueue(QUEUE_NAMES.POLICY_DECODE) private readonly policyDecodeQueue: Queue,
@@ -57,6 +59,7 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         // Always schedule initial topic/token syncs (idempotent via jobId)
         await this.scheduleTopicSyncs();
         await this.scheduleTokenSyncs();
+        await this.scheduleRetireSyncs();
         await this.schedulePolicyDecodeJobs();
         await this.rescheduleOrphanedTopics();
 
@@ -244,10 +247,157 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
             }, { jobId });
         }
 
+        // Fungible tokens carry no serials, so the hasNext watermark above never
+        // brings them back. Re-sync them here to pick up mint transactions added
+        // since the last pass; the per-token mintTxWatermark keeps this cheap.
+        const fungibleTokens = await this.dataSource.query(
+            `SELECT "tokenId" FROM token_cache WHERE type = 'FUNGIBLE_COMMON'`,
+        );
+        for (const token of fungibleTokens) {
+            const jobId = `token-${token.tokenId}-fungible-mints`;
+            try {
+                await this.tokenQueue.remove(jobId);
+            } catch {
+                // Job didn't exist — fine.
+            }
+            await this.tokenQueue.add('sync', {
+                tokenId: token.tokenId,
+                fetchNfts: false,
+                fromSerial: 0,
+            }, { jobId });
+        }
+
+        const treasuries = await this.scheduleTreasuryTransferSweeps();
+
         this.logger.log(
             `Enqueued ${pendingTokens.length} incremental token sync(s), ` +
-            `${nftTokens.length} NFT retirement check(s)`,
+            `${nftTokens.length} NFT retirement check(s), ` +
+            `${fungibleTokens.length} fungible mint check(s), ` +
+            `${treasuries} treasury transfer sweep(s)`,
         );
+    }
+
+    /**
+     * Enqueues one transfer sweep per NFT treasury, never-scanned accounts first.
+     *
+     * Transfers are readable only from an account's transaction list, and a
+     * registry treasury commonly issues hundreds of tokens, so the account —
+     * not the token — is the unit of work: 17,743 testnet tokens resolve to
+     * 6,978 accounts, and the busiest single account backs 1,072 tokens.
+     *
+     * Ordering matters as much as the grouping. Accounts already walked to the
+     * present are cheap to re-check but add nothing, so they go last; a sweep
+     * interrupted by a restart then resumes into unscanned accounts instead of
+     * repeating the ones it already finished.
+     */
+    private async scheduleTreasuryTransferSweeps(): Promise<number> {
+        // Every token of a treasury shares one watermark, so grouping token_cache
+        // by treasury yields both the work list and each account's scan position
+        // — no separate bookkeeping table to keep in step with it.
+        //
+        // NULLS FIRST puts never-scanned accounts at the front; the rest follow
+        // oldest position first, which leaves accounts already caught up to the
+        // present at the back where a re-check costs one page.
+        const treasuries: Array<{ treasury: string }> = await this.dataSource.query(`
+            SELECT treasury
+            FROM token_cache
+            WHERE treasury IS NOT NULL AND type = 'NON_FUNGIBLE_UNIQUE'
+            GROUP BY treasury
+            ORDER BY MAX("transferTxWatermark") ASC NULLS FIRST, treasury
+        `);
+
+        for (const { treasury } of treasuries) {
+            const jobId = `treasury-${treasury}-sweep`;
+            try {
+                await this.tokenQueue.remove(jobId);
+            } catch {
+                // Job didn't exist — fine.
+            }
+            await this.tokenQueue.add(
+                TREASURY_TRANSFERS_JOB,
+                { treasury },
+                { jobId },
+            );
+        }
+
+        return treasuries.length;
+    }
+
+    /**
+     * Discovers Guardian's RETIRE contracts and enqueues a log sync for each.
+     *
+     * Discovery has two sources because `contractId`/`contractType` were not
+     * always extracted by the message parser: newly parsed Contract messages
+     * carry them in `options`, while older rows only have them inside the raw
+     * HCS payload in message_cache. Both are read, so no contract is missed on
+     * an existing database.
+     */
+    private async scheduleRetireSyncs(): Promise<void> {
+        // Source 1 — parsed messages.
+        await this.dataSource.query(`
+            INSERT INTO contract_cache (contract_id, contract_type, topic_id, owner, last_update)
+            SELECT DISTINCT ON (m.options->>'contractId')
+                   m.options->>'contractId',
+                   m.options->>'contractType',
+                   m."topicId",
+                   m.owner,
+                   $1
+            FROM message m
+            WHERE m.type = 'Contract' AND m.options->>'contractId' IS NOT NULL
+            ORDER BY m.options->>'contractId', m."consensusTimestamp" DESC
+            ON CONFLICT (contract_id) DO UPDATE SET
+                contract_type = COALESCE(EXCLUDED.contract_type, contract_cache.contract_type),
+                topic_id      = COALESCE(EXCLUDED.topic_id, contract_cache.topic_id),
+                owner         = COALESCE(EXCLUDED.owner, contract_cache.owner)
+        `, [Date.now().toString()]);
+
+        // Source 2 — raw payloads of Contract messages parsed before contractId
+        // was extracted. Decoded in JS so one malformed payload can't abort the
+        // batch the way a SQL-side jsonb cast would.
+        const raw: Array<{ consensusTimestamp: string; topicId: string; owner: string | null; message: string }> =
+            await this.dataSource.query(`
+                SELECT mc."consensusTimestamp", mc."topicId", m.owner, mc.message
+                FROM message_cache mc
+                JOIN message m ON m."consensusTimestamp" = mc."consensusTimestamp"
+                WHERE m.type = 'Contract'
+                  AND m.options->>'contractId' IS NULL
+                  AND COALESCE(mc."chunkTotal", 1) = 1
+            `);
+        for (const r of raw) {
+            let payload: Record<string, unknown>;
+            try {
+                payload = JSON.parse(Buffer.from(r.message, 'base64').toString('utf8'));
+            } catch {
+                continue;
+            }
+            const contractId = payload['contractId'];
+            if (typeof contractId !== 'string' || !contractId) {
+                continue;
+            }
+            await this.dataSource.query(`
+                INSERT INTO contract_cache (contract_id, contract_type, topic_id, owner, last_update)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (contract_id) DO UPDATE SET
+                    contract_type = COALESCE(EXCLUDED.contract_type, contract_cache.contract_type),
+                    topic_id      = COALESCE(EXCLUDED.topic_id, contract_cache.topic_id),
+                    owner         = COALESCE(EXCLUDED.owner, contract_cache.owner)
+            `, [contractId, payload['contractType'] ?? null, r.topicId, r.owner, Date.now().toString()]);
+        }
+
+        const retireContracts: Array<{ contract_id: string }> = await this.dataSource.query(
+            `SELECT contract_id FROM contract_cache WHERE contract_type = 'RETIRE'`,
+        );
+        for (const c of retireContracts) {
+            const jobId = `retire-${c.contract_id}`;
+            try {
+                await this.retireQueue.remove(jobId);
+            } catch {
+                // Job didn't exist — fine.
+            }
+            await this.retireQueue.add('sync', { contractId: c.contract_id }, { jobId });
+        }
+
+        this.logger.log(`Enqueued ${retireContracts.length} retirement contract sync(s)`);
     }
 
     /**

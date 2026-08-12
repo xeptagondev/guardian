@@ -131,13 +131,30 @@ statements and so on — presented as readable fields rather than raw files.
 Everything about the credits themselves:
 
 - the **credit lifecycle** bar, splitting total issued into what is still active, what has been
-  transferred and what has been retired;
+  transferred and what has been retired — followed by the **transaction history**: every retirement
+  and transfer affecting this project's credits, with the date, the accounts involved, how many
+  credits moved and which serial numbers. A dash rather than a number means the figure cannot be
+  determined (see below), not that nothing happened;
 - a **projected issuance** card for projects that have not issued yet, showing forecast volume and
   expected year. If the source documents contain no forecast, this reads **No Estimations Available**
   — that is an honest statement that the registry did not publish a number, not a loading state and
   not a zero;
-- the **issuances table**, listing each minting event with its amount and date, filterable by year.
-  Each row links through to the credit record described in chapter 05.
+- the **issuances table**, listing each minting event with its **declared** amount (what the Guardian
+  mint document said) alongside the amount **minted on-chain** (what the ledger recorded), filterable
+  by year. A warning marks any issuance where the two disagree — chapter 05 explains why that happens.
+  Expanding a row shows the serial numbers the issuance produced, with retired ones struck through,
+  and the retirements and transfers affecting exactly those serials. Each row also links through to
+  that issuance's own page, described in chapter 05.
+
+  Serial numbers are shown as **ranges** — `1–42,278` rather than forty-two thousand separate numbers.
+  Nothing is lost: every serial in a range shares the same state and the same holder, because a range
+  is split whenever either changes.
+
+**Where Transferred shows a dash.** Transfers are read from current ownership on the ledger, because
+Guardian issues no transfer document. The figure is unavailable for fungible credits — those balances
+cannot be traced back to the issuance that created them — and while serial ownership is still syncing,
+where a partial count would understate it. Transfer history covers the move out of the registry's
+treasury to the first holder; later trades between holders are not indexed.
 
 ### MRV External Data
 

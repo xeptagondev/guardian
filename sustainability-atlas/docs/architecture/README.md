@@ -142,7 +142,8 @@ Hedera Mirror Node REST API          IPFS Gateways
 | `mirror-node-topics` | 5 | Fetch HCS messages from Mirror Node by topic ID (bulk crawl — every tracked topic) |
 | `mirror-node-topics-priority` | 2 | Same job, separate queue: root/registry topic + guardian-sync's event-triggered syncs only. Kept physically apart from the bulk queue so these never queue behind it — `priority`/`lifo` job options were tried and don't reliably jump a job forward once the bulk queue has 100k+ entries. |
 | `mirror-node-messages` | 10 | Decode, parse, and classify raw messages |
-| `mirror-node-tokens` | 2 | Fetch token metadata and NFT serials |
+| `mirror-node-tokens` | 2 | Fetch token metadata, NFT serials and owners, fungible mint transactions, and treasury transfers |
+| `mirror-node-retirements` | 2 | Read executed retirement events from Guardian's RETIRE contracts (see [credit lifecycle tracking](credit-lifecycle-tracking.md)) |
 | `ipfs-files` | 3 | Fetch documents from IPFS gateways |
 | `maintenance-refresh-mvs` | 1 | Refresh PostgreSQL materialized views |
 | `maintenance-build-business-views` | 5 | Map raw messages to business entities |
@@ -748,11 +749,24 @@ Each network has its own database containing the same set of tables. There is no
 | `MessageCache` | `message_cache` | Interim storage during processing |
 | `TopicCache` | `topic_cache` | Topic sync watermarks |
 | `TokenCache` | `token_cache` | Token metadata + NFT watermarks |
-| `NftCache` | `nft_cache` | Individual NFT serial tracking |
+| `NftCache` | `nft_cache` | Per-serial tracking: decoded mint VP timestamp, current holder, deleted flag |
 | `IpfsFile` | `ipfs_files` | IPFS document content storage (per-network, not deduped across networks) |
 | `BusinessView` | `business_view` | Materialized business entities + generated `searchVector` tsvector |
 | `SynchronizationTask` | `synchronization_task` | Data source sync timestamps |
 | `Log` | `log` | Error and event logging |
+
+Tables created by `bootstrapSchema` rather than TypeORM (no entity — they are outside `synchronize`'s
+reach, so it cannot drop their columns). All documented in
+[credit lifecycle tracking](credit-lifecycle-tracking.md):
+
+| Table | Purpose |
+|-------|---------|
+| `project_mint_link` | One row per MintToken VC: project attribution, declared vs actually-minted amount, serial/retired/transferred counts, reconciliation status |
+| `token_mint_tx` | Fungible mint transactions and the mint VP timestamp decoded from their memo |
+| `token_retire_event` | Documented retirements from Guardian's RETIRE contract: account, serials, amount |
+| `token_transfer_event` | Credits leaving a token's treasury: sender, receiver, serial |
+| `contract_cache` | Discovered Guardian WIPE/RETIRE contracts and their log watermark |
+| `project_geometry` | Project polygons |
 
 ### Materialized views
 

@@ -67,11 +67,59 @@ Arriving here from elsewhere in the Atlas narrows the list and shows a banner sa
 Each has a **Clear filter** link that returns you to the full list. If a count looks unexpectedly
 small, check for one of these banners before anything else.
 
-## The credit record
+## The issuance record
 
-Clicking a row opens the token's own page. The header carries the token name, symbol, token id and
-the project it is connected to. Content is split across four tabs, and the active tab appears in the
-address bar so you can link straight to it.
+Clicking a row opens that **issuance** — a single minting event — rather than the token as a whole.
+This matters because one token is often minted several times, for different projects and vintages;
+a token-level page cannot tell those apart.
+
+The header carries the token name, symbol, type and whether the issuance reconciles, followed by three
+headline figures: the amount **declared**, the amount **minted on-chain**, and the reconciliation
+status. Content is then split across four tabs, and the active tab appears in the address bar so you
+can link straight to it.
+
+### Summary
+
+Where the issuance came from and what it produced: the project, methodology and registry it belongs
+to, and its **serial ranges**.
+
+Serials are listed as ranges — `1–42,278` rather than forty-two thousand rows — with the number of
+credits, whether they are active or retired, and **which account holds them**. A range is split
+whenever the state or the holder changes, so every serial inside one is identical in both respects.
+The holder column is blank for retired credits, which no longer have one, and while ownership is still
+being synced.
+
+### Transactions
+
+Retirements and transfers of this issuance's credits, newest first, with the date, the accounts
+involved, how many credits moved and which serials.
+
+An issuance can show retired credits here and still list no retirement transaction. That is not a
+gap in the page: retirement is counted from the ledger marking serials destroyed, but a retirement
+*transaction* only exists where the registry used Guardian's retirement contract. Credits wiped
+outside it are genuinely retired, yet nothing on-chain records who did it or when. The page says so
+where it happens.
+
+### Token Information
+
+The token behind the issuance: current supply, credits minted across every project using that token
+and for this issuance's project alone, the token's other issuances, and the projects sharing it.
+
+A token serving several projects is normal. The issuance itself always belongs to exactly one — shown
+under Summary.
+
+### Advanced
+
+The on-chain identifiers: token id, policy topic, creation date, issuer DID, and the consensus
+timestamps of both the mint credential and its verifiable presentation. Each can be copied, and those
+that resolve on Hedera link straight to HashScan.
+
+---
+
+## The token record
+
+Older links to a token rather than an issuance open the token's newest issuance. Tokens with no
+Guardian mint credential behind them keep the token-level view described below.
 
 ### Details
 
@@ -87,10 +135,24 @@ The main tab.
 
 **When total minted and current supply disagree.** This is normal and expected, not an error. Minting
 only ever adds; supply falls when credits are **retired** (permanently destroyed for offsetting).
-A gap between the two therefore tells you that some of the credits have been used. The interface flags
-the difference with an explanatory tooltip where the two figures sit side by side. Note that
+A gap between the two therefore tells you that some of the credits have been used. Note that
 **transfers** do not change supply at all — moving credits between holders leaves the total
 untouched.
+
+**Declared vs actually minted.** These are different things and the Atlas shows both. The *declared*
+amount is what the registry's Guardian mint document said it was issuing. The *minted on-chain*
+amount is what the Hedera ledger actually recorded. A warning appears when they disagree:
+
+- **Fewer minted than declared** — the mint partially failed, or never completed. Retirement is *not*
+  the cause: retired credits still count as minted.
+- **More minted than declared** — extra credits were minted on the ledger beyond what the document
+  claimed. Nothing forces the two to match; they are separate actions by the registry.
+- **Not matched yet** — the on-chain mint has not been linked to the document yet, so the declared
+  figure is shown as a fallback. This resolves itself as syncing catches up.
+
+**What the Atlas does not count.** Only credits issued through a Guardian mint document the Atlas has
+synced are tracked. Serials minted outside that flow have no project, methodology or vintage behind
+them, so they are deliberately excluded rather than guessed at.
 
 ### Transactions
 

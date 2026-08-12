@@ -694,6 +694,8 @@ export class PgCreditRepository extends CreditRepository {
             document: Record<string, unknown> | null;
             projectKey: string | null;
             type: string | null;
+            mintedAmount: string | null;
+            mintMatchStatus: string | null;
         }> = await this.dataSource.query(
             `SELECT
                 m."consensusTimestamp",
@@ -702,7 +704,12 @@ export class PgCreditRepository extends CreditRepository {
                 m.documents->'credentialSubject'->0->>'date'   AS date,
                 m.documents                                    AS document,
                 pml.project_key                                AS "projectKey",
-                m.documents->'credentialSubject'->0->>'type'  AS type
+                m.documents->'credentialSubject'->0->>'type'  AS type,
+                -- What the ledger actually minted for this event, so the UI can
+                -- contrast it with the declared amount above rather than against
+                -- live token supply (which is net of retirements).
+                pml.minted_amount                              AS "mintedAmount",
+                pml.mint_match_status                          AS "mintMatchStatus"
              FROM message m
              LEFT JOIN project_mint_link pml
                  ON pml.mint_consensus_timestamp = m."consensusTimestamp"

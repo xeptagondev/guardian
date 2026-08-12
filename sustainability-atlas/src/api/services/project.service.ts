@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
     ProjectQueryDto,
     ProjectResponseDto,
@@ -6,7 +6,10 @@ import {
     ProjectIdsDto,
     PaginatedProjectsDto,
     ProjectFilterOptionsDto,
+    MintSerialsResponseDto,
+    MintTransactionsResponseDto,
 } from '../dto/project.dto';
+import { PaginatedResponse } from '../dto/pagination.dto';
 import { NetworkDataSourceRegistry } from '../database/network-datasource.registry';
 import { PgProjectRepository } from '../repositories/pg-project.repository';
 import { ProjectRepository } from '../repositories/project.repository';
@@ -142,6 +145,60 @@ export class ProjectsService {
         const row = await repo.findById(id);
         if (!row) return null;
         return ProjectResponseDto.fromRow(row, network, true);
+    }
+
+    /**
+     * NFT serials attributed to one of this project's mint events, resolved via
+     * Guardian's NFT-metadata → mint-VP linkage. Throws NotFound when the mint
+     * isn't linked to this project, so a project's namespace can't be used to
+     * read another project's serials.
+     */
+    async findMintSerials(
+        network: string,
+        id: string | null,
+        mintConsensusTimestamp: string,
+        page: number,
+        limit: number,
+    ): Promise<MintSerialsResponseDto> {
+        const repo = this.getRepository(network);
+        const result = await repo.findMintSerials(id, mintConsensusTimestamp, page, limit);
+        if (!result) {
+            throw new NotFoundException(
+                id
+                    ? `Mint "${mintConsensusTimestamp}" is not linked to project "${id}" on ${network}`
+                    : `Mint "${mintConsensusTimestamp}" not found on ${network}`,
+            );
+        }
+        const { ranges, totalRanges, ...rest } = result;
+        // Pagination counts ranges, not serials — the two differ by orders of
+        // magnitude, and it is ranges the caller is paging through.
+        return { ...rest, ...new PaginatedResponse(ranges, totalRanges, page, limit) };
+    }
+
+    /** Retirement and transfer transactions for one issuance, or for the whole project when no mint is given. */
+    async findMintTransactions(
+        network: string,
+        id: string,
+        mintConsensusTimestamp: string | null,
+        page: number,
+        limit: number,
+        sortBy?: string,
+        sortDir?: 'asc' | 'desc',
+    ): Promise<MintTransactionsResponseDto> {
+        const repo = this.getRepository(network);
+        const result = await repo.findMintTransactions(id, mintConsensusTimestamp, page, limit, sortBy, sortDir);
+        if (!result) {
+            throw new NotFoundException(
+                mintConsensusTimestamp
+                    ? `Mint "${mintConsensusTimestamp}" is not linked to project "${id}" on ${network}`
+                    : `Project "${id}" has no linked issuances on ${network}`,
+            );
+        }
+        return {
+            mintConsensusTimestamp,
+            transferHistorySynced: result.transferHistorySynced,
+            ...new PaginatedResponse(result.transactions, result.total, page, limit),
+        };
     }
 
     async findActivity(network: string, id: string): Promise<ActivityEventDto[]> {

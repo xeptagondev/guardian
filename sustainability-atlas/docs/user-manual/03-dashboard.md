@@ -72,6 +72,11 @@ The same idea applied to retirements — credits permanently removed from circul
 Read together with the issuance trend, this is where you see whether credits are being used or merely
 created.
 
+The chart totals the same credits as the **Total Retired** stat card, so the two always agree. Each
+credit is placed in time by its retirement record where a registry's retirement contract wrote one,
+and otherwise by its last movement — the point at which it left circulation. Retirements made outside
+a retirement contract are therefore included, dated as precisely as the ledger allows.
+
 ## Vintage Distribution
 
 Issued credits grouped by **vintage year** — the year the emission reduction actually happened, which

@@ -13,6 +13,9 @@ export const BASE_QUEUE_NAMES = {
     IPFS_FETCH: 'ipfs-files',
     POLICY_DECODE: 'policy-decode',
     TOKEN_SYNC: 'mirror-node-tokens',
+    // Retirement events read from Guardian's RETIRE smart contracts. Separate
+    // from TOKEN_SYNC because the unit of work is a contract, not a token.
+    RETIRE_SYNC: 'mirror-node-retirements',
     MV_REFRESH: 'maintenance-refresh-mvs',
     BUSINESS_VIEW_BUILD: 'maintenance-build-business-views',
     PROJECT_REPARSE: 'project-reparse',
@@ -46,6 +49,7 @@ export const QUEUE_NAMES = {
     IPFS_FETCH: qname(BASE_QUEUE_NAMES.IPFS_FETCH),
     POLICY_DECODE: qname(BASE_QUEUE_NAMES.POLICY_DECODE),
     TOKEN_SYNC: qname(BASE_QUEUE_NAMES.TOKEN_SYNC),
+    RETIRE_SYNC: qname(BASE_QUEUE_NAMES.RETIRE_SYNC),
     MV_REFRESH: qname(BASE_QUEUE_NAMES.MV_REFRESH),
     BUSINESS_VIEW_BUILD: qname(BASE_QUEUE_NAMES.BUSINESS_VIEW_BUILD),
     PROJECT_REPARSE: qname(BASE_QUEUE_NAMES.PROJECT_REPARSE),
@@ -149,6 +153,17 @@ export function getQueueConfigs(): QueueDefinition[] {
                 removeOnFail: envInt('TOKEN_SYNC_REMOVE_ON_FAIL', 2000),
             },
             concurrency: envInt('WORKER_TOKEN_CONCURRENCY', 2),
+        },
+        {
+            name: QUEUE_NAMES.RETIRE_SYNC,
+            defaultJobOptions: {
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 5000 },
+                timeout: 90000,
+                removeOnComplete: envInt('RETIRE_SYNC_REMOVE_ON_COMPLETE', 500),
+                removeOnFail: envInt('RETIRE_SYNC_REMOVE_ON_FAIL', 2000),
+            },
+            concurrency: envInt('WORKER_RETIRE_CONCURRENCY', 2),
         },
         {
             name: QUEUE_NAMES.MV_REFRESH,

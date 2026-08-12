@@ -319,6 +319,20 @@ async function downloadCredits() {
         downloading.value = false;
     }
 }
+/**
+ * Each row is one issuance, so it links to that issuance — the list has carried
+ * `mintConsensusTimestamp` all along and used it only as a Vue key. Rows with no
+ * mint link (a token the Atlas indexed but that has no Guardian mint credential)
+ * fall back to the token page.
+ */
+function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensusTimestamp?: string | null }): string {
+    if (c.mintConsensusTimestamp) {
+        return `/issuances/${encodeURIComponent(c.mintConsensusTimestamp)}`;
+    }
+    return c.projectId
+        ? `/credits/${encodeURIComponent(c.tokenId)}?projectId=${encodeURIComponent(c.projectId)}`
+        : `/credits/${encodeURIComponent(c.tokenId)}`;
+}
 </script>
 
 <template>
@@ -472,7 +486,7 @@ async function downloadCredits() {
 
                         <!-- Data rows -->
                         <template v-else>
-                            <tr v-for="c in rows" :key="`${c.tokenId}|${c.projectId ?? ''}|${c.mintConsensusTimestamp ?? ''}`" class="hover:bg-muted/30 transition-colors cursor-pointer" @click="navigateTo(c.projectId ? `/credits/${encodeURIComponent(c.tokenId)}?projectId=${encodeURIComponent(c.projectId)}` : `/credits/${encodeURIComponent(c.tokenId)}`)">
+                            <tr v-for="c in rows" :key="`${c.tokenId}|${c.projectId ?? ''}|${c.mintConsensusTimestamp ?? ''}`" class="hover:bg-muted/30 transition-colors cursor-pointer" @click="navigateTo(rowTarget(c))">
                                 <td class="py-3 px-4 whitespace-nowrap">
                                     <div class="font-medium text-foreground">{{ c.name ?? '-' }}</div>
                                     <div class="text-[11px] text-muted-foreground/60 font-mono">{{ c.tokenId ?? '-' }}</div>

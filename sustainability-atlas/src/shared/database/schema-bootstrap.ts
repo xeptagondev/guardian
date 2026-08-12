@@ -1,6 +1,20 @@
+import { Logger } from '@nestjs/common';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { getSystemDatabaseConfig } from '@shared/config/database.config';
+import { MATERIALIZED_VIEWS } from '@shared/materialized-views';
 import { hashPasswordRaw } from '@shared/security/password-hash.util';
+
+/** Rows per pass of the nft_cache."metadataTimestamp" backfill — large enough to
+ *  keep the full-table walk to a handful of passes, small enough that each
+ *  statement stays a short transaction on a multi-million-row table. */
+const METADATA_BACKFILL_BATCH = 50_000;
+
+/** How long the backfill may run per boot. It resumes on the next boot, and the
+ *  scheduler's NFT re-sync decodes rows through the normal write path meanwhile,
+ *  so a partial pass costs freshness rather than correctness. */
+const METADATA_BACKFILL_BUDGET_MS = 60_000;
+
+const bootstrapLogger = new Logger('SchemaBootstrap');
 
 /**
  * Post-TypeORM schema modifications that can't be expressed via decorators.
@@ -158,6 +172,331 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     await dataSource.query(`
         CREATE INDEX IF NOT EXISTS idx_pml_token_id
             ON project_mint_link (token_id)
+    `);
+
+    // ── Serial → mint-event mapping (Guardian NFT-metadata convention) ─────
+    // Guardian base64-encodes the mint VP-Document's consensus timestamp into
+    // each NFT's metadata. nft_cache."metadataTimestamp" (added via the entity)
+    // holds the decoded value; the columns below link each mint row to its VP
+    // and carry the serial-count reconciliation computed by serial-mint-linker.
+    await dataSource.query(`
+        ALTER TABLE project_mint_link
+        ADD COLUMN IF NOT EXISTS vp_consensus_timestamp VARCHAR(30)
+    `);
+    await dataSource.query(`
+        ALTER TABLE project_mint_link
+        ADD COLUMN IF NOT EXISTS serial_count INT
+    `);
+    await dataSource.query(`
+        ALTER TABLE project_mint_link
+        ADD COLUMN IF NOT EXISTS serial_retired_count INT
+    `);
+    // Serials of this mint no longer held by the token's treasury and not
+    // retired — i.e. transferred to a third party. Non-fungible only: fungible
+    // balances can't be traced back to the mint that created them.
+    await dataSource.query(`
+        ALTER TABLE project_mint_link
+        ADD COLUMN IF NOT EXISTS serial_transferred_count INT
+    `);
+    // Real amount actually minted on-chain, in display units: the serial count
+    // for non-fungible tokens, the summed mint-transaction amount scaled by
+    // token decimals for fungible ones. NUMERIC because fungible amounts are
+    // fractional once decimals are applied.
+    await dataSource.query(`
+        ALTER TABLE project_mint_link
+        ADD COLUMN IF NOT EXISTS minted_amount NUMERIC
+    `);
+    // verified | mismatch | unmatched | ambiguous | NULL (= no VP resolved yet).
+    // Named for the mint, not the serial: fungible mints are reconciled too and
+    // have no serials. Renamed in place so databases carrying the earlier
+    // serial_match_status keep their values instead of silently resetting.
+    await dataSource.query(`
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'project_mint_link'
+                         AND column_name = 'serial_match_status')
+               AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name = 'project_mint_link'
+                                 AND column_name = 'mint_match_status') THEN
+                ALTER TABLE project_mint_link
+                    RENAME COLUMN serial_match_status TO mint_match_status;
+            END IF;
+        END
+        $$
+    `);
+    await dataSource.query(`
+        ALTER TABLE project_mint_link
+        ADD COLUMN IF NOT EXISTS mint_match_status VARCHAR(16)
+    `);
+    // MintToken VC amounts can be fractional for fungible tokens ("250.5"); the
+    // original BIGINT forced the linker to round and lose the fraction.
+    //
+    // The materialized views read this column, so Postgres refuses the type
+    // change while they exist. They are dropped and rebuilt around it here
+    // rather than left to MvRefreshProcessor: bootstrapSchema also runs in
+    // guardian-sync, which has no refresh loop to put them back. Their
+    // mv_registry hashes are cleared so the refresh processor still owns
+    // definition changes from here on.
+    const [amountCol]: Array<{ data_type: string }> = await dataSource.query(`
+        SELECT data_type FROM information_schema.columns
+        WHERE table_name = 'project_mint_link' AND column_name = 'amount'
+    `);
+    if (amountCol && amountCol.data_type !== 'numeric') {
+        for (const mv of [...MATERIALIZED_VIEWS].reverse()) {
+            await dataSource.query(`DROP MATERIALIZED VIEW IF EXISTS ${mv.name} CASCADE`);
+        }
+        await dataSource.query(`
+            ALTER TABLE project_mint_link ALTER COLUMN amount TYPE NUMERIC USING amount::numeric
+        `);
+        for (const mv of MATERIALIZED_VIEWS) {
+            await dataSource.query(mv.createSql);
+            if (mv.indexSql) {
+                await dataSource.query(mv.indexSql);
+            }
+        }
+        const [registryTable] = await dataSource.query(`SELECT to_regclass('mv_registry') AS t`);
+        if (registryTable?.t) {
+            await dataSource.query(`DELETE FROM mv_registry WHERE name = ANY($1::text[])`, [
+                MATERIALIZED_VIEWS.map((mv) => mv.name),
+            ]);
+        }
+    }
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_pml_vp_ts
+            ON project_mint_link (vp_consensus_timestamp)
+            WHERE vp_consensus_timestamp IS NOT NULL
+    `);
+
+    // Add the decoded-timestamp column here as well as on the entity:
+    // bootstrapSchema also runs BEFORE TypeORM synchronize (worker pre-boot,
+    // guardian-sync with synchronize off), so the backfill/index below cannot
+    // rely on synchronize having created it. Same type as the entity column.
+    await dataSource.query(`
+        ALTER TABLE nft_cache
+        ADD COLUMN IF NOT EXISTS "metadataTimestamp" varchar(30)
+    `);
+    // Current holder per serial. Declared here as well as on the entity for the
+    // same reason as metadataTimestamp: bootstrapSchema also runs before
+    // TypeORM synchronize, and in guardian-sync where synchronize is off.
+    await dataSource.query(`
+        ALTER TABLE nft_cache
+        ADD COLUMN IF NOT EXISTS "accountId" varchar(30)
+    `);
+
+    // Backfill nft_cache."metadataTimestamp" for rows synced before the column
+    // existed. Set-based and batched: nft_cache holds millions of rows, so the
+    // per-row plpgsql loop this replaces was orders of magnitude too slow.
+    //
+    // Two guards make decoding safe to run over a whole batch at once:
+    //   - the length/charset prefilter keeps decode() off anything that isn't
+    //     base64 of a 20-char consensus timestamp (IPFS CIDs are 56/64/84 chars),
+    //   - LATIN1 rather than UTF8, because convert_from(..., 'UTF8') *throws* on
+    //     non-UTF8 bytes and would abort the whole statement. Every byte is valid
+    //     LATIN1, and only pure-ASCII results survive the timestamp regex, so the
+    //     two are equivalent for values we accept.
+    // Idempotent — only touches rows still NULL, so re-runs settle at zero.
+    //
+    // The loop walks an `id` watermark rather than re-querying "still NULL"
+    // rows: a candidate that decodes to something other than a timestamp is
+    // deliberately left NULL, so a NULL-driven loop would re-select it forever.
+    //
+    // Time-budgeted, because this must not hold up boot: a cold 5M-row table
+    // costs ~4s per batch just to find candidates, so a full pass can run for
+    // tens of minutes. Whatever is left over is not lost — the sync scheduler
+    // re-syncs every NFT token from serial 0, which rewrites metadataTimestamp
+    // through the normal upsert path, and the next boot resumes here. Until a
+    // mint's serials are decoded the linker simply reports it 'unmatched'.
+    const backfillDeadline = Date.now() + METADATA_BACKFILL_BUDGET_MS;
+    let backfillCursor = '0';
+    let backfilled = 0;
+    let backfillDone = true;
+    for (;;) {
+        if (Date.now() > backfillDeadline) {
+            backfillDone = false;
+            break;
+        }
+        const [batch]: Array<{ max_id: string | null; seen: string }> = await dataSource.query(
+            `
+            WITH candidate AS (
+                SELECT id, convert_from(decode(metadata, 'base64'), 'LATIN1') AS ts
+                FROM nft_cache
+                WHERE metadata IS NOT NULL
+                  AND "metadataTimestamp" IS NULL
+                  AND id > $1::bigint
+                  AND length(metadata) = 28
+                  AND metadata ~ '^[A-Za-z0-9+/]{27}=$'
+                ORDER BY id
+                LIMIT ${METADATA_BACKFILL_BATCH}
+            ), applied AS (
+                UPDATE nft_cache SET "metadataTimestamp" = c.ts
+                FROM candidate c
+                WHERE nft_cache.id = c.id AND c.ts ~ '^\\d{10}\\.\\d{9}$'
+                RETURNING 1
+            )
+            SELECT MAX(id)::text AS max_id, COUNT(*)::text AS seen FROM candidate
+            `,
+            [backfillCursor],
+        );
+        if (!batch || batch.seen === '0' || batch.max_id === null) {
+            break;
+        }
+        backfilled += Number(batch.seen);
+        backfillCursor = batch.max_id;
+    }
+    if (backfilled > 0) {
+        bootstrapLogger.log(
+            `nft_cache.metadataTimestamp backfill: ${backfilled} row(s) this pass` +
+            (backfillDone ? ' (complete)' : ' — time budget reached, resuming next boot'),
+        );
+    }
+
+    // Serial lookup per mint event: (tokenId, metadataTimestamp) equality join
+    // from project_mint_link — partial, most non-Guardian serials are NULL.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_nft_cache_metadata_ts
+        ON nft_cache ("tokenId", "metadataTimestamp")
+        WHERE "metadataTimestamp" IS NOT NULL
+    `);
+
+    // ── Fungible mint transactions ─────────────────────────────────────────
+    // Fungible tokens have no per-unit metadata, so Guardian carries the mint
+    // VP-Document's consensus timestamp in the TOKENMINT transaction memo
+    // instead. This table is the fungible counterpart of nft_cache: one row per
+    // on-chain mint transaction, holding the real amount the ledger minted.
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS token_mint_tx (
+            consensus_timestamp    VARCHAR(30) PRIMARY KEY,
+            token_id               VARCHAR(30) NOT NULL,
+            vp_consensus_timestamp VARCHAR(30),
+            amount_raw             NUMERIC     NOT NULL,
+            last_update            BIGINT      NOT NULL
+        )
+    `);
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_tmt_token_vp
+            ON token_mint_tx (token_id, vp_consensus_timestamp)
+    `);
+    // Highest TOKENMINT consensus timestamp already ingested for this token, so
+    // each sync pass asks Mirror Node only for transactions newer than that.
+    await dataSource.query(`
+        ALTER TABLE token_cache
+        ADD COLUMN IF NOT EXISTS "mintTxWatermark" VARCHAR(30)
+    `);
+
+    // ── Retirement ledger ──────────────────────────────────────────────────
+    // Guardian deploys a RETIRE smart contract per policy; executing a
+    // retirement emits an on-chain event naming the retiring account, the
+    // token, the fungible amount and — for non-fungible tokens — the exact
+    // serials. That is a documented retirement record, as opposed to inferring
+    // retirement from Mirror Node's nft_cache.deleted flag.
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS contract_cache (
+            contract_id   VARCHAR(30) PRIMARY KEY,
+            contract_type VARCHAR(20),
+            topic_id      VARCHAR(20),
+            owner         VARCHAR(200),
+            log_watermark VARCHAR(30),
+            last_update   BIGINT NOT NULL
+        )
+    `);
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_contract_cache_type ON contract_cache (contract_type)
+    `);
+    // One row per (event, token). log_index is part of the key because a single
+    // transaction can retire several tokens, and the same event is echoed more
+    // than once in Mirror Node's log feed.
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS token_retire_event (
+            consensus_timestamp VARCHAR(30) NOT NULL,
+            log_index           INT         NOT NULL,
+            token_id            VARCHAR(30) NOT NULL,
+            contract_id         VARCHAR(30) NOT NULL,
+            account_id          VARCHAR(30),
+            amount              NUMERIC,
+            serials             INT[],
+            PRIMARY KEY (consensus_timestamp, log_index, token_id)
+        )
+    `);
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_tre_token ON token_retire_event (token_id)
+    `);
+
+    // ── Transfer ledger ────────────────────────────────────────────────────
+    // Guardian writes no transfer document, so the only record of a credit
+    // changing hands is the Hedera CRYPTOTRANSFER itself. One row per
+    // (transaction, serial): a single distribution moves many serials at once,
+    // and the per-serial grain is what lets a transfer be tied back to the mint
+    // event that created the serial.
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS token_transfer_event (
+            consensus_timestamp VARCHAR(30) NOT NULL,
+            token_id            VARCHAR(30) NOT NULL,
+            serial_number       INT         NOT NULL,
+            sender_account_id   VARCHAR(30),
+            receiver_account_id VARCHAR(30),
+            PRIMARY KEY (consensus_timestamp, token_id, serial_number)
+        )
+    `);
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_tte_token_serial
+            ON token_transfer_event (token_id, serial_number)
+    `);
+    // Retired credits are a tiny fraction of all serials (6.5k of 5M on
+    // testnet), so the retirement aggregates read them through a partial index
+    // rather than scanning every serial ever minted.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_nft_cache_deleted
+            ON nft_cache ("tokenId", "serialNumber", "metadataTimestamp")
+            WHERE deleted
+    `);
+    // Highest CRYPTOTRANSFER consensus timestamp already scanned for this
+    // token's TREASURY, so each pass asks Mirror Node only for newer transfers.
+    //
+    // Held per token but written per treasury: Mirror Node has no per-token
+    // transfer feed, and one registry treasury commonly issues hundreds of
+    // tokens (the busiest testnet account backs 1,072). A single walk of that
+    // account therefore serves all of them and advances every row's watermark
+    // together, so every token of a treasury always carries the same value.
+    await dataSource.query(`
+        ALTER TABLE token_cache
+        ADD COLUMN IF NOT EXISTS "transferTxWatermark" VARCHAR(30)
+    `);
+    // Lower bound for a treasury walk: no transfer of a token can predate the
+    // token. Without it a sweep starts at genesis and pages through years of
+    // unrelated account activity.
+    await dataSource.query(`
+        ALTER TABLE token_cache
+        ADD COLUMN IF NOT EXISTS "createdTimestamp" VARCHAR(30)
+    `);
+    // Seed it for tokens cached before the column existed, so the first sweep
+    // does not have to wait for every token to re-sync. A token's first mint is
+    // a sound lower bound — serials cannot move before they exist — and the
+    // token's next sync replaces it with the true creation timestamp. Done here,
+    // once, because the sweep reads this column thousands of times per pass and
+    // must stay a single-table lookup.
+    await dataSource.query(`
+        UPDATE token_cache tc
+        SET "createdTimestamp" = pml.earliest_mint
+        FROM (
+            SELECT token_id, MIN(mint_consensus_timestamp) AS earliest_mint
+            FROM project_mint_link
+            WHERE token_id IS NOT NULL
+            GROUP BY token_id
+        ) pml
+        WHERE tc."tokenId" = pml.token_id
+          AND tc."createdTimestamp" IS NULL
+    `);
+    // Superseded by the per-treasury watermark above. Held nothing that is not
+    // recomputable from token_cache, so dropping it loses no ingested data.
+    await dataSource.query(`DROP TABLE IF EXISTS treasury_transfer_scan`);
+
+    // Backs the VC→VP reverse lookup in serial-mint-linker:
+    // options->'relationships' @> to_jsonb(mint_consensus_timestamp).
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_vp_relationships
+        ON message USING GIN ((options->'relationships') jsonb_path_ops)
+        WHERE type = 'VP-Document'
     `);
 
     // Partial index for the methodology LATERAL in the credits query:
@@ -324,6 +663,19 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_message_standard_registry_cts
         ON message ("consensusTimestamp" DESC)
         WHERE type = 'Standard Registry'
+    `);
+
+    // Resolves a token's creation message by token id — the token/issuance
+    // detail pages read the creation date and issuer DID from it.
+    //
+    // Without this the planner falls back to idx_message_other_activity_cts and
+    // walks the whole Token partition applying the jsonb filter row by row:
+    // measured at 1,120 ms and 222,118 rows discarded on testnet for a single
+    // lookup. As an expression index it is a straight probe.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_token_options_token_id
+        ON message ((options->>'tokenId'))
+        WHERE type = 'Token'
     `);
 
     // Backs the Network Activity feed's "Other" bucket (Token / DID-Document /
