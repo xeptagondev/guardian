@@ -2582,8 +2582,7 @@
         },
         "transactions": {
             "title": "Transacciones",
-            "subtitle": "Retiros y transferencias de los créditos que produjo esta emisión.",
-            "undocumentedRetirement": "Esta emisión tiene {count} crédito(s) retirado(s). Los retiros solo aparecen abajo cuando el registro usó el contrato de retiro de Guardian; los créditos eliminados fuera de él están realmente retirados, pero la cadena no registra ninguna transacción que indique quién los retiró ni cuándo."
+            "subtitle": "Retiros y transferencias de los créditos que produjo esta emisión."
         },
         "token": {
             "title": "Información del token",

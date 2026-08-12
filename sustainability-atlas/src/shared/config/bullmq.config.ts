@@ -90,7 +90,7 @@ export function getQueueConfigs(): QueueDefinition[] {
                 removeOnComplete: envInt('TOPIC_SYNC_REMOVE_ON_COMPLETE', 1000),
                 removeOnFail: envInt('TOPIC_SYNC_REMOVE_ON_FAIL', 5000),
             },
-            concurrency: envInt('WORKER_TOPIC_CONCURRENCY', 5),
+            concurrency: envInt('WORKER_TOPIC_CONCURRENCY', 20),
         },
         {
             name: QUEUE_NAMES.TOPIC_SYNC_PRIORITY,
@@ -101,8 +101,7 @@ export function getQueueConfigs(): QueueDefinition[] {
                 removeOnComplete: envInt('TOPIC_SYNC_PRIORITY_REMOVE_ON_COMPLETE', 500),
                 removeOnFail: envInt('TOPIC_SYNC_PRIORITY_REMOVE_ON_FAIL', 1000),
             },
-            // Queue stays small by construction — 2 is sufficient.
-            concurrency: envInt('WORKER_TOPIC_PRIORITY_CONCURRENCY', 2),
+            concurrency: envInt('WORKER_TOPIC_PRIORITY_CONCURRENCY', 5),
         },
         {
             name: QUEUE_NAMES.MESSAGE_PARSE,

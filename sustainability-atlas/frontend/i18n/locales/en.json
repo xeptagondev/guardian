@@ -2584,8 +2584,7 @@
         },
         "transactions": {
             "title": "Transactions",
-            "subtitle": "Retirements and transfers of the credits this issuance produced.",
-            "undocumentedRetirement": "This issuance has {count} retired credit(s). Retirements only appear below when the registry used Guardian's retirement contract; credits wiped outside it are genuinely retired, but the ledger records no transaction naming who retired them or when."
+            "subtitle": "Retirements and transfers of the credits this issuance produced."
         },
         "token": {
             "title": "Token Information",

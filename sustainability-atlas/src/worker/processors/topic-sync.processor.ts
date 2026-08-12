@@ -13,6 +13,10 @@ export interface TopicSyncJobData {
     isOrgTopic: boolean;
     // Consecutive empty-poll count; drives backoff. Reset to 0 on real messages.
     emptyPollStreak?: number;
+    // Set by message-process.processor.ts on first-ever discovery of a topic so
+    // it gets an expedited initial sync on TOPIC_SYNC_PRIORITY instead of queuing
+    // behind TOPIC_SYNC's bulk backlog.
+    oneTimePriority?: boolean;
 }
 
 @Processor(QUEUE_NAMES.TOPIC_SYNC)

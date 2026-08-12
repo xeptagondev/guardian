@@ -20,6 +20,7 @@ import {
 // Processor imports — we inject the live instances so we can access their
 // underlying BullMQ Worker (via WorkerHost.worker) and mutate concurrency.
 import { TopicSyncProcessor } from '../processors/topic-sync.processor';
+import { TopicSyncPriorityProcessor } from '../processors/topic-sync-priority.processor';
 import { MessageProcessProcessor } from '../processors/message-process.processor';
 import { TokenSyncProcessor } from '../processors/token-sync.processor';
 import { IpfsFetchProcessor } from '../processors/ipfs-fetch.processor';
@@ -73,6 +74,7 @@ export class QueueAutoscalerService implements OnApplicationBootstrap, OnModuleD
 
         // Queues
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly topicPriorityQueue: Queue,
         @InjectQueue(QUEUE_NAMES.MESSAGE_PARSE) private readonly messageQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
@@ -85,6 +87,7 @@ export class QueueAutoscalerService implements OnApplicationBootstrap, OnModuleD
         // only registers processors for active queues. NestJS resolves missing
         // optional providers as undefined rather than throwing.
         @Optional() private readonly topicProcessor: TopicSyncProcessor,
+        @Optional() private readonly topicPriorityProcessor: TopicSyncPriorityProcessor,
         @Optional() private readonly messageProcessor: MessageProcessProcessor,
         @Optional() private readonly tokenProcessor: TokenSyncProcessor,
         @Optional() private readonly ipfsProcessor: IpfsFetchProcessor,
@@ -178,6 +181,12 @@ export class QueueAutoscalerService implements OnApplicationBootstrap, OnModuleD
                 queueName: QUEUE_NAMES.TOPIC_SYNC,
                 queue: this.topicQueue,
                 processor: this.topicProcessor,
+            },
+            {
+                baseName: BASE_QUEUE_NAMES.TOPIC_SYNC_PRIORITY,
+                queueName: QUEUE_NAMES.TOPIC_SYNC_PRIORITY,
+                queue: this.topicPriorityQueue,
+                processor: this.topicPriorityProcessor,
             },
             {
                 baseName: BASE_QUEUE_NAMES.MESSAGE_PARSE,

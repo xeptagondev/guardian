@@ -22,6 +22,10 @@ import { isRegistryAllowlistActive, isTopicAllowedFromSeed } from '@shared/confi
 export interface MessageProcessJobData {
     consensusTimestamp: string;
     topicId: string;
+    // True when the topic-sync job that found this message ran on
+    // TOPIC_SYNC_PRIORITY (root/registry topic, guardian-sync events, or a
+    // topic that itself cascaded from one of those).
+    fromPriorityLane?: boolean;
 }
 
 // Message types for which IPFS fetch is always enqueued immediately (not VCs).
@@ -43,6 +47,7 @@ export class MessageProcessProcessor extends WorkerHost {
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
         @InjectQueue(QUEUE_NAMES.POLICY_DECODE) private readonly policyDecodeQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly topicPriorityQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
     ) {
         super();
@@ -53,7 +58,7 @@ export class MessageProcessProcessor extends WorkerHost {
     }
 
     async process(job: Job<MessageProcessJobData>): Promise<void> {
-        const { consensusTimestamp, topicId } = job.data;
+        const { consensusTimestamp, topicId, fromPriorityLane = false } = job.data;
 
         if (isTopicBlocked(topicId)) {
             this.logger.debug(`Topic ${topicId} is blocklisted — skipping message ${consensusTimestamp}`);
@@ -223,16 +228,14 @@ export class MessageProcessProcessor extends WorkerHost {
                 );
                 continue;
             }
-            // No priority: prioritized jobs are starved here because the
-            // continuous topic re-poll stream keeps the `wait` list non-empty,
-            // so the worker never drains the `prioritized` set. Enqueueing
-            // discovery on the same `wait` FIFO guarantees it is processed.
-            await this.topicQueue.add(
+            const targetQueue = fromPriorityLane ? this.topicPriorityQueue : this.topicQueue;
+            await targetQueue.add(
                 'sync',
                 {
                     topicId: topic.topicId,
                     fromSequenceNumber: 0,
                     isOrgTopic: topic.isOrgTopic,
+                    oneTimePriority: fromPriorityLane,
                 },
                 {
                     jobId: `topic-${topic.topicId}-0`,

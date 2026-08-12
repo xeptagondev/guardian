@@ -121,8 +121,28 @@ The 3 failing suites are pre-existing and unrelated to current work — gate on
   worker drains the always-non-empty plain `wait` list and never/rarely falls through to
   `prioritized`; `lifo` jumps forward once but its queue position then grows again as routine churn
   keeps landing at the same end. The actual fix is a **physically separate queue**
-  (`TOPIC_SYNC_PRIORITY` — root/registry topic + guardian-sync event syncs only, always small by
-  construction) instead of ordering tricks inside the 100k+-job bulk queue.
+  (`TOPIC_SYNC_PRIORITY` — root/registry topic, guardian-sync event syncs, and topics discovered
+  from priority-lane messages via `oneTimePriority`, see below) instead of ordering tricks inside
+  the 100k+-job bulk queue.
+- `TOPIC_SYNC`'s concurrency default (5) and the autoscaler's ceiling formula (`baseline*4` in
+  `queue-autoscaler.service.ts`, so 5→20) were both far too small for 100k+ testnet topics — the
+  queue grew into a multi-million backlog (all genuinely "waiting", not stuck "delayed") that
+  starved *every* topic sitting behind it, including topics newly discovered via
+  `message-process.processor.ts`'s child-topic discovery. Symptom looked exactly like "guardian-sync
+  triggers fine, but only the one triggered topic ever actually fetches" — the topic guardian-sync
+  routes gets priority treatment, but the related topics discovered *from* its messages (schemas,
+  sub-instances) landed on the bulk queue behind the backlog. Fixed two ways together: raised the
+  default concurrency to 20 (`WORKER_TOPIC_CONCURRENCY`, also in `.env`/`.env.example` since an
+  explicit override there masks a code-default bump), and made topic discovery lineage-aware:
+  `MESSAGE_PARSE` job data carries `fromPriorityLane` (set by whichever topic-sync processor found
+  the message), and `message-process.processor.ts` only gives a discovered topic
+  `oneTimePriority: true` (routes to `TOPIC_SYNC_PRIORITY`) when `fromPriorityLane` is true —
+  topics discovered from an ordinary bulk-crawl message stay on the bulk queue. This keeps the
+  priority lane scoped to guardian-sync's own lineage instead of absorbing the whole crawl. A
+  `oneTimePriority` topic still hands itself back to bulk once caught up (empty poll or partial
+  page), so it doesn't inherit bulk's steady-state growth either. If `.env` pins
+  `WORKER_..._CONCURRENCY` or `WORKER_..._MAX_CONCURRENCY`, remember to update it there too — env
+  always wins over the code default.
 - `topic_cache` rows that keep returning empty polls back off exponentially
   (`emptyPollStreak` in topic-sync job data, capped by `MIRROR_NODE_MAX_POLL_DELAY`) — a flat
   interval across 100k+ testnet topics is not sustainable and 429s the mirror node.
@@ -150,6 +170,17 @@ The 3 failing suites are pre-existing and unrelated to current work — gate on
 - A backfill over `nft_cache` cannot run to completion at boot (5M rows, ~4 s/batch just to find
   candidates). `schema-bootstrap.ts` time-budgets it and resumes next boot; the scheduler's NFT
   re-sync fills the rest through the normal write path.
+- Guardian's AEM docs (`docs/guardian/standard-registry/external-events/...` in the parent `guardian/`
+  repo) show `ipfs_added_file`'s payload as `{cid, url}`, but the actual publish call
+  (`worker-service/src/api/worker.ts`: `this.publish(ExternalMessageEvents.IPFS_ADDED_FILE, cid)`)
+  sends the bare CID **string**, and the AEM HTTP layer (`application-events/src/routes/events.ts`)
+  forwards NATS payloads untouched — no wrapping. `guardian-event-router.ts`'s `route()` nulls out
+  any non-object payload before dispatch, so `onIpfsAdded` silently got `null` every time: 810 events
+  received, 0 triggers logged, no debug output (the early-return had no log line). Symptom looked
+  like "IPFS fetches aren't syncing" with no error anywhere. Fixed by passing the raw `payload`
+  through for this event and accepting both a bare string and `{cid}`. **Lesson: verify an AEM
+  event's payload shape against the actual publish call in the sibling `guardian/` source, not the
+  docs** — the docs are aspirational/stale for at least this one event.
 - Nuxt composables (`useRuntimeConfig()`) must be called during setup. Calling one inside a function
   fired from a click handler throws "nuxt instance unavailable" *before* any try/catch, so a loading
   flag never clears and the UI hangs with nothing in the console.
