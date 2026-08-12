@@ -1033,8 +1033,13 @@ export class ProjectResponseDto {
             totalTransferred: row.totalTransferred ?? null,
             totalRetired: row.totalRetired ?? 0,
             totalActive: row.totalActive ?? 0,
-            linkedSchemas,
-            mrvSchemas,
+            // Detail-page-only: LinkedVcsPanel/ProjectPolicyCanvas/RelationshipDiagram
+            // (pages/projects/[id].vue) are the only consumers — the list page never
+            // reads these, so list rows skip shipping the per-schema/per-VC arrays.
+            // Still computed above either way (friendlyName's ID-lookalike fallback,
+            // and the pre-MV lifecycle-stage derivation, both depend on it).
+            linkedSchemas: full ? linkedSchemas : [],
+            mrvSchemas: full ? mrvSchemas : [],
             hasMrvData,
             lifecycleStage,
             expectedIssuanceYear,

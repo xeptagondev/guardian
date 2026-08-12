@@ -13,7 +13,7 @@ import {
 import { PaginatedResponse } from '../dto/pagination.dto';
 import { NetworkDataSourceRegistry } from '../database/network-datasource.registry';
 import { PgProjectRepository } from '../repositories/pg-project.repository';
-import { ProjectRepository } from '../repositories/project.repository';
+import { ProjectRepository, ProjectListSummary } from '../repositories/project.repository';
 import { MappingReprocessService } from './mapping-reprocess.service';
 import { PolicyWorkflowGraph } from './policy-graph.builder';
 import { AdditionalDetailsSchemaDto } from '../dto/additional-details.dto';
@@ -23,6 +23,11 @@ import { MrvDataQueryDto, MrvDataResponseDto } from '../dto/mrv-data.dto';
 // data changes on ingest and on admin re-extract/refresh-ipfs actions, not on
 // a fixed refresh cadence, so this stays short to keep those changes visible quickly.
 const FIND_BY_ID_CACHE_TTL_SECONDS = 30;
+
+// Short TTL, same reasoning as above — count/summary read live business_view
+// rows, not an MV. Only bounds how long a page-flip within one search can
+// reuse the prior total/summary instead of re-running the search predicate.
+const COUNT_SUMMARY_CACHE_TTL_SECONDS = 20;
 
 @Injectable()
 export class ProjectsService {
@@ -39,6 +44,14 @@ export class ProjectsService {
         const repo = this.getRepository(network);
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
+
+        // count/summary don't depend on page/limit — cache them separately so
+        // flipping pages within the same search reuses page 1's total/summary
+        // instead of re-running the search predicate for count and summary too.
+        const countSummaryCacheKey = this.countSummaryCacheKey(network, query);
+        const cachedCountAndSummary = await this.redis.getJson<{ total: number; summary: ProjectListSummary }>(
+            countSummaryCacheKey,
+        );
 
         const result = await repo.findAll({
             page,
@@ -64,7 +77,16 @@ export class ProjectsService {
             lifecycleStage: query.lifecycleStage,
             expectedIssuanceYearRange: query.expectedIssuanceYearRange,
             isPipeline: query.isPipeline,
+            cachedCountAndSummary: cachedCountAndSummary ?? undefined,
         });
+
+        if (!cachedCountAndSummary) {
+            await this.redis.setJson(
+                countSummaryCacheKey,
+                { total: result.total, summary: result.summary },
+                COUNT_SUMMARY_CACHE_TTL_SECONDS,
+            );
+        }
 
         const data = result.rows.map(row => ProjectResponseDto.fromRow(row, network, false));
         return {
@@ -72,6 +94,21 @@ export class ProjectsService {
             meta: { page, limit, total: result.total, totalPages: Math.ceil(result.total / limit) },
             summary: result.summary,
         };
+    }
+
+    /**
+     * Encodes every findAll filter that affects the search predicate — everything
+     * except page/limit, which don't change count or summary.
+     */
+    private countSummaryCacheKey(network: string, query: ProjectQueryDto): string {
+        return `projects:count-summary:${network}` +
+            `:${query.search ?? ''}:${query.name ?? ''}:${query.country ?? ''}` +
+            `:${query.methodology ?? ''}:${query.registry ?? ''}:${query.registryDid ?? ''}` +
+            `:${query.developer ?? ''}:${query.vintage ?? ''}:${query.status ?? ''}` +
+            `:${query.policyTopicId ?? ''}:${query.instanceTopicId ?? ''}:${query.sdgs ?? ''}` +
+            `:${query.sector ?? ''}:${query.sectoralScope ?? ''}:${query.vintageRange ?? ''}` +
+            `:${query.methodologyId ?? ''}:${query.lifecycleStage ?? ''}` +
+            `:${query.expectedIssuanceYearRange ?? ''}:${query.isPipeline ?? ''}`;
     }
 
     async getFilterOptions(network: string): Promise<ProjectFilterOptionsDto> {

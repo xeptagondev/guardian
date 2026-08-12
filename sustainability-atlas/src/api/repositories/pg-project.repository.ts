@@ -71,11 +71,12 @@ interface RawRow {
     expectedIssuanceYear?: string | null;
 }
 
-const SEARCH_TSVECTOR = `(
-    setweight(to_tsvector('english', coalesce(bv."displayName", '')), 'A') ||
-    setweight(to_tsvector('english', coalesce(bv."registryDid", '')), 'B') ||
-    setweight(to_tsvector('english', coalesce(bv."searchText", '')), 'C')
-)`;
+// business_view."searchVector" is a STORED generated column with this exact
+// expression (see schema-bootstrap.ts) — referencing it directly, rather than
+// recomputing the expression inline, lets the planner match it back to
+// idx_business_view_search_vector (GIN). An inline recompute is opaque to the
+// planner even though it's byte-identical, so it was never reaching that index.
+const SEARCH_TSVECTOR = `bv."searchVector"`;
 
 /**
  * Joined into both findAll and findById to look up the publishing registry's
@@ -291,15 +292,21 @@ export class PgProjectRepository extends ProjectRepository {
             WHERE ${whereSql}
         `;
 
+        // count/summary re-run the same whereSql as rows and are invariant across
+        // pages of one search — when the caller already has a cached value for
+        // this exact filter set, skip re-running both and pay the predicate cost
+        // once (for rows) instead of three times.
         const [rawRows, countResult, summaryResult]: [
             RawRow[],
-            Array<{ total: number }>,
-            Array<{ total_issuances: string | null; unique_countries: number; unique_registries: number }>,
-        ] = await Promise.all([
-            this.dataSource.query(rowsSql, params),
-            this.dataSource.query(countSql, countParams),
-            this.dataSource.query(summarySql, countParams),
-        ]);
+            Array<{ total: number }> | undefined,
+            Array<{ total_issuances: string | null; unique_countries: number; unique_registries: number }> | undefined,
+        ] = query.cachedCountAndSummary
+            ? [await this.dataSource.query(rowsSql, params), undefined, undefined]
+            : await Promise.all([
+                this.dataSource.query(rowsSql, params),
+                this.dataSource.query(countSql, countParams),
+                this.dataSource.query(summarySql, countParams),
+            ]);
 
         // Batch-loads each distinct policy's schema names + policyMapping in one indexed query (names extracted
         // SQL-side, so heavyweight rawSchemaJson bodies never leave Postgres), mirroring findById.
@@ -364,11 +371,11 @@ export class PgProjectRepository extends ProjectRepository {
                 undefined,
                 schemasByTopic.get((row.businessData as Record<string, any> | null)?.['policyTopicId'] ?? ''),
             )),
-            total: countResult[0]?.total ?? 0,
-            summary: {
-                totalIssuances: Number(summaryResult[0]?.total_issuances ?? 0),
-                uniqueCountries: summaryResult[0]?.unique_countries ?? 0,
-                uniqueRegistries: summaryResult[0]?.unique_registries ?? 0,
+            total: query.cachedCountAndSummary?.total ?? countResult?.[0]?.total ?? 0,
+            summary: query.cachedCountAndSummary?.summary ?? {
+                totalIssuances: Number(summaryResult?.[0]?.total_issuances ?? 0),
+                uniqueCountries: summaryResult?.[0]?.unique_countries ?? 0,
+                uniqueRegistries: summaryResult?.[0]?.unique_registries ?? 0,
             },
         };
     }
