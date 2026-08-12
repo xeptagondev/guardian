@@ -33,43 +33,106 @@ export const MV_PROJECT_STATS_NAME = 'mv_project_stats';
 export const MV_PROJECT_STATS_CREATE_SQL = `
     CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_PROJECT_STATS_NAME} AS
     WITH issued AS (
-        -- issuance_count + total_issued, straight off project_mint_link.
+        -- issuance_count + volumes, straight off project_mint_link.
+        --
+        -- total_issued reports what the ledger actually minted (minted_amount,
+        -- reconciled from NFT serials or fungible mint transactions by
+        -- serial-mint-linker), falling back to the MintToken VC's declared
+        -- amount while a mint is still unreconciled — so a project never drops
+        -- to zero mid-sync. The declared figure is kept alongside it because the
+        -- two genuinely differ: mints have been observed declaring 48 credits
+        -- while minting 8.
         SELECT
             pml.project_key,
             COUNT(*) FILTER (WHERE pml.token_id IS NOT NULL)::int AS issuance_count,
-            COALESCE(SUM(pml.amount), 0)::bigint AS total_issued
+            COALESCE(SUM(COALESCE(pml.minted_amount, pml.amount)), 0)::numeric AS total_issued,
+            COALESCE(SUM(pml.amount), 0)::numeric AS total_declared,
+            COUNT(*) FILTER (WHERE pml.mint_match_status = 'mismatch')::int AS mismatch_count
         FROM project_mint_link pml
         GROUP BY pml.project_key
     ),
-    -- Distinct NFT tokens per project. Only NON_FUNGIBLE_UNIQUE tokens can have
-    -- retired (deleted) serials, so non-NFT tokens are filtered out here.
-    project_nft_tokens AS (
+    -- Retirement is assembled from the most specific evidence available.
+    --
+    -- Best case: a retired NFT serial carries the mint VP's timestamp, so it is
+    -- attributed to the exact mint event (and therefore vintage) it came from.
+    -- serial_retired_count holds that per-mint figure, and because each mint
+    -- link belongs to exactly one project it cannot be double-counted the way
+    -- the previous token-level rollup was — that version charged *every* project
+    -- sharing a token with the whole of that token's retirements.
+    mint_retired AS (
+        SELECT pml.project_key,
+               COALESCE(SUM(pml.serial_retired_count), 0)::numeric AS retired
+        FROM project_mint_link pml
+        WHERE pml.serial_retired_count IS NOT NULL
+        GROUP BY pml.project_key
+    ),
+    -- Retired serials no mint event claims (metadata missing, or its mint VP
+    -- never resolved). Nothing finer than the token exists to key them to.
+    unattributed_nft_retired AS (
+        SELECT n."tokenId" AS token_id, COUNT(*)::numeric AS retired
+        FROM nft_cache n
+        WHERE n.deleted = true
+          AND NOT EXISTS (
+              SELECT 1 FROM project_mint_link p
+              WHERE p.token_id = n."tokenId"
+                AND p.vp_consensus_timestamp = n."metadataTimestamp"
+          )
+        GROUP BY n."tokenId"
+    ),
+    -- Fungible retirement, documented by Guardian's RETIRE contract events.
+    -- Token-level by nature: fungible units are interchangeable, so there is no
+    -- honest way to say which mint event a retired unit came from. Amounts are
+    -- recorded in the token's smallest units, hence the decimals scaling.
+    fungible_retired AS (
+        SELECT tre.token_id,
+               (SUM(tre.amount) / (10::numeric ^ COALESCE(tc.decimals, 0))) AS retired
+        FROM token_retire_event tre
+        JOIN token_cache tc
+            ON tc."tokenId" = tre.token_id AND tc.type = 'FUNGIBLE_COMMON'
+        WHERE tre.amount IS NOT NULL
+        GROUP BY tre.token_id, tc.decimals
+    ),
+    project_tokens AS (
         SELECT DISTINCT pml.project_key, pml.token_id
         FROM project_mint_link pml
-        JOIN token_cache tc
-            ON tc."tokenId" = pml.token_id
-           AND tc.type = 'NON_FUNGIBLE_UNIQUE'
         WHERE pml.token_id IS NOT NULL
     ),
-    -- Retired serial counts per token (one pass over nft_cache).
-    nft_retired AS (
-        SELECT "tokenId", COUNT(*) FILTER (WHERE deleted = true)::bigint AS retired_count
-        FROM nft_cache
-        GROUP BY "tokenId"
+    -- Tokens minted by exactly one project. The token-level remainder below is
+    -- only charged to these: when several projects mint the same token there is
+    -- no way to say whose credits the unattributable residue was, and counting
+    -- it for each of them would report one retirement several times.
+    sole_project_tokens AS (
+        SELECT pml.token_id
+        FROM project_mint_link pml
+        WHERE pml.token_id IS NOT NULL
+        GROUP BY pml.token_id
+        HAVING COUNT(DISTINCT pml.project_key) = 1
+    ),
+    -- The token-level remainder: retired serials no mint event claims, plus
+    -- documented fungible retirement. Not per-vintage, but real.
+    token_level_retired AS (
+        SELECT pt.project_key,
+               (COALESCE(SUM(u.retired), 0) + COALESCE(SUM(f.retired), 0))::numeric AS retired
+        FROM project_tokens pt
+        JOIN sole_project_tokens spt ON spt.token_id = pt.token_id
+        LEFT JOIN unattributed_nft_retired u ON u.token_id = pt.token_id
+        LEFT JOIN fungible_retired f ON f.token_id = pt.token_id
+        GROUP BY pt.project_key
     ),
     retired AS (
-        SELECT
-            pnt.project_key,
-            COALESCE(SUM(nr.retired_count), 0)::bigint AS total_retired
-        FROM project_nft_tokens pnt
-        LEFT JOIN nft_retired nr ON nr."tokenId" = pnt.token_id
-        GROUP BY pnt.project_key
+        SELECT pt.project_key,
+               (COALESCE(mr.retired, 0) + COALESCE(tl.retired, 0))::numeric AS total_retired
+        FROM (SELECT DISTINCT project_key FROM project_tokens) pt
+        LEFT JOIN mint_retired mr       ON mr.project_key = pt.project_key
+        LEFT JOIN token_level_retired tl ON tl.project_key = pt.project_key
     )
     SELECT
         i.project_key                        AS "projectKey",
         i.issuance_count                     AS issuance_count,
         i.total_issued                       AS total_issued,
-        COALESCE(r.total_retired, 0)::bigint AS total_retired
+        i.total_declared                     AS total_declared,
+        i.mismatch_count                     AS mismatch_count,
+        COALESCE(r.total_retired, 0)::numeric AS total_retired
     FROM issued i
     LEFT JOIN retired r ON r.project_key = i.project_key;
 `;

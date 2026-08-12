@@ -224,10 +224,24 @@ export function extractFields(json: Record<string, unknown>): ParsedMessage {
             break;
         }
 
+        // Contract messages announce Guardian's per-policy WIPE and RETIRE
+        // smart contracts. contractId/contractType are what make the retirement
+        // ledger reachable, so they are carried through here rather than dropped
+        // into the shared default shape.
+        case 'Contract':
+            result.options = {
+                name: json['name'] || null,
+                description: json['description'] || null,
+                topicId: json['topicId'] || null,
+                tokenId: json['tokenId'] || null,
+                contractId: json['contractId'] || null,
+                contractType: json['contractType'] || null,
+            };
+            break;
+
         case 'Module':
         case 'Tool':
         case 'Schema':
-        case 'Contract':
         default:
             result.options = {
                 name: json['name'] || null,

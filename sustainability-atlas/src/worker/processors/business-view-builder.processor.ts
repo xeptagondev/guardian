@@ -5,6 +5,7 @@ import { DataSource } from "typeorm";
 import Redis from "ioredis";
 import { QUEUE_NAMES } from "@shared/config/bullmq.config";
 import { buildMintProjectLinks } from "../project-mapper/mint-project-linker";
+import { linkSerialsToMints } from "../project-mapper/serial-mint-linker";
 
 /**
  * Builds METHODOLOGY / REGISTRY / CREDIT rows in business_view from raw
@@ -149,6 +150,7 @@ export class BusinessViewBuilderProcessor extends WorkerHost {
         const totalUpserted = result?.rowCount ?? result?.length ?? 0;
 
         await buildMintProjectLinks(this.dataSource, this.logger);
+        await linkSerialsToMints(this.dataSource, this.logger);
 
         await this.redis.publish(
             "se:events",

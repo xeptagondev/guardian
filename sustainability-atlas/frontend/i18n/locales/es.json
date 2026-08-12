@@ -425,7 +425,7 @@
         "noIssuanceData": "No hay datos de emisiones que coincidan con los filtros seleccionados",
         "analytics": "Analíticas",
         "retirementTrend": "Tendencia de retiros",
-        "retirementTrendTooltip": "Volumen de retiros a lo largo del tiempo. Muestra las emisiones retiradas permanentemente (quemadas) para compensación.",
+        "retirementTrendTooltip": "Créditos retirados de forma permanente de la circulación para compensación, según el mes en que se retiraron. Cuando el contrato de retiro de un registro dejó constancia de la reclamación, se usa esa fecha; en caso contrario, el crédito se sitúa en su último movimiento, el momento en que salió de circulación. El total coincide con Total retirado.",
         "noRetirementData": "No hay datos de retiros que coincidan con los filtros seleccionados",
         "vintageDistribution": "Distribución por añada",
         "vintageDistributionTooltip": "Distribución de emisiones por año de añada. Muestra qué años tienen más créditos emitidos en los proyectos coincidentes.",
@@ -606,6 +606,7 @@
             },
             "lifecycle": {
                 "transferred": "Transferidos",
+                "transferredTooltip": "Créditos de este proyecto en poder de una cuenta distinta a la tesorería del token. Derivado de la propiedad actual del NFT: Hedera registra quién posee cada serial, pero Guardian no emite ningún documento de transferencia, por lo que no hay contraparte ni fecha de transferencia. Se muestra como — cuando no puede determinarse: para créditos fungibles, cuyos saldos no pueden rastrearse hasta la emisión que los creó, y mientras la propiedad de los seriales aún se está sincronizando (un recuento parcial la subestimaría).",
                 "transfers": "Transferencias",
                 "retirements": "Retiros",
                 "from": "Desde",
@@ -614,7 +615,28 @@
                 "date": "Fecha",
                 "beneficiary": "Beneficiario",
                 "reason": "Razón",
-                "empty": "Aún no se han registrado transferencias o retiros para este proyecto."
+                "empty": "Aún no se han registrado transferencias o retiros para este proyecto.",
+                "types": {
+                    "retirement": "Retiro",
+                    "transfer": "Transferencia"
+                },
+                "columns": {
+                    "date": "Fecha",
+                    "event": "Evento",
+                    "parties": "Cuentas",
+                    "credits": "Créditos",
+                    "serials": "Seriales"
+                },
+                "emptyTitle": "Aún no hay transacciones",
+                "syncingTitle": "El historial de transacciones aún no está disponible",
+                "syncing": "Las transferencias no llevan ningún documento del registro, por lo que cada una debe leerse del historial en la cadena de la cuenta emisora. Todavía no se ha hecho para los créditos de este proyecto. Los retiros no se ven afectados y aparecen en cuanto quedan registrados.",
+                "batchTooltip": "Una sola transacción en la cadena puede incluir como máximo 10 seriales de créditos. Por eso una misma distribución aparece como varias filas de hasta 10 créditos: las mismas cuentas en el mismo momento, divididas por la cadena y no por la propia transacción.",
+                "statusPartial": "{count} de {total} retirados",
+                "statusPartialTooltip": "Parte de esta transferencia se ha retirado desde entonces. Los créditos restantes siguen en poder de la cuenta receptora y continúan disponibles para su venta o para un retiro futuro.",
+                "viaGuardianTooltip": "Retirado dentro de Guardian. El contrato de retiro del registro dejó constancia de la reclamación en la cadena, identificando la cuenta que retiró y los seriales exactos de los créditos: un retiro plenamente documentado.",
+                "outsideGuardianTooltip": "Retirado fuera de Guardian. Los créditos se destruyeron de forma permanente en la cadena sin pasar por el contrato de retiro del registro. Su salida de circulación es indudable, pero ningún registro en la cadena identifica quién reclamó la compensación ni en nombre de quién.",
+                "burned": "Retirado",
+                "eventTooltip": "Transferencia: los créditos cambiaron de titular y siguen siendo válidos para su venta o retiro futuro. Retiro: los créditos salieron de circulación de forma permanente y no pueden volver a utilizarse. Cada transacción es una cosa o la otra."
             },
             "location": {
                 "title": "Ubicación del proyecto",
@@ -713,7 +735,21 @@
             },
             "issuances": {
                 "yearFilter": "Año",
-                "empty": "Aún no se han registrado emisiones para este proyecto."
+                "empty": "Aún no se han registrado emisiones para este proyecto.",
+                "notReconciled": "Sin asociar",
+                "viewSerials": "Mostrar números de serie",
+                "serialsHeading": "Números de serie acuñados por esta emisión",
+                "serialsUnavailable": "No hay números de serie disponibles para esta emisión.",
+                "transactionsHeading": "Retiros y transferencias de estos seriales",
+                "retiredOfMinted": "{retired} de {total} retirados",
+                "status": {
+                    "mismatch": "El documento de acuñación de Guardian declaró {declared} créditos, pero se acuñaron {minted} en cadena.",
+                    "unmatched": "Esta emisión aún no se ha asociado a una acuñación en cadena, por lo que solo se conoce el monto declarado.",
+                    "ambiguous": "Más de un documento de acuñación reclama esta emisión, por lo que sus créditos no pueden atribuirse con confianza.",
+                    "pending": "Esta emisión aún no se ha conciliado con la cadena."
+                },
+                "serialsActive": "{count} activos",
+                "serialsRetired": "{count} retirados"
             },
             "tabs": {
                 "summary": "Resumen",
@@ -833,6 +869,8 @@
             "symbol": "Símbolo",
             "type": "Tipo",
             "supply": "Monto acuñado",
+            "declaredAmount": "Declarado",
+            "mintedOnChain": "Acuñado en cadena",
             "mintDate": "Fecha de emisión",
             "project": "Proyecto",
             "methodology": "Metodología",
@@ -849,7 +887,9 @@
         "tooltips": {
             "hideUnlinked": "Oculta los tokens que aún no han sido asociados a ningún proyecto. Desmarque para ver todos los tokens indexados.",
             "mintDate": "Fecha de emisión",
-            "mintAmount": "Número total de créditos acuñados para el proyecto. Para NFTs, es el número de seriales únicos."
+            "mintAmount": "Número total de créditos acuñados para el proyecto. Para NFTs, es el número de seriales únicos.",
+            "declaredAmount": "El monto de créditos indicado en el documento de acuñación de Guardian. Es lo que el registro pretendía emitir, que no siempre coincide con lo que registró la cadena.",
+            "mintedOnChain": "El monto realmente acuñado en Hedera: el número de seriales NFT que llevan el identificador de esta acuñación, o el monto registrado por la transacción de acuñación fungible."
         },
         "detail": {
             "notFound": "Token no encontrado",
@@ -873,6 +913,8 @@
             },
             "tokenInformation": "Información del token",
             "supplyDifferenceTooltip": "El monto de suministro y el monto acuñado de esta emisión son actualmente diferentes.",
+            "mintDifferenceTooltip": "{count} de las emisiones de este token declararon un monto distinto al realmente acuñado en cadena. Total declarado: {declared}. Realmente acuñado: {minted}.",
+            "mintPendingTooltip": "Algunas emisiones de este token aún no se han asociado a una acuñación en cadena, por lo que los totales mostrados son los montos declarados en los documentos de acuñación de Guardian.",
             "tokenSupply": "Suministro del token",
             "tokenSupplyTooltip": "Número total de tokens que están actualmente en circulación.",
             "tokenSupplyLiveTooltip": "Suministro total en vivo, obtenido directamente del Hedera Mirror Node.",
@@ -1345,7 +1387,7 @@
             "countries": "Países",
             "topMethodology": "Metodología principal",
             "coverage": "Cobertura"
-},
+        },
         "names": {
             "1": "Fin de la pobreza",
             "2": "Hambre cero",
@@ -1471,7 +1513,6 @@
             "subtitle": "Señal de riesgo: una fuerte concentración en añadas más antiguas puede indicar una menor integridad de la línea de base según los principios CCP / ICVCM"
         }
     },
-
     "vcViewer": {
         "rawDataOnBlockchain": "Datos brutos en la blockchain",
         "searchInJson": "Buscar en JSON...",
@@ -1585,12 +1626,13 @@
             "activeSupply": {
                 "label": "Suministro activo",
                 "sub": "Emitidos − retirados",
-                "footer": "Tasa de retiro: 0%"
+                "footer": "Tasa de retiro: {rate}%"
             },
             "totalRetired": {
                 "label": "Total de créditos retirados",
                 "sub": "Retirados permanentemente",
-                "footer": "Sin retiros aún"
+                "footer": "En {count} proyectos seguidos",
+                "footerEmpty": "Aún no se registran retiros"
             },
             "activeProjects": {
                 "label": "Proyectos activos",
@@ -2488,5 +2530,92 @@
             "reparseEnqueued": "Reanálisis encolado: {enqueued} trabajos de VC en {succeeded} metodologías",
             "reparseFailed": "Error en el reanálisis: {error}"
         }
+    },
+    "issuances": {
+        "title": "Emisión",
+        "notFound": "Emisión no encontrada",
+        "notFoundDesc": "No se encontró ninguna emisión con el identificador {id} en esta red.",
+        "backToList": "Volver a emisiones",
+        "mintedOn": "Acuñada el {date}",
+        "declared": "Monto declarado",
+        "mintedOnChain": "Acuñado en cadena",
+        "notReconciled": "Sin asociar",
+        "project": "Proyecto",
+        "methodology": "Metodología",
+        "registry": "Registro",
+        "vpTimestamp": "Marca de tiempo del VP de acuñación",
+        "vpTimestampTooltip": "La marca de tiempo del documento de acuñación de Guardian que Hedera registra en cadena: en los metadatos de cada NFT o en el memo de la transacción de acuñación fungible. Es lo que vincula la acuñación en cadena con esta credencial.",
+        "status": {
+            "label": "Conciliación",
+            "mismatch": "El documento de acuñación de Guardian declaró {declared} créditos, pero se acuñaron {minted} en cadena: {direction} de lo declarado.",
+            "more": "más",
+            "fewer": "menos",
+            "unmatched": "Esta emisión aún no se ha asociado a una acuñación en cadena, por lo que solo se conoce el monto declarado.",
+            "ambiguous": "Más de un documento de acuñación reclama esta emisión, por lo que sus créditos no pueden atribuirse con confianza.",
+            "pending": "Esta emisión aún no se ha conciliado con la cadena.",
+            "verifiedSub": "El monto declarado y el de la cadena coinciden"
+        },
+        "statusLabels": {
+            "verified": "Verificada",
+            "mismatch": "Discrepancia",
+            "unmatched": "Sin asociar",
+            "ambiguous": "Ambigua",
+            "pending": "Pendiente"
+        },
+        "serials": {
+            "title": "Seriales",
+            "range": "Rango de seriales",
+            "count": "Créditos",
+            "state": "Estado",
+            "active": "Activo",
+            "retired": "Retirado",
+            "summary": "{total} seriales · {active} activos · {retired} retirados",
+            "empty": "Aún no se han atribuido seriales a esta emisión.",
+            "holder": "En poder de",
+            "holderTooltip": "La cuenta que actualmente posee estos seriales, leída de Hedera. Los rangos se dividen al cambiar de tenedor, por lo que un rango nunca abarca dos propietarios. Guardian no emite documento de transferencia, así que aquí no hay historial de contrapartes.",
+            "holderUnknown": "Aún sin sincronizar",
+            "holderRetired": "Retirado",
+            "fungible": "Esta es una emisión fungible. Los créditos fungibles no tienen números de serie: sus unidades son intercambiables y no pueden enumerarse.",
+            "fungibleTitle": "Sin números de serie",
+            "emptyTitle": "Aún no hay seriales atribuidos",
+            "rangeTooltip": "Los seriales se agrupan en rangos en lugar de listarse uno a uno: un rango puede abarcar decenas de miles de créditos. Un rango se divide cuando cambia el estado o el tenedor, por lo que todos los seriales dentro de uno son idénticos en ambos aspectos."
+        },
+        "transactions": {
+            "title": "Transacciones",
+            "subtitle": "Retiros y transferencias de los créditos que produjo esta emisión.",
+            "undocumentedRetirement": "Esta emisión tiene {count} crédito(s) retirado(s). Los retiros solo aparecen abajo cuando el registro usó el contrato de retiro de Guardian; los créditos eliminados fuera de él están realmente retirados, pero la cadena no registra ninguna transacción que indique quién los retiró ni cuándo."
+        },
+        "token": {
+            "title": "Información del token",
+            "supply": "Suministro del token",
+            "supplyTooltip": "Créditos de este token existentes actualmente. Neto de retiros, por lo que es menor que el monto acuñado cuando se han retirado créditos.",
+            "mintedAll": "Total acuñado (todos los proyectos)",
+            "mintedProject": "Total acuñado (este proyecto)",
+            "issuanceCount": "Emisiones",
+            "relatedIssuances": "Emisiones relacionadas del token",
+            "relatedIssuancesEmpty": "Esta es la única emisión registrada para este token.",
+            "relatedProjects": "Proyectos que usan este token",
+            "relatedProjectsEmpty": "Ningún otro proyecto acuña desde este token.",
+            "relatedProjectsTooltip": "Proyectos que acuñan desde este mismo token. Un token puede servir a varios proyectos, pero esta emisión pertenece exactamente a uno — se muestra en Resumen.",
+            "relatedIssuancesEmptyTitle": "No hay otras emisiones",
+            "relatedProjectsEmptyTitle": "No hay otros proyectos"
+        },
+        "tabs": {
+            "summary": "Resumen",
+            "transactions": "Transacciones",
+            "token": "Información del token",
+            "advanced": "Avanzado"
+        },
+        "amountsTitle": "Monto de la emisión",
+        "linkageTitle": "Vínculos de la emisión",
+        "declaredSub": "Indicado en el documento de acuñación de Guardian",
+        "mintedOnChainSub": "Registrado por la cadena Hedera",
+        "mintTimestamp": "Marca de tiempo de la credencial",
+        "mintTimestampTooltip": "La marca de tiempo de consenso HCS de la credencial MintToken. Identifica esta emisión en todo el Atlas.",
+        "advanced": {
+            "title": "Avanzado",
+            "subtitle": "Identificadores en cadena de esta emisión."
+        },
+        "unlinked": "Esta emisión no está vinculada a ningún proyecto. La credencial de acuñación es real y su monto es válido, pero nada la conectó con un proyecto, metodología o registro, por lo que no cuenta en el total de ningún proyecto. La atribución puede aparecer más adelante a medida que se indexe más de la política."
     }
 }

@@ -72,6 +72,62 @@ A project with a large minted total and a small current supply has had most of i
 which is the intended end state for a carbon credit. Chapter 05 covers how to read the issuance and
 retirement history.
 
+### An issuance says the declared and minted amounts differ
+
+These are separate facts and the Atlas reports both rather than picking one.
+
+**Declared** is the amount written into the registry's Guardian mint document — a statement of what
+it intended to issue. **Minted on-chain** is what the Hedera ledger actually recorded.
+
+- **Fewer minted than declared** — the mint partially failed or never finished. Retirement is not the
+  cause; retired credits still count as minted.
+- **More minted than declared** — more credits were created on the ledger than the document claimed.
+  Nothing forces the two to agree; they are separate actions by the registry.
+- **"Not matched"** — the on-chain mint has not been linked to the document yet and the declared
+  figure is standing in. This clears as syncing catches up.
+
+Dashboard and stat-card totals use the on-chain figure, so they can read lower than a registry's own
+published numbers. That gap is the point: it is the difference between what was documented and what
+the ledger did.
+
+### Transferred shows a dash instead of a number
+
+A dash means the value cannot be determined — not that nothing was transferred. Guardian issues no
+transfer document, so transfers are read from current ownership on the ledger. That is unavailable
+for fungible credits, whose balances cannot be traced back to the issuance that created them, and
+while serial ownership is still syncing, where a partial count would understate it.
+
+### Transferred shows a number but the transactions table is empty
+
+Both are correct; they answer different questions from different sources.
+
+**Transferred** says where the credits are **now** — how many sit with an account other than the
+token's treasury. That comes from current ownership, which the ledger reports in full as soon as the
+serials are synced.
+
+**Transactions** say **when** the credits moved and between whom. Guardian writes no transfer
+document, so each movement has to be read from the treasury account's own transaction history, and
+those accounts are swept in the background. Until a project's treasury has been swept, the Atlas can
+tell you where the credits are without yet being able to tell you when they got there.
+
+The two cases are labelled differently, so you can tell them apart:
+
+| What the table says | What it means |
+|---|---|
+| **Transaction history not available yet** | The issuing account's history has not been read yet. Transfers may exist. |
+| **No transactions yet** | The history has been read, and these credits genuinely have not moved. |
+
+Nothing is missing or wrong in the meantime, and the transactions appear on their own once that
+treasury is reached. The count is deliberately **not** derived from the transaction log: doing so
+would report zero for any treasury not yet swept, and would also count credits that were transferred
+and later retired as though they were still in circulation.
+
+### A token has serials the Atlas does not show
+
+The Atlas only tracks credits issued through a Guardian mint document it has synced. Serials minted
+outside that flow have no project, methodology or vintage behind them, so they are excluded rather
+than attributed to a project on a guess.
+
 ## Accounts and access
 
 ### I did not get the verification email

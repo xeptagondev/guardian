@@ -13,6 +13,10 @@ export interface DashboardMintStatsDto {
     mintSeries: MintSeriesEntry[];
     bySector: MintBreakdownEntry[];
     byRegistry: MintBreakdownEntry[];
+    /** Total retired credits. Matches the retired totals shown elsewhere. */
+    totalRetired: number;
+    /** Monthly retired amounts, dated by retirement record where one exists, otherwise by the credit's last movement. */
+    retirementSeries: MintSeriesEntry[];
 }
 
 // ── Dashboard summary ────────────────────────────────────────────────────────
@@ -121,4 +125,6 @@ export interface PortfolioStatsDto {
     byProjectKey: PortfolioProjectTotal[];
     mintSeries: MintSeriesEntry[];
     recentIssuances: PortfolioRecentIssuance[];
+    /** Monthly retired amounts for the watched projects, dated by retirement record where one exists, otherwise by last movement. */
+    retirementSeries: MintSeriesEntry[];
 }

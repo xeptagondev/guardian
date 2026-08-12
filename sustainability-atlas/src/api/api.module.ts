@@ -18,6 +18,7 @@ import { PolicySchemasController } from './controllers/policy-schemas.controller
 import { PoliciesController } from './controllers/policies.controller';
 import { ProjectsController } from './controllers/project.controller';
 import { CreditsController } from './controllers/credits.controller';
+import { IssuanceController } from './controllers/issuance.controller';
 import { QueueStatusController } from './controllers/queue-status.controller';
 import { GuardianSyncController } from './controllers/guardian-sync.controller';
 import { SdgsController } from './controllers/sdgs.controller';
@@ -36,6 +37,7 @@ import { PoliciesService } from './services/policies.service';
 import { ProjectsService } from './services/project.service';
 import { ProjectExportService } from './services/project-export.service';
 import { CreditsService } from './services/credits.service';
+import { IssuanceService } from './services/issuance.service';
 import { SdgsService } from './services/sdgs.service';
 import { DevelopersService } from './services/developers.service';
 import { DashboardService } from './services/dashboard.service';
@@ -73,6 +75,7 @@ import { LocalPolicyZipStorage } from '@worker/services/storage/local-policy-zip
         PoliciesController,
         ProjectsController,
         CreditsController,
+        IssuanceController,
         QueueStatusController,
         GuardianSyncController,
         SdgsController,
@@ -91,6 +94,7 @@ import { LocalPolicyZipStorage } from '@worker/services/storage/local-policy-zip
         ProjectsService,
         ProjectExportService,
         CreditsService,
+        IssuanceService,
         SdgsService,
         DevelopersService,
         DashboardService,

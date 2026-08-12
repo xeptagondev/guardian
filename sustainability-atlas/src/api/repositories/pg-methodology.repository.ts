@@ -505,6 +505,12 @@ export class PgMethodologyRepository extends MethodologyRepository {
                 documents: Record<string, any> | null;
                 mint_ts: string;
                 link_method: string | null;
+                vp_ts: string | null;
+                minted_amount: string | null;
+                serial_count: number | null;
+                serial_retired_count: number | null;
+                serial_transferred_count: number | null;
+                mint_match_status: string | null;
             }> = await this.dataSource.query(
                 `SELECT
                     pml.token_id,
@@ -512,7 +518,13 @@ export class PgMethodologyRepository extends MethodologyRepository {
                     pml.mint_date,
                     m.documents,
                     pml.mint_consensus_timestamp AS mint_ts,
-                    pml.link_method
+                    pml.link_method,
+                    pml.vp_consensus_timestamp   AS vp_ts,
+                    pml.minted_amount,
+                    pml.serial_count,
+                    pml.serial_retired_count,
+                    pml.serial_transferred_count,
+                    pml.mint_match_status
                  FROM project_mint_link pml
                  JOIN business_view proj
                      ON proj."projectKey" = pml.project_key
@@ -577,6 +589,12 @@ export class PgMethodologyRepository extends MethodologyRepository {
                         mintDate: r.mint_date ? r.mint_date.toISOString().split('T')[0] : null,
                         linkMethod: r.link_method ?? null,
                         rawVc: r.documents ?? null,
+                        vpConsensusTimestamp: r.vp_ts ?? null,
+                        mintedAmount: r.minted_amount != null ? Number(r.minted_amount) : null,
+                        serialCount: r.serial_count != null ? Number(r.serial_count) : null,
+                        serialRetiredCount: r.serial_retired_count != null ? Number(r.serial_retired_count) : null,
+                        serialTransferredCount: r.serial_transferred_count != null ? Number(r.serial_transferred_count) : null,
+                        mintMatchStatus: r.mint_match_status ?? null,
                     };
                 });
             }
@@ -759,7 +777,8 @@ export class PgMethodologyRepository extends MethodologyRepository {
         // findById passes lifecycle explicitly; findAll supplies it via the LIFECYCLE_JOIN lateral columns on the raw row.
         const resolvedLifecycle = lifecycle ?? (row.total_issued != null
             ? (() => {
-                const issued = parseInt(row.total_issued!, 10);
+                // parseFloat: total_issued is NUMERIC, so fungible fractions survive.
+                const issued = parseFloat(row.total_issued!);
                 const retired = parseInt(row.total_retired ?? '0', 10);
                 return { totalIssued: issued, totalRetired: retired, totalActive: issued - retired };
               })()

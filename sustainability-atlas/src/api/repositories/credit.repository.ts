@@ -116,6 +116,9 @@ export interface CreditRawDetail {
         document: Record<string, unknown> | null;
         projectKey: string | null;
         type: string | null;
+        /** What the ledger actually minted for this event, so the UI can contrast it with the declared `amount` rather than against live token supply (which is net of retirements). */
+        mintedAmount: string | null;
+        mintMatchStatus: string | null;
     }>;
 }
 

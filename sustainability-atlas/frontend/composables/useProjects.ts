@@ -1,4 +1,4 @@
-import type { Project, ProjectIssuance, IssuanceEvent, LinkedSchema, LinkedVc, Milestone, ProjectedIssuance } from '~/types/models';
+import type { Project, ProjectIssuance, IssuanceEvent, MintMatchStatus, LinkedSchema, LinkedVc, Milestone, ProjectedIssuance } from '~/types/models';
 
 // country display name → ISO 3166-1 alpha-3 for CountryFlag component
 export const COUNTRY_ALPHA3: Record<string, string> = {
@@ -199,12 +199,19 @@ export function mapApiProject(raw: Record<string, any>): Project {
                 symbol: typeof e['symbol'] === 'string' ? e['symbol'] : null,
                 type: typeof e['type'] === 'string' ? e['type'] : null,
                 amount: typeof e['amount'] === 'number' ? e['amount'] : null,
+                mintedAmount: typeof e['mintedAmount'] === 'number' ? e['mintedAmount'] : null,
+                serialCount: typeof e['serialCount'] === 'number' ? e['serialCount'] : null,
+                serialRetiredCount: typeof e['serialRetiredCount'] === 'number' ? e['serialRetiredCount'] : null,
+                serialTransferredCount: typeof e['serialTransferredCount'] === 'number' ? e['serialTransferredCount'] : null,
+                mintMatchStatus: typeof e['mintMatchStatus'] === 'string' ? (e['mintMatchStatus'] as MintMatchStatus) : null,
                 mintDate: typeof e['mintDate'] === 'string' ? e['mintDate'] : null,
                 linkMethod: typeof e['linkMethod'] === 'string' ? e['linkMethod'] : null,
                 rawVc: e['rawVc'] && typeof e['rawVc'] === 'object' ? (e['rawVc'] as Record<string, any>) : null,
             }))
             : [],
         totalIssued: typeof raw.totalIssued === 'number' ? raw.totalIssued : 0,
+        totalDeclared: typeof raw.totalDeclared === 'number' ? raw.totalDeclared : undefined,
+        totalTransferred: typeof raw.totalTransferred === 'number' ? raw.totalTransferred : null,
         totalRetired: typeof raw.totalRetired === 'number' ? raw.totalRetired : 0,
         totalActive: typeof raw.totalActive === 'number' ? raw.totalActive : 0,
         linkedSchemas: Array.isArray(raw.linkedSchemas)

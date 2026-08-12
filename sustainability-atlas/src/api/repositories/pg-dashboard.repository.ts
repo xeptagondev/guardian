@@ -8,6 +8,16 @@ export interface MintAggRow {
     amount: string; // Postgres returns BIGINT as string
 }
 
+/**
+ * Retirement volume by month, from Guardian's retirement contracts.
+ *
+ * Only documented retirements carry a date. Credits destroyed without going
+ * through the contract are visible on the ledger but carry no record of when,
+ * so they cannot be placed on a time axis and are absent here by necessity —
+ * this series is a floor on retirement volume, not the whole of it.
+ */
+export type RetirementAggRow = MintAggRow;
+
 export interface DashboardMintQuery {
     registry?: string;
     developer?: string;
@@ -530,6 +540,139 @@ export class PgDashboardRepository {
                 ORDER BY "registryDid", "createdAt" DESC NULLS LAST
             ) reg ON reg."registryDid" = bv."registryDid"
             WHERE ${where}
+            GROUP BY sector, registry, month
+            ORDER BY month ASC NULLS LAST
+        `;
+
+        return this.dataSource.query(sql, params);
+    }
+
+    /**
+     * Dated retirement volume, grouped the same way as {@link getMintAggregations}
+     * so the two series can be filtered and bucketed identically.
+     *
+     * Credits reach a project two ways, in the same precedence the retired
+     * totals elsewhere use, so the chart and the stat cards agree:
+     *
+     * 1. By serial, through the issuance that minted it — exact attribution.
+     * 2. Failing that, by token, and only where that token belongs to a single
+     *    project. Serials minted before Guardian recorded the issuance have no
+     *    mint to match; dropping them understated the chart by more than half.
+     *
+     * Fungible credits have no serials at all and always take route (2).
+     *
+     * Each credit is then dated documented-first, the same precedence the credit
+     * lifecycle uses: the retirement contract's timestamp where one exists, and
+     * otherwise the credit's last movement — the point at which it left
+     * circulation. Without that fallback the chart would omit credits the
+     * retired totals include, and the two would disagree for no reason a reader
+     * could see.
+     */
+    async getRetirementAggregations(query: DashboardMintQuery = {}): Promise<RetirementAggRow[]> {
+        const params: unknown[] = [];
+        const conditions: string[] = [];
+
+        if (query.registry) {
+            params.push(query.registry);
+            conditions.push(`reg.registry_name = $${params.length}`);
+        }
+
+        if (query.developer) {
+            params.push(query.developer);
+            conditions.push(`bv."businessData"->>'developer' = $${params.length}`);
+        }
+
+        const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        const sql = `
+            WITH sole_project_tokens AS (
+                SELECT token_id, MIN(project_key) AS project_key
+                FROM project_mint_link
+                WHERE token_id IS NOT NULL
+                GROUP BY token_id
+                HAVING COUNT(DISTINCT project_key) = 1
+            ),
+            mint_project AS (
+                -- Collapsed to one project per (token, mint VP) so a serial
+                -- cannot match two mint links and be counted twice.
+                SELECT token_id, vp_consensus_timestamp, MIN(project_key) AS project_key
+                FROM project_mint_link
+                WHERE token_id IS NOT NULL AND vp_consensus_timestamp IS NOT NULL
+                GROUP BY token_id, vp_consensus_timestamp
+            ),
+            retired_credits AS (
+                -- Every credit the ledger shows destroyed, attributed by mint
+                -- first and by sole-project token otherwise. Backed by the
+                -- partial index on deleted serials — the alternative is a scan
+                -- of every serial ever minted.
+                SELECT n."tokenId" AS token_id,
+                       n."serialNumber" AS serial,
+                       COALESCE(mp.project_key, spt.project_key) AS project_key
+                FROM nft_cache n
+                LEFT JOIN mint_project mp
+                    ON mp.token_id = n."tokenId"
+                   AND mp.vp_consensus_timestamp = n."metadataTimestamp"
+                LEFT JOIN sole_project_tokens spt ON spt.token_id = n."tokenId"
+                WHERE n.deleted
+            ),
+            -- Both date sets are built once and hash-joined. Asking per credit
+            -- instead turns a few thousand rows into a subquery per serial.
+            retire_dates AS (
+                SELECT tre.token_id, s AS serial, MIN(tre.consensus_timestamp) AS ts
+                FROM token_retire_event tre
+                CROSS JOIN LATERAL unnest(tre.serials) AS s
+                GROUP BY tre.token_id, s
+            ),
+            transfer_dates AS (
+                SELECT token_id, serial_number AS serial, MAX(consensus_timestamp) AS ts
+                FROM token_transfer_event
+                GROUP BY token_id, serial_number
+            ),
+            nft_retirements AS (
+                SELECT COALESCE(rd.ts, td.ts) AS consensus_timestamp,
+                       rc.project_key,
+                       1::numeric AS amount
+                FROM retired_credits rc
+                LEFT JOIN retire_dates rd
+                    ON rd.token_id = rc.token_id AND rd.serial = rc.serial
+                LEFT JOIN transfer_dates td
+                    ON td.token_id = rc.token_id AND td.serial = rc.serial
+                WHERE rc.project_key IS NOT NULL
+            ),
+            fungible_retirements AS (
+                SELECT tre.consensus_timestamp, spt.project_key,
+                       tre.amount / (10::numeric ^ COALESCE(tc.decimals, 0)) AS amount
+                FROM token_retire_event tre
+                JOIN token_cache tc
+                    ON tc."tokenId" = tre.token_id AND tc.type = 'FUNGIBLE_COMMON'
+                JOIN sole_project_tokens spt ON spt.token_id = tre.token_id
+                WHERE tre.amount IS NOT NULL
+            ),
+            retirements AS (
+                SELECT * FROM nft_retirements
+                UNION ALL
+                SELECT * FROM fungible_retirements
+            )
+            SELECT
+                COALESCE(bv."businessData"->>'sector', '')                   AS sector,
+                COALESCE(reg.registry_name, bv."registryDid", 'Unknown')     AS registry,
+                -- Consensus timestamps are 'seconds.nanos'; only the seconds
+                -- part is a date.
+                DATE_TRUNC('month', to_timestamp(split_part(r.consensus_timestamp, '.', 1)::bigint))::date AS month,
+                SUM(r.amount)::bigint                                        AS amount
+            FROM retirements r
+            JOIN business_view bv
+                ON bv."projectKey" = r.project_key
+               AND bv."viewType" = 'PROJECT'
+            LEFT JOIN (
+                SELECT DISTINCT ON ("registryDid")
+                       "registryDid",
+                       "displayName" AS registry_name
+                FROM business_view
+                WHERE "viewType" = 'REGISTRY'
+                ORDER BY "registryDid", "createdAt" DESC NULLS LAST
+            ) reg ON reg."registryDid" = bv."registryDid"
+            ${where}
             GROUP BY sector, registry, month
             ORDER BY month ASC NULLS LAST
         `;

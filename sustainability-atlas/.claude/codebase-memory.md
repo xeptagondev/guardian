@@ -9,8 +9,9 @@ Three deployable Node processes off one `src/`: **worker** (`src/worker/main.ts`
 
 ## Worker — ingest pipeline
 
-- `src/worker/processors/` — 9 BullMQ processors: topic-sync, topic-sync-priority, message-process,
-  ipfs-fetch, policy-decode, token-sync, business-view-builder, mv-refresh, project-reparse.
+- `src/worker/processors/` — 10 BullMQ processors: topic-sync, topic-sync-priority, message-process,
+  ipfs-fetch, policy-decode, token-sync, retire-sync, business-view-builder, mv-refresh,
+  project-reparse.
 - `src/worker/services/` — hedera, ipfs, project-mapper, reverse-geo, queue-autoscaler,
   `storage/` (PolicyZipStorage; local FS behind an interface).
 - `src/worker/schedulers/sync-scheduler.service.ts` — onModuleInit scheduling, leader election.
@@ -28,7 +29,21 @@ Three deployable Node processes off one `src/`: **worker** (`src/worker/main.ts`
 - `src/worker/project-mapper/` — helpers.ts, improved-heuristic.mapper.ts, schema-classifier.ts,
   document-type-classifier.ts, non-project-credential.ts, project-fields.ts
   (`PROJECT_EXTRACT_FIELDS` / `ProjectFieldKey`), types.ts (`DocumentType`, FieldDef, SchemaEntry),
-  topic-classifier.ts, mint-project-linker.ts.
+  topic-classifier.ts, mint-project-linker.ts, serial-mint-linker.ts.
+- **Credit lifecycle (mint / retire / transfer)** — design + business rules in
+  `docs/architecture/credit-lifecycle-tracking.md`. Read it before touching any of:
+  `serial-mint-linker.ts` (reconciles declared vs actually-minted; writes `minted_amount`,
+  `mint_match_status`, serial/retired/transferred counts), `retire-sync.processor.ts` +
+  `services/retire-event.decoder.ts` (ABI-decodes Guardian RETIRE contract events),
+  `token-sync.processor.ts` (serials, owners, fungible mint txs, and the `treasury-transfers` job).
+  Non-obvious invariants: only serials traceable to a synced Guardian MintToken VC are tracked;
+  token `total_supply` is **not** "minted" (it is net of retirements); a fungible retirement can
+  never be attributed to a specific mint event; counts are `null` not `0` when unknowable.
+  Transfers are swept **per treasury account, not per token** — Mirror Node has no per-token transfer
+  feed and one treasury issues hundreds of tokens. State is `token_cache."transferTxWatermark"`
+  written across the whole treasury (deliberately no separate table) with `"createdTimestamp"` as the
+  walk's lower bound. "How many transferred" comes from current ownership and is **not** derived from
+  `token_transfer_event`: the log is sweep-dependent and counts credits later retired.
 - `src/worker/project-mapper/resolvers/` — resolver.types.ts, circuit-breaker.ts, base-resolver.ts
   (abstract `BaseProjectKeyResolver`), the four strategies, resolver-chain.service.ts.
   Chain order M1→M4, first `resolved` wins: `dynamic-topic` (`topic`) → `cs-ref` (`csRef`) →
@@ -68,6 +83,13 @@ materialized-views, redis, security, utils, vc-detail.
 Entities: business-view, message, message-cache, policy, topic-cache, token-cache, nft-cache,
 ipfs-file, ipfs-fetch-failure, guardian-event-log, synchronization-task, log, plus `auth/`.
 
+Tables owned by `schema-bootstrap.ts` with **no entity** — deliberate: TypeORM `synchronize` cannot
+drop columns it doesn't know about (it has silently dropped one before). `project_mint_link`,
+`token_mint_tx`, `token_retire_event`, `token_transfer_event`, `contract_cache`, `project_geometry`,
+`notification_watermarks`, `mv_registry`. A column added here that *also* belongs to an entity table
+(e.g. `nft_cache.accountId`, `token_cache.mintTxWatermark`) **must** be declared on the entity too,
+or synchronize will drop it.
+
 ## Frontend
 
 `frontend/` — Nuxt 3. See `frontend/README.md` for layout. Project page tabs (Pipeline /
@@ -76,7 +98,7 @@ Advanced) read `linkedSchemas`, `decodeMethod`, `metadata`, `issuanceEvents` off
 ## Tests — real status (verified, not assumed)
 
 `npx tsc --noEmit` → **TSC_EXIT:0** (clean).
-`npx jest` → **132 passed, 5 failed, 137 total; 13 suites pass, 3 fail.** ~54 s.
+`npx jest` → **146 passed, 5 failed, 151 total; 14 suites pass, 3 fail.** ~55 s.
 
 The 3 failing suites are pre-existing and unrelated to current work — gate on
 "tsc 0 AND no failures beyond these three":
@@ -116,6 +138,21 @@ The 3 failing suites are pre-existing and unrelated to current work — gate on
   create too or a concurrent winner's index causes a duplicate-key crash on boot.
 - Resolver/linker changes need a worker restart; existing rows keep their old key and
   `decodeMethod` until reparsed (`BACKFILL_PROJECTS_ON_BOOT=true` once, or the reparse endpoint).
+- `CREATE TABLE IF NOT EXISTS` is **not** race-safe in Postgres — two boots running
+  `bootstrapSchema` concurrently produced a duplicate-key error on `pg_type`. Transient (the next
+  boot succeeds), but don't trust the "replicas race safely" comment for CREATE TABLE.
+- Mirror Node's `/transactions` endpoint, ascending: a range wider than it will scan returns an
+  **empty page, not an error** (`gte:0` returns nothing for an account that demonstrably has
+  transactions) — anchor the first query to the token's `created_timestamp`. And an empty page is
+  **not** end-of-history: it walks fixed time windows and still returns a live `links.next`, so
+  follow the link rather than breaking on a short page. Both cost real debugging time.
+- Contract logs call the timestamp field `timestamp`; transactions call it `consensus_timestamp`.
+- A backfill over `nft_cache` cannot run to completion at boot (5M rows, ~4 s/batch just to find
+  candidates). `schema-bootstrap.ts` time-budgets it and resumes next boot; the scheduler's NFT
+  re-sync fills the rest through the normal write path.
+- Nuxt composables (`useRuntimeConfig()`) must be called during setup. Calling one inside a function
+  fired from a click handler throws "nuxt instance unavailable" *before* any try/catch, so a loading
+  flag never clears and the UI hangs with nothing in the console.
 - For client-only DOM libs in Nuxt, `nuxi build` passing is not a sufficient gate — `.client.vue`
   stops render, not module load. Verify by running `node .output/server/index.mjs` and curling the
   consuming page.

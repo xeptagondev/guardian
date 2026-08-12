@@ -219,9 +219,16 @@ export class ImpactSummaryResponseDto {
 }
 
 const RETIREMENT_METHODOLOGY_NOTE =
-    'Retirement figures are inferred from Hedera Mirror Node NFT serials marked deleted (nft_cache.deleted), ' +
-    'not from an on-chain retirement/burn transaction record. There is no ledger of retirement events; treat ' +
-    'this figure as an estimate, not an audited total.';
+    'Retirement figures combine documented and inferred evidence, most specific first. Where a policy uses ' +
+    "Guardian's retirement smart contract, the retirement is documented on-chain: the contract event records " +
+    'the retiring account, the token, the amount, and — for non-fungible credits — the exact serial numbers, ' +
+    'which are traced back to the individual mint event and vintage they came from. Retired serials that no ' +
+    'mint event accounts for, and credits wiped outside the retirement contract, are still inferred from ' +
+    'Hedera Mirror Node NFT serials marked deleted, and are reported at token level rather than per vintage. ' +
+    'Fungible retirement is documented but can never be attributed to a specific mint event, because fungible ' +
+    'units are interchangeable by definition. Issuance volume is documented throughout: it reports what the ' +
+    'ledger actually minted, not the amount the MintToken credential declared — the two differ whenever a ' +
+    'mint partially failed.';
 
 function pct(part: number, total: number): number {
     if (!total) return 0;

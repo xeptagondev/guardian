@@ -425,7 +425,7 @@
         "noIssuanceData": "No issuance data matches the selected filters",
         "analytics": "Analytics",
         "retirementTrend": "Retirement Trend",
-        "retirementTrendTooltip": "Retirement volume over time. Shows issuances permanently retired (burned) for offsetting.",
+        "retirementTrendTooltip": "Credits permanently taken out of circulation for offsetting, by the month they were retired. Where a registry's retirement contract recorded the claim, that date is used; otherwise the credit is placed at its last movement, the point at which it left circulation. The total matches Total Retired.",
         "noRetirementData": "No retirement data matches the selected filters",
         "vintageDistribution": "Vintage Distribution",
         "vintageDistributionTooltip": "Distribution of issuances by vintage year. Shows which years have the most credits issued across matching projects.",
@@ -606,6 +606,7 @@
             },
             "lifecycle": {
                 "transferred": "Transferred",
+                "transferredTooltip": "Credits from this project now held by an account other than the token treasury. Derived from current NFT ownership — Hedera records who holds each serial, but Guardian writes no transfer document, so there is no counterparty or transfer date. Shown as — when it cannot be determined: for fungible credits, whose balances cannot be traced back to the issuance that created them, and while serial ownership is still being synced (a partial count would understate it).",
                 "transfers": "Transfers",
                 "retirements": "Retirements",
                 "from": "From",
@@ -614,7 +615,28 @@
                 "date": "Date",
                 "beneficiary": "Beneficiary",
                 "reason": "Reason",
-                "empty": "No transfers or retirements recorded for this project yet."
+                "empty": "No transfers or retirements recorded for this project yet.",
+                "types": {
+                    "retirement": "Retirement",
+                    "transfer": "Transfer"
+                },
+                "columns": {
+                    "date": "Date",
+                    "event": "Event",
+                    "parties": "Accounts",
+                    "credits": "Credits",
+                    "serials": "Serials"
+                },
+                "emptyTitle": "No transactions yet",
+                "syncingTitle": "Transaction history not available yet",
+                "syncing": "Transfers carry no registry document, so each one has to be read from the issuing account's own ledger history. That has not been done for this project's credits yet. Retirements are unaffected and appear as soon as they are recorded.",
+                "batchTooltip": "A single ledger transaction can carry at most 10 credit serials. One distribution therefore appears as several rows of up to 10 credits — the same accounts at the same moment, divided by the ledger rather than by the transaction itself.",
+                "statusPartial": "{count} of {total} retired",
+                "statusPartialTooltip": "Part of this transfer has since been retired. The remaining credits are still held by the receiving account and remain available for sale or future retirement.",
+                "viaGuardianTooltip": "Retired inside Guardian. The registry's retirement contract recorded the claim on-chain, identifying the retiring account and the exact credit serials — a fully documented retirement.",
+                "outsideGuardianTooltip": "Retired outside Guardian. The credits were permanently destroyed on the ledger without passing through the registry's retirement contract. Their removal from circulation is certain, but no on-chain record identifies who claimed the offset or on whose behalf.",
+                "burned": "Retired",
+                "eventTooltip": "Transfer — the credits changed hands and remain valid for future sale or retirement. Retirement — the credits were permanently taken out of circulation and can never be used again. Every transaction is one or the other."
             },
             "location": {
                 "title": "Project Location",
@@ -713,7 +735,21 @@
             },
             "issuances": {
                 "yearFilter": "Year",
-                "empty": "No issuances have been recorded for this project yet."
+                "empty": "No issuances have been recorded for this project yet.",
+                "notReconciled": "Not matched",
+                "viewSerials": "Show serial numbers",
+                "serialsHeading": "Serial numbers minted by this issuance",
+                "serialsUnavailable": "Serial numbers are not available for this issuance.",
+                "transactionsHeading": "Retirements and transfers of these serials",
+                "retiredOfMinted": "{retired} of {total} retired",
+                "status": {
+                    "mismatch": "The Guardian mint document declared {declared} credits, but {minted} were actually minted on-chain.",
+                    "unmatched": "This issuance has not been matched to an on-chain mint yet, so only the declared amount is known.",
+                    "ambiguous": "More than one mint document claims this issuance, so its credits cannot be attributed to it with confidence.",
+                    "pending": "This issuance has not been reconciled against the ledger yet."
+                },
+                "serialsActive": "{count} active",
+                "serialsRetired": "{count} retired"
             },
             "tabs": {
                 "summary": "Summary",
@@ -829,6 +865,8 @@
             "symbol": "Symbol",
             "type": "Type",
             "supply": "Mint Amount",
+            "declaredAmount": "Declared",
+            "mintedOnChain": "Minted On-Chain",
             "mintDate": "Mint Date",
             "project": "Project",
             "methodology": "Methodology",
@@ -849,7 +887,9 @@
         "tooltips": {
             "hideUnlinked": "Hides tokens that have not yet been matched to a project. Uncheck to see all indexed tokens including those still awaiting project attribution.",
             "mintDate": "Mint Date",
-            "mintAmount": "Total number of Credits Minted for the particular project. For NFTs, this is the number of unique serials."
+            "mintAmount": "Total number of Credits Minted for the particular project. For NFTs, this is the number of unique serials.",
+            "declaredAmount": "The credit amount stated in the Guardian mint document. This is what the registry intended to issue, which is not always what the ledger recorded.",
+            "mintedOnChain": "The amount actually minted on Hedera: the number of NFT serials carrying this mint's identifier, or the amount recorded by the fungible mint transaction."
         },
         "detail": {
             "notFound": "Token not found",
@@ -873,6 +913,8 @@
             },
             "tokenInformation": "Token Information",
             "supplyDifferenceTooltip": "The Supply Amount and Minted Amount for this issuance are currently different.",
+            "mintDifferenceTooltip": "{count} of this token's issuances declared a different amount than was actually minted on-chain. Declared in total: {declared}. Actually minted: {minted}.",
+            "mintPendingTooltip": "Some of this token's issuances have not yet been matched to an on-chain mint, so the totals shown are the amounts declared in the Guardian mint documents.",
             "tokenSupply": "Token Supply",
             "tokenSupplyTooltip": "Total number of tokens that are currently in circulation.",
             "tokenSupplyLiveTooltip": "Live total supply, fetched directly from the Hedera Mirror Node.",
@@ -1473,7 +1515,6 @@
             "subtitle": "Risk signal: heavy concentration in older vintages may indicate weaker baseline integrity under CCP / ICVCM principles"
         }
     },
-
     "vcViewer": {
         "rawDataOnBlockchain": "Raw Data on the blockchain",
         "searchInJson": "Search in JSON...",
@@ -1587,12 +1628,13 @@
             "activeSupply": {
                 "label": "Active Supply",
                 "sub": "Issued − retired",
-                "footer": "Retirement rate: 0%"
+                "footer": "Retirement rate: {rate}%"
             },
             "totalRetired": {
                 "label": "Total Credits Retired",
                 "sub": "Permanently retired",
-                "footer": "No retirements yet"
+                "footer": "Across {count} watched projects",
+                "footerEmpty": "No retirements recorded yet"
             },
             "activeProjects": {
                 "label": "Active Projects",
@@ -2490,5 +2532,92 @@
             "reparseEnqueued": "Reparse enqueued: {enqueued} VC jobs across {succeeded} methodologies",
             "reparseFailed": "Reparse failed: {error}"
         }
+    },
+    "issuances": {
+        "title": "Issuance",
+        "notFound": "Issuance not found",
+        "notFoundDesc": "No issuance with identifier {id} was found on this network.",
+        "backToList": "Back to issuances",
+        "mintedOn": "Minted on {date}",
+        "declared": "Declared Amount",
+        "mintedOnChain": "Minted On-Chain",
+        "notReconciled": "Not matched",
+        "project": "Project",
+        "methodology": "Methodology",
+        "registry": "Registry",
+        "vpTimestamp": "Mint VP Timestamp",
+        "vpTimestampTooltip": "The Guardian mint document timestamp that Hedera carries on-chain — in each NFT's metadata, or in the fungible mint transaction's memo. It is what ties the on-chain mint back to this credential.",
+        "status": {
+            "label": "Reconciliation",
+            "mismatch": "The Guardian mint document declared {declared} credits, but {minted} were actually minted on-chain — {direction} than declared.",
+            "more": "more",
+            "fewer": "fewer",
+            "unmatched": "This issuance has not been matched to an on-chain mint yet, so only the declared amount is known.",
+            "ambiguous": "More than one mint document claims this issuance, so its credits cannot be attributed to it with confidence.",
+            "pending": "This issuance has not been reconciled against the ledger yet.",
+            "verifiedSub": "Declared and on-chain amounts agree"
+        },
+        "statusLabels": {
+            "verified": "Verified",
+            "mismatch": "Mismatch",
+            "unmatched": "Not matched",
+            "ambiguous": "Ambiguous",
+            "pending": "Pending"
+        },
+        "serials": {
+            "title": "Serials",
+            "range": "Serial range",
+            "count": "Credits",
+            "state": "State",
+            "active": "Active",
+            "retired": "Retired",
+            "summary": "{total} serials · {active} active · {retired} retired",
+            "empty": "No serials have been attributed to this issuance yet.",
+            "holder": "Held by",
+            "holderTooltip": "The account currently holding these serials, read from Hedera. Ranges split on a change of holder, so a range never spans two owners. Guardian issues no transfer document, so there is no counterparty history here.",
+            "holderUnknown": "Not synced yet",
+            "holderRetired": "Retired",
+            "fungible": "This is a fungible issuance. Fungible credits have no serial numbers — their units are interchangeable and cannot be enumerated.",
+            "fungibleTitle": "No serial numbers",
+            "emptyTitle": "No serials attributed yet",
+            "rangeTooltip": "Serials are grouped into ranges rather than listed one by one — a range can cover tens of thousands of credits. A range is split whenever the state or the holder changes, so every serial inside one is identical in both respects."
+        },
+        "transactions": {
+            "title": "Transactions",
+            "subtitle": "Retirements and transfers of the credits this issuance produced.",
+            "undocumentedRetirement": "This issuance has {count} retired credit(s). Retirements only appear below when the registry used Guardian's retirement contract; credits wiped outside it are genuinely retired, but the ledger records no transaction naming who retired them or when."
+        },
+        "token": {
+            "title": "Token Information",
+            "supply": "Token Supply",
+            "supplyTooltip": "Credits of this token currently in existence. Net of retirements, so it is lower than the amount minted whenever credits have been retired.",
+            "mintedAll": "Total Minted (All Projects)",
+            "mintedProject": "Total Minted (This Project)",
+            "issuanceCount": "Issuances",
+            "relatedIssuances": "Related Token Issuances",
+            "relatedIssuancesEmpty": "This is the only issuance recorded for this token.",
+            "relatedProjects": "Projects Using This Token",
+            "relatedProjectsEmpty": "No other project mints from this token.",
+            "relatedProjectsTooltip": "Projects that mint from this same token. A token can serve several projects, but this issuance belongs to exactly one of them — shown under Summary.",
+            "relatedIssuancesEmptyTitle": "No other issuances",
+            "relatedProjectsEmptyTitle": "No other projects"
+        },
+        "tabs": {
+            "summary": "Summary",
+            "transactions": "Transactions",
+            "token": "Token Information",
+            "advanced": "Advanced"
+        },
+        "amountsTitle": "Issuance Amount",
+        "linkageTitle": "Issuance Linkage",
+        "declaredSub": "Stated in the Guardian mint document",
+        "mintedOnChainSub": "Recorded by the Hedera ledger",
+        "mintTimestamp": "Mint Credential Timestamp",
+        "mintTimestampTooltip": "The HCS consensus timestamp of the MintToken credential. It identifies this issuance across the whole Atlas.",
+        "advanced": {
+            "title": "Advanced",
+            "subtitle": "On-chain identifiers behind this issuance."
+        },
+        "unlinked": "This issuance is not linked to a project. The mint credential is real and its amount stands, but nothing connected it to a project, methodology or registry — so it counts towards no project total. Attribution can appear later as more of the policy is indexed."
     }
 }
