@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { MV_REGISTRY_STATS_NAME } from '@shared/materialized-views';
 import {
     IssuanceRepository,
     IssuanceSummaryRow,
@@ -60,7 +61,7 @@ export class PgIssuanceRepository extends IssuanceRepository {
                 meth."relatedTopicId"                            AS "methodologyId",
                 meth."displayName"                               AS "methodologyName",
                 proj."registryDid"                               AS "registryDid",
-                reg."displayName"                                AS "registryName"
+                reg.registry_name                                AS "registryName"
              FROM message m
              LEFT JOIN project_mint_link pml
                  ON pml.mint_consensus_timestamp = m."consensusTimestamp"
@@ -76,13 +77,8 @@ export class PgIssuanceRepository extends IssuanceRepository {
                  ORDER BY bv_meth."sourceTimestamp"::numeric DESC NULLS LAST
                  LIMIT 1
              ) meth ON true
-             LEFT JOIN LATERAL (
-                 SELECT bv_reg."displayName"
-                 FROM business_view bv_reg
-                 WHERE bv_reg."viewType" = 'REGISTRY' AND bv_reg."registryDid" = proj."registryDid"
-                 ORDER BY bv_reg."sourceTimestamp"::numeric DESC NULLS LAST
-                 LIMIT 1
-             ) reg ON true
+             LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg
+                 ON reg."registryDid" = proj."registryDid"
              WHERE m."consensusTimestamp" = $1
                AND m.type = 'VC-Document'
                AND m.documents->'credentialSubject'->0->>'type' LIKE 'MintToken%'

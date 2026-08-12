@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { RedisService } from '@shared/redis/redis.service';
 import { NetworkDataSourceRegistry } from '../database/network-datasource.registry';
 import { PgIssuanceRepository } from '../repositories/pg-issuance.repository';
 import { IssuanceRepository } from '../repositories/issuance.repository';
@@ -11,6 +12,11 @@ import {
 } from '../dto/issuance.dto';
 import { MintSerialsResponseDto, MintTransactionsResponseDto } from '../dto/project.dto';
 
+// Short TTL, matching ProjectsService.findById — this reads through
+// project_mint_link's live reconciliation (declared vs. minted, serial
+// counts), which the worker updates on ingest, not on a fixed cadence.
+const FIND_SUMMARY_CACHE_TTL_SECONDS = 30;
+
 /**
  * Serves the issuance detail page.
  *
@@ -21,7 +27,10 @@ import { MintSerialsResponseDto, MintTransactionsResponseDto } from '../dto/proj
  */
 @Injectable()
 export class IssuanceService {
-    constructor(private readonly dataSources: NetworkDataSourceRegistry) {}
+    constructor(
+        private readonly dataSources: NetworkDataSourceRegistry,
+        private readonly redis: RedisService,
+    ) {}
 
     private getRepository(network: string): IssuanceRepository {
         return new PgIssuanceRepository(this.dataSources.getDataSource(network));
@@ -38,8 +47,14 @@ export class IssuanceService {
     }
 
     async findSummary(network: string, mintConsensusTimestamp: string): Promise<IssuanceSummaryDto> {
+        const cacheKey = `issuance-summary:${network}:${mintConsensusTimestamp}`;
+        const cached = await this.redis.getJson<IssuanceSummaryDto>(cacheKey);
+        if (cached) return cached;
+
         const row = await this.getRepository(network).findSummary(mintConsensusTimestamp);
         if (!row) throw this.notFound(network, mintConsensusTimestamp);
+
+        await this.redis.setJson(cacheKey, row, FIND_SUMMARY_CACHE_TTL_SECONDS);
         return row;
     }
 
