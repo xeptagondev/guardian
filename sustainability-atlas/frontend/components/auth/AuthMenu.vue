@@ -2,7 +2,7 @@
 import { onClickOutside } from '@vueuse/core';
 import { LogIn, UserCircle, Users, LogOut, ChevronDown } from 'lucide-vue-next';
 
-const { user, isAuthenticated, isAdmin, openSignIn, logout } = useAuth();
+const { user, isAuthenticated, isAdmin, isAuthResolved, openSignIn, logout } = useAuth();
 
 const open = ref(false);
 const menuRef = ref<HTMLElement | null>(null);
@@ -39,9 +39,15 @@ async function onLogout() {
 </script>
 
 <template>
-    <!-- Guest: Sign In button -->
+    <!-- Auth resolving: show neutral skeleton so Sign In never flashes on refresh -->
+    <div
+        v-if="!isAuthResolved"
+        class="h-7 w-20 animate-pulse rounded-md bg-muted/60"
+    />
+
+    <!-- Guest: Sign In button — only rendered AFTER auth resolves -->
     <button
-        v-if="!isAuthenticated"
+        v-else-if="!isAuthenticated"
         data-tour="auth-menu"
         class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         @click="openSignIn()"
