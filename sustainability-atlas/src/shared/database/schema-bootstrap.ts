@@ -241,39 +241,6 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         ALTER TABLE project_mint_link
         ADD COLUMN IF NOT EXISTS mint_match_status VARCHAR(16)
     `);
-    // MintToken VC amounts can be fractional for fungible tokens ("250.5"); the
-    // original BIGINT forced the linker to round and lose the fraction.
-    //
-    // The materialized views read this column, so Postgres refuses the type
-    // change while they exist. They are dropped and rebuilt around it here
-    // rather than left to MvRefreshProcessor: bootstrapSchema also runs in
-    // guardian-sync, which has no refresh loop to put them back. Their
-    // mv_registry hashes are cleared so the refresh processor still owns
-    // definition changes from here on.
-    const [amountCol]: Array<{ data_type: string }> = await dataSource.query(`
-        SELECT data_type FROM information_schema.columns
-        WHERE table_name = 'project_mint_link' AND column_name = 'amount'
-    `);
-    if (amountCol && amountCol.data_type !== 'numeric') {
-        for (const mv of [...MATERIALIZED_VIEWS].reverse()) {
-            await dataSource.query(`DROP MATERIALIZED VIEW IF EXISTS ${mv.name} CASCADE`);
-        }
-        await dataSource.query(`
-            ALTER TABLE project_mint_link ALTER COLUMN amount TYPE NUMERIC USING amount::numeric
-        `);
-        for (const mv of MATERIALIZED_VIEWS) {
-            await dataSource.query(mv.createSql);
-            if (mv.indexSql) {
-                await dataSource.query(mv.indexSql);
-            }
-        }
-        const [registryTable] = await dataSource.query(`SELECT to_regclass('mv_registry') AS t`);
-        if (registryTable?.t) {
-            await dataSource.query(`DELETE FROM mv_registry WHERE name = ANY($1::text[])`, [
-                MATERIALIZED_VIEWS.map((mv) => mv.name),
-            ]);
-        }
-    }
     await dataSource.query(`
         CREATE INDEX IF NOT EXISTS idx_pml_vp_ts
             ON project_mint_link (vp_consensus_timestamp)
@@ -737,6 +704,49 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
             CONSTRAINT "PK_notification_watermarks" PRIMARY KEY ("source")
         )
     `);
+
+    // MintToken VC amounts can be fractional for fungible tokens ("250.5"); the
+    // original BIGINT forced the linker to round and lose the fraction.
+    //
+    // The materialized views read this column, so Postgres refuses the type
+    // change while they exist. They are dropped and rebuilt around it here
+    // rather than left to MvRefreshProcessor: bootstrapSchema also runs in
+    // guardian-sync, which has no refresh loop to put them back. Their
+    // mv_registry hashes are cleared so the refresh processor still owns
+    // definition changes from here on.
+    //
+    // Kept as the last thing bootstrapSchema does: the materialized view
+    // definitions reach across most of this function's tables/columns (e.g.
+    // mv_project_stats reads nft_cache."metadataTimestamp" and
+    // token_retire_event), so rebuilding them has to run after everything
+    // else here has ensured its column/table exists — running this earlier
+    // dropped every materialized view and then failed to recreate them
+    // because a dependency further down the function hadn't run yet,
+    // leaving the database without any materialized views at all.
+    const [amountCol]: Array<{ data_type: string }> = await dataSource.query(`
+        SELECT data_type FROM information_schema.columns
+        WHERE table_name = 'project_mint_link' AND column_name = 'amount'
+    `);
+    if (amountCol && amountCol.data_type !== 'numeric') {
+        for (const mv of [...MATERIALIZED_VIEWS].reverse()) {
+            await dataSource.query(`DROP MATERIALIZED VIEW IF EXISTS ${mv.name} CASCADE`);
+        }
+        await dataSource.query(`
+            ALTER TABLE project_mint_link ALTER COLUMN amount TYPE NUMERIC USING amount::numeric
+        `);
+        for (const mv of MATERIALIZED_VIEWS) {
+            await dataSource.query(mv.createSql);
+            if (mv.indexSql) {
+                await dataSource.query(mv.indexSql);
+            }
+        }
+        const [registryTable] = await dataSource.query(`SELECT to_regclass('mv_registry') AS t`);
+        if (registryTable?.t) {
+            await dataSource.query(`DELETE FROM mv_registry WHERE name = ANY($1::text[])`, [
+                MATERIALIZED_VIEWS.map((mv) => mv.name),
+            ]);
+        }
+    }
 }
 
 /**
