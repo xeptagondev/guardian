@@ -6,18 +6,20 @@ import { DataSource } from 'typeorm';
 import { QUEUE_NAMES } from '@shared/config/bullmq.config';
 import { HederaService, TopicMessage } from '../services/hedera.service';
 import { isTopicBlocked } from '@shared/config/topic-blocklist';
+import { TopicSyncJobData } from './topic-sync.processor';
 
-export interface TopicSyncJobData {
-    topicId: string;
-    fromSequenceNumber: number;
-    isOrgTopic: boolean;
-    // Consecutive empty-poll count; drives backoff. Reset to 0 on real messages.
-    emptyPollStreak?: number;
-}
-
-@Processor(QUEUE_NAMES.TOPIC_SYNC)
-export class TopicSyncProcessor extends WorkerHost {
-    private readonly logger = new Logger(TopicSyncProcessor.name);
+/**
+ * Same sync logic as TopicSyncProcessor, on a physically separate queue that
+ * only ever holds the root/registry topic + guardian-sync's event-triggered
+ * syncs — never the six-figure routine-repoll backlog TOPIC_SYNC carries.
+ *
+ * A separate queue instead of `priority`/`lifo` on TOPIC_SYNC because neither
+ * reliably jumped a job to the front once that queue hit 100k+ jobs (tested
+ * against this project's Redict instance).
+ */
+@Processor(QUEUE_NAMES.TOPIC_SYNC_PRIORITY)
+export class TopicSyncPriorityProcessor extends WorkerHost {
+    private readonly logger = new Logger(TopicSyncPriorityProcessor.name);
     private readonly pollDelay: number;
     private readonly orgPollDelay: number;
     private readonly maxPollDelay: number;
@@ -27,13 +29,11 @@ export class TopicSyncProcessor extends WorkerHost {
         private readonly dataSource: DataSource,
         private readonly configService: ConfigService,
         @InjectQueue(QUEUE_NAMES.MESSAGE_PARSE) private readonly messageQueue: Queue,
-        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly priorityQueue: Queue,
     ) {
         super();
         this.pollDelay = this.configService.get<number>('app.mirrorNodePollDelay') ?? 30000;
-        // Org topics poll 3x faster for quicker visibility of org-specific events
         this.orgPollDelay = Math.max(1000, Math.floor(this.pollDelay / 3));
-        // Ceiling for the empty-poll backoff below.
         this.maxPollDelay = this.configService.get<number>('app.mirrorNodeMaxPollDelay') ?? 1_800_000;
     }
 
@@ -45,19 +45,15 @@ export class TopicSyncProcessor extends WorkerHost {
             return;
         }
 
-        this.logger.log(`Syncing topic ${topicId} from seq ${fromSequenceNumber}`);
+        this.logger.log(`Syncing topic ${topicId} from seq ${fromSequenceNumber} (priority lane)`);
 
         const { messages } = await this.hederaService.getMessages(topicId, fromSequenceNumber);
 
         if (messages.length === 0) {
-            // No new messages — re-enqueue with a delay, backing off exponentially
-            // the longer the topic stays quiet (capped at maxPollDelay).
-            // Uses timestamp in jobId so each poll creates a fresh job
-            // (BullMQ dedupes completed/stale jobIds).
             const baseDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
             const streak = emptyPollStreak + 1;
             const delay = Math.min(baseDelay * 2 ** Math.min(streak, 10), this.maxPollDelay);
-            await this.topicQueue.add('sync', {
+            await this.priorityQueue.add('sync', {
                 topicId,
                 fromSequenceNumber,
                 isOrgTopic,
@@ -65,8 +61,6 @@ export class TopicSyncProcessor extends WorkerHost {
             }, {
                 jobId: `topic-${topicId}-poll-${Date.now()}`,
                 delay,
-                // Each poll is a uniquely-named keep-alive job; without these the
-                // completed/failed sets grow unbounded and eventually OOM Redict.
                 removeOnComplete: true,
                 removeOnFail: 1000,
             });
@@ -78,10 +72,8 @@ export class TopicSyncProcessor extends WorkerHost {
         const hasNext = messages.length >= 100;
         const now = Date.now().toString();
 
-        // 1. Batch insert into message_cache within a transaction
         await this.batchInsertMessages(messages, topicId, now);
 
-        // 2. Bulk enqueue message processing jobs
         await this.messageQueue.addBulk(
             messages.map(msg => ({
                 name: 'process',
@@ -90,19 +82,14 @@ export class TopicSyncProcessor extends WorkerHost {
                     topicId,
                 },
                 opts: {
-                    priority: isOrgTopic ? 1 : 10,
+                    priority: 1,
                     jobId: `msg-${msg.consensus_timestamp}`,
-                    // Trim on finish — message data lives in Postgres, so retained
-                    // completed/failed job hashes are pure Redict bloat.
                     removeOnComplete: true,
                     removeOnFail: 1000,
                 },
             })),
         );
 
-        // 3. Update watermark LAST — if we crash before here,
-        //    the watermark stays at the old value and messages
-        //    will be re-fetched on restart (idempotent via ON CONFLICT)
         await this.dataSource.query(
             `INSERT INTO topic_cache ("topicId", messages, "hasNext", "lastUpdate", status)
              VALUES ($4, $1, $2, $3, 'SYNCED')
@@ -114,33 +101,25 @@ export class TopicSyncProcessor extends WorkerHost {
             [maxSequence, hasNext, now, topicId],
         );
 
-        // 4. Self-enqueue for next page.
-        //    - If full page received: immediate next page (catching up)
-        //    - If partial page: delayed re-poll (caught up, waiting for new messages)
         const nextDelay = hasNext ? 100 : (isOrgTopic ? this.orgPollDelay : this.pollDelay);
-        await this.topicQueue.add('sync', {
+        await this.priorityQueue.add('sync', {
             topicId,
             fromSequenceNumber: maxSequence,
             isOrgTopic,
-            emptyPollStreak: 0, // real messages arrived — reset the backoff
+            emptyPollStreak: 0,
         }, {
             jobId: `topic-${topicId}-${maxSequence}-${Date.now()}`,
             delay: nextDelay,
-            // Uniquely-named per page/watermark — trim on finish so they don't
-            // accumulate in the completed/failed sets and exhaust Redict memory.
             removeOnComplete: true,
             removeOnFail: 1000,
         });
 
         this.logger.log(
-            `Topic ${topicId}: ${messages.length} messages, maxSeq=${maxSequence}, hasNext=${hasNext}`,
+            `Topic ${topicId} (priority lane): ${messages.length} messages, maxSeq=${maxSequence}, hasNext=${hasNext}`,
         );
     }
 
-    /**
-     * Batch inserts messages into message_cache using a single query
-     * wrapped in a transaction for atomicity.
-     */
+    /** Same batching approach as TopicSyncProcessor — see that file for rationale. */
     private async batchInsertMessages(
         messages: TopicMessage[],
         topicId: string,
@@ -151,7 +130,6 @@ export class TopicSyncProcessor extends WorkerHost {
         await queryRunner.startTransaction();
 
         try {
-            // Build a single multi-row INSERT with unnest for batch efficiency
             const timestamps: string[] = [];
             const topicIds: string[] = [];
             const bodies: string[] = [];
@@ -212,7 +190,7 @@ export class TopicSyncProcessor extends WorkerHost {
     @OnWorkerEvent('failed')
     onFailed(job: Job<TopicSyncJobData>, error: Error): void {
         this.logger.error(
-            `Topic sync job ${job.id} failed for topic ${job.data.topicId}: ${error.message}`,
+            `Priority topic sync job ${job.id} failed for topic ${job.data.topicId}: ${error.message}`,
             error.stack,
         );
     }

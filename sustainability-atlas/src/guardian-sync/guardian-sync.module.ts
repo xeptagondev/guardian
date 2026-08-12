@@ -16,6 +16,7 @@ import { GuardianEventSubscriber } from './guardian-event-subscriber.service';
 // the worker owns/drains them. These are the only queues the event router touches.
 const PRODUCER_QUEUES = [
     QUEUE_NAMES.TOPIC_SYNC,
+    QUEUE_NAMES.TOPIC_SYNC_PRIORITY,
     QUEUE_NAMES.IPFS_FETCH,
     QUEUE_NAMES.TOKEN_SYNC,
 ] as const;

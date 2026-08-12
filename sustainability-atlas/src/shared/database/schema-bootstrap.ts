@@ -15,15 +15,23 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
 
     // Add tsvector column to business_view if it doesn't exist.
     // This is a generated column that auto-updates whenever the source fields change.
-    await dataSource.query(`
-        ALTER TABLE business_view
-        ADD COLUMN IF NOT EXISTS "searchVector" tsvector
-        GENERATED ALWAYS AS (
-            setweight(to_tsvector('english', coalesce("displayName", '')), 'A') ||
-            setweight(to_tsvector('english', coalesce("registryDid", '')), 'B') ||
-            setweight(to_tsvector('english', coalesce("searchText", '')), 'C')
-        ) STORED
+    // Existence check first: ALTER TABLE needs an ACCESS EXCLUSIVE lock even to
+    // evaluate IF NOT EXISTS, so skip the statement when already applied.
+    const [searchVectorCol] = await dataSource.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'business_view' AND column_name = 'searchVector'
     `);
+    if (!searchVectorCol) {
+        await dataSource.query(`
+            ALTER TABLE business_view
+            ADD COLUMN IF NOT EXISTS "searchVector" tsvector
+            GENERATED ALWAYS AS (
+                setweight(to_tsvector('english', coalesce("displayName", '')), 'A') ||
+                setweight(to_tsvector('english', coalesce("registryDid", '')), 'B') ||
+                setweight(to_tsvector('english', coalesce("searchText", '')), 'C')
+            ) STORED
+        `);
+    }
 
     // GIN index on tsvector for fast full-text search (O(log n) instead of O(n))
     await dataSource.query(`
@@ -45,10 +53,16 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
 
     // Stable dedup key for PROJECT rows in eager mapping.
     // Nullable; partial unique index ensures no two PROJECT rows share a key.
-    await dataSource.query(`
-        ALTER TABLE business_view
-        ADD COLUMN IF NOT EXISTS "projectKey" varchar(120)
+    const [projectKeyCol] = await dataSource.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'business_view' AND column_name = 'projectKey'
     `);
+    if (!projectKeyCol) {
+        await dataSource.query(`
+            ALTER TABLE business_view
+            ADD COLUMN IF NOT EXISTS "projectKey" varchar(120)
+        `);
+    }
 
     await dataSource.query(`
         CREATE UNIQUE INDEX IF NOT EXISTS idx_business_view_project_key
@@ -72,15 +86,25 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     // VC-Documents per credit row (Postgres can't index into JSONB without
     // an expression index). With this index the lookup is O(log n).
     // Uses LIKE 'MintToken%' to capture versioned variants (e.g. MintToken&1.0.0).
-    // Drop first so a stale index with the old = 'MintToken' condition is replaced.
-    await dataSource.query(`DROP INDEX IF EXISTS idx_message_mint_token_tokenid`);
-    await dataSource.query(`
-        CREATE INDEX idx_message_mint_token_tokenid
-        ON message ((documents->'credentialSubject'->0->>'tokenId'))
-        WHERE type = 'VC-Document'
-          AND documents IS NOT NULL
-          AND (documents->'credentialSubject'->0->>'type') LIKE 'MintToken%'
+    // Only drop+rebuild when the live definition doesn't already match (an old
+    // deployment may still carry the stale `= 'MintToken'` condition) — this
+    // runs on every worker boot, i.e. every deploy, and an unconditional rebuild
+    // means re-scanning the full `message` table for no reason on every restart.
+    const [mintTokenIdx] = await dataSource.query(`
+        SELECT indexdef FROM pg_indexes
+        WHERE schemaname = 'public' AND indexname = 'idx_message_mint_token_tokenid'
     `);
+    if (!mintTokenIdx || !mintTokenIdx.indexdef.includes(`LIKE 'MintToken%'`)) {
+        await dataSource.query(`DROP INDEX IF EXISTS idx_message_mint_token_tokenid`);
+        // IF NOT EXISTS guards the DROP+CREATE race across concurrent boots (api + worker(s)).
+        await dataSource.query(`
+            CREATE INDEX IF NOT EXISTS idx_message_mint_token_tokenid
+            ON message ((documents->'credentialSubject'->0->>'tokenId'))
+            WHERE type = 'VC-Document'
+              AND documents IS NOT NULL
+              AND (documents->'credentialSubject'->0->>'type') LIKE 'MintToken%'
+        `);
+    }
 
     // Partial expression index on Token-message options->>'tokenId'. Without
     // this, the raw-data viewer's Token-message lookup (ORDER BY
@@ -112,34 +136,30 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     `);
 
     // Migrate existing tables that still use the old project_source_timestamp column.
-    // ADD COLUMN IF NOT EXISTS + conditional backfill + DROP COLUMN IF EXISTS are all
-    // idempotent, so this runs safely on every startup.
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        ADD COLUMN IF NOT EXISTS project_key VARCHAR(120)
+    // Runs only while the legacy column is present, to avoid an unconditional
+    // ACCESS EXCLUSIVE lock on project_mint_link every boot after migration.
+    const [legacyTimestampCol] = await dataSource.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'project_mint_link' AND column_name = 'project_source_timestamp'
     `);
-    await dataSource.query(`
-        DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'project_mint_link'
-                  AND column_name = 'project_source_timestamp'
-            ) THEN
-                UPDATE project_mint_link pml
-                SET project_key = bv."projectKey"
-                FROM business_view bv
-                WHERE bv."sourceTimestamp" = pml.project_source_timestamp
-                  AND bv."viewType" = 'PROJECT'
-                  AND pml.project_key IS NULL;
-            END IF;
-        END
-        $$
-    `);
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        DROP COLUMN IF EXISTS project_source_timestamp
-    `);
+    if (legacyTimestampCol) {
+        await dataSource.query(`
+            ALTER TABLE project_mint_link
+            ADD COLUMN IF NOT EXISTS project_key VARCHAR(120)
+        `);
+        await dataSource.query(`
+            UPDATE project_mint_link pml
+            SET project_key = bv."projectKey"
+            FROM business_view bv
+            WHERE bv."sourceTimestamp" = pml.project_source_timestamp
+              AND bv."viewType" = 'PROJECT'
+              AND pml.project_key IS NULL
+        `);
+        await dataSource.query(`
+            ALTER TABLE project_mint_link
+            DROP COLUMN IF EXISTS project_source_timestamp
+        `);
+    }
 
     await dataSource.query(`DROP INDEX IF EXISTS idx_pml_project_src`);
     await dataSource.query(`

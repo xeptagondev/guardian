@@ -260,6 +260,9 @@ export default registerAs('app', () => {
 
         // Mirror node polling
         mirrorNodePollDelay: parseInt(process.env.MIRROR_NODE_POLL_DELAY || '30000', 10),
+        // Ceiling for topic-sync.processor.ts's empty-poll backoff (a topic with no
+        // new messages doubles its re-poll delay each miss, up to this cap).
+        mirrorNodeMaxPollDelay: parseInt(process.env.MIRROR_NODE_MAX_POLL_DELAY || '1800000', 10),
 
         // Logging
         logLevel: process.env.LOG_LEVEL || 'info',

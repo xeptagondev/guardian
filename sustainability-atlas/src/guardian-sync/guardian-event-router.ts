@@ -22,9 +22,11 @@ interface AuditMeta {
  * Contract:
  *   - route() NEVER throws (it is called per stream event; a malformed payload
  *     logs at debug and returns).
- *   - Every enqueue uses a STABLE jobId + removeOnComplete and sets NO `priority`
- *     (D11 crawler-starvation). jobIds match the canonical conventions so event
- *     and poll paths dedupe to one job.
+ *   - Every enqueue uses a STABLE jobId + removeOnComplete. jobIds match the
+ *     canonical conventions so event and poll paths dedupe to one job.
+ *   - enqueueTopicSync() targets TOPIC_SYNC_PRIORITY, a separate small queue,
+ *     not the bulk TOPIC_SYNC crawl (priority/lifo ordering on that one proved
+ *     unreliable at 100k+ jobs — see topic-sync-priority.processor.ts).
  */
 @Injectable()
 export class GuardianEventRouter {
@@ -34,7 +36,7 @@ export class GuardianEventRouter {
     constructor(
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
-        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly topicQueue: Queue,
         private readonly eventLog: GuardianEventLogService,
         private readonly dataSource: DataSource,
     ) {}
@@ -205,9 +207,11 @@ export class GuardianEventRouter {
         } catch {
             // Job didn't exist — fine.
         }
+        // Targets TOPIC_SYNC_PRIORITY (injected as topicQueue above), not the
+        // bulk TOPIC_SYNC crawl — see the class doc comment for why.
         await this.topicQueue.add(
             'sync',
-            { topicId, fromSequenceNumber: 0, isOrgTopic: false },
+            { topicId, fromSequenceNumber: 0, isOrgTopic: true },
             { jobId, removeOnComplete: true },
         );
     }

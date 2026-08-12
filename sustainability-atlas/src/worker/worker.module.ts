@@ -27,6 +27,7 @@ import { LocalPolicyZipStorage } from './services/storage/local-policy-zip-stora
 
 // Processors
 import { TopicSyncProcessor } from './processors/topic-sync.processor';
+import { TopicSyncPriorityProcessor } from './processors/topic-sync-priority.processor';
 import { MessageProcessProcessor } from './processors/message-process.processor';
 import { TokenSyncProcessor } from './processors/token-sync.processor';
 import { IpfsFetchProcessor } from './processors/ipfs-fetch.processor';
@@ -47,6 +48,7 @@ import { QueueAutoscalerService } from './services/queue-autoscaler.service';
  */
 const PROCESSOR_MAP: Record<string, any> = {
     [QUEUE_NAMES.TOPIC_SYNC]: TopicSyncProcessor,
+    [QUEUE_NAMES.TOPIC_SYNC_PRIORITY]: TopicSyncPriorityProcessor,
     [QUEUE_NAMES.MESSAGE_PARSE]: MessageProcessProcessor,
     [QUEUE_NAMES.TOKEN_SYNC]: TokenSyncProcessor,
     [QUEUE_NAMES.IPFS_FETCH]: IpfsFetchProcessor,
