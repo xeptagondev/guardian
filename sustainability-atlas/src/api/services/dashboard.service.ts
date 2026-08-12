@@ -91,7 +91,7 @@ export class DashboardService {
     }
 
     private cacheKey(scope: string, network: string, query: DashboardMintQuery): string {
-        return `dashboard:${scope}:${network}:${query.registry ?? ''}:${query.developer ?? ''}`;
+        return `dashboard:${scope}:${network}:${query.registry ?? ''}:${query.developer ?? ''}:${query.registryDid ?? ''}`;
     }
 
     private buildSummary(

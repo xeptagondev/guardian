@@ -9,6 +9,13 @@ import { CreditRepository, CreditRawDetail, CreditListQuery } from '../repositor
 
 const STATS_CACHE_TTL_SECONDS = 60;
 
+// Longer than the other cache TTLs in this file — the underlying Token/MintToken
+// HCS messages are immutable once written. The only thing that can move is the
+// project/methodology attribution joined in via project_mint_link, which shifts
+// only on an admin re-link/reparse action, so a bounded TTL (rather than a
+// permanent cache with no invalidation hook) keeps that eventually consistent.
+const RAW_CACHE_TTL_SECONDS = 300;
+
 @Injectable()
 export class CreditsService {
     constructor(
@@ -70,8 +77,16 @@ export class CreditsService {
     }
 
     async findRaw(network: string, tokenId: string): Promise<CreditRawDetail | null> {
+        const cacheKey = `credit-raw:${network}:${tokenId}`;
+        const cached = await this.redis.getJson<CreditRawDetail>(cacheKey);
+        if (cached) return cached;
+
         const repo = this.getRepository(network);
-        return repo.findRaw(tokenId);
+        const detail = await repo.findRaw(tokenId);
+        if (!detail) return null;
+
+        await this.redis.setJson(cacheKey, detail, RAW_CACHE_TTL_SECONDS);
+        return detail;
     }
 
     /**

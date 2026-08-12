@@ -395,9 +395,40 @@ export class PgProjectRepository extends ProjectRepository {
         const policyTopicId = (row.businessData as Record<string, any> | null)?.['policyTopicId'] as string | null;
         const instanceTopicId = row.relatedTopicId;
 
-        // Step 1 — per-project mint attribution via project_mint_link: the linker pre-resolves each MintToken to
-        // its specific project by walking options.relationships, so this is correct even for grouped projects
-        // that share one instance topic.
+        // The three branches below share no data dependency on each other — only
+        // on the row already fetched above — so they run concurrently instead of
+        // as a 6-deep sequential chain (each was previously await'ed one after
+        // another purely by code placement, not because it needed a prior
+        // branch's result).
+        const [issuanceData, policySchemas, polygon] = await Promise.all([
+            this.resolveIssuances(row.projectKey, instanceTopicId),
+            this.resolvePolicySchemas(policyTopicId),
+            this.resolveGeometry(row.projectKey),
+        ]);
+
+        const { issuances, issuanceEvents, totalIssued, totalDeclared, totalRetired, totalTransferred, issuanceCount } = issuanceData;
+        const totalActive = totalIssued - totalRetired;
+
+        return PgProjectRepository.mapRow(row, issuances, { totalIssued, totalDeclared, totalRetired, totalActive, totalTransferred }, policySchemas, issuanceEvents, issuanceCount, polygon);
+    }
+
+    /**
+     * Per-project mint attribution via project_mint_link: the linker pre-resolves each MintToken to
+     * its specific project by walking options.relationships, so this is correct even for grouped projects
+     * that share one instance topic.
+     */
+    private async resolveIssuances(
+        projectKey: string | null,
+        instanceTopicId: string | null,
+    ): Promise<{
+        issuances: IssuanceRow[];
+        issuanceEvents: IssuanceEventRow[];
+        totalIssued: number;
+        totalDeclared: number;
+        totalRetired: number;
+        totalTransferred: number | null;
+        issuanceCount: number;
+    }> {
         let issuances: IssuanceRow[] = [];
         let issuanceEvents: IssuanceEventRow[] = [];
         let totalIssued = 0;
@@ -407,46 +438,50 @@ export class PgProjectRepository extends ProjectRepository {
         let totalTransferred: number | null = null;
         let totalRetired = 0;
 
-        const mintTokenRows: Array<{
-            token_id: string | null;
-            amount: number | null;
-            mint_date: Date | null;
-            documents: Record<string, any> | null;
-            mint_ts: string;
-            link_method: string | null;
-            vp_ts: string | null;
-            minted_amount: string | null;
-            serial_count: number | null;
-            serial_retired_count: number | null;
-            serial_transferred_count: number | null;
-            mint_match_status: string | null;
-        }> = await this.dataSource.query(
-            `SELECT
-                pml.token_id,
-                pml.amount,
-                pml.mint_date,
-                m.documents,
-                pml.mint_consensus_timestamp AS mint_ts,
-                pml.link_method,
-                pml.vp_consensus_timestamp   AS vp_ts,
-                pml.minted_amount,
-                pml.serial_count,
-                pml.serial_retired_count,
-                pml.serial_transferred_count,
-                pml.mint_match_status
-             FROM project_mint_link pml
-             JOIN message m ON m."consensusTimestamp" = pml.mint_consensus_timestamp
-             WHERE pml.project_key = $1
-             ORDER BY pml.mint_date ASC NULLS LAST`,
-            [row.projectKey],
-        );
-
-        const issuanceCountRows: Array<{ count: number }> = await this.dataSource.query(
-            `SELECT COUNT(*) FILTER (WHERE token_id IS NOT NULL)::int AS count
-             FROM project_mint_link
-             WHERE project_key = $1`,
-            [row.projectKey],
-        );
+        const [mintTokenRows, issuanceCountRows]: [
+            Array<{
+                token_id: string | null;
+                amount: number | null;
+                mint_date: Date | null;
+                documents: Record<string, any> | null;
+                mint_ts: string;
+                link_method: string | null;
+                vp_ts: string | null;
+                minted_amount: string | null;
+                serial_count: number | null;
+                serial_retired_count: number | null;
+                serial_transferred_count: number | null;
+                mint_match_status: string | null;
+            }>,
+            Array<{ count: number }>,
+        ] = await Promise.all([
+            this.dataSource.query(
+                `SELECT
+                    pml.token_id,
+                    pml.amount,
+                    pml.mint_date,
+                    m.documents,
+                    pml.mint_consensus_timestamp AS mint_ts,
+                    pml.link_method,
+                    pml.vp_consensus_timestamp   AS vp_ts,
+                    pml.minted_amount,
+                    pml.serial_count,
+                    pml.serial_retired_count,
+                    pml.serial_transferred_count,
+                    pml.mint_match_status
+                 FROM project_mint_link pml
+                 JOIN message m ON m."consensusTimestamp" = pml.mint_consensus_timestamp
+                 WHERE pml.project_key = $1
+                 ORDER BY pml.mint_date ASC NULLS LAST`,
+                [projectKey],
+            ),
+            this.dataSource.query(
+                `SELECT COUNT(*) FILTER (WHERE token_id IS NOT NULL)::int AS count
+                 FROM project_mint_link
+                 WHERE project_key = $1`,
+                [projectKey],
+            ),
+        ]);
         let issuanceCount = issuanceCountRows[0]?.count ?? 0;
 
         if (mintTokenRows.length > 0) {
@@ -692,65 +727,69 @@ export class PgProjectRepository extends ProjectRepository {
 
         if (issuanceCount === 0 && issuances.length > 0) issuanceCount = issuances.length;
 
-        const totalActive = totalIssued - totalRetired;
+        return { issuances, issuanceEvents, totalIssued, totalDeclared, totalRetired, totalTransferred, issuanceCount };
+    }
 
-        // Load schema metadata for this project's policyTopicId so the DTO can render a grouped linked-VCs view without a second round trip.
-        let policySchemas: PolicySchemaRow[] = [];
-        if (policyTopicId) {
-            const policySchemaRows: Array<{
-                policyTopicId: string;
-                sourceCid: string;
-                rawSchemaJson: Record<string, unknown> | null;
-                rawPolicyJson: Record<string, unknown> | null;
-                policyMapping: Record<string, unknown> | null;
-                createdAt: Date;
-                updatedAt: Date;
-            }> = await this.dataSource.query(
-                `SELECT "policyTopicId", "sourceCid", "rawSchemaJson", "rawPolicyJson", "policyMapping", "createdAt", "updatedAt"
-                 FROM policy
-                 WHERE "policyTopicId" = $1
-                   AND "decodeStatus" = 'decoded'
-                 ORDER BY "createdAt" DESC
-                 LIMIT 1`,
-                [policyTopicId],
+    /** Schema metadata for this project's policyTopicId so the DTO can render a grouped linked-VCs view. Independent of resolveIssuances — only needs policyTopicId, already known from the row query. */
+    private async resolvePolicySchemas(policyTopicId: string | null): Promise<PolicySchemaRow[]> {
+        if (!policyTopicId) return [];
+
+        const policySchemaRows: Array<{
+            policyTopicId: string;
+            sourceCid: string;
+            rawSchemaJson: Record<string, unknown> | null;
+            rawPolicyJson: Record<string, unknown> | null;
+            policyMapping: Record<string, unknown> | null;
+            createdAt: Date;
+            updatedAt: Date;
+        }> = await this.dataSource.query(
+            `SELECT "policyTopicId", "sourceCid", "rawSchemaJson", "rawPolicyJson", "policyMapping", "createdAt", "updatedAt"
+             FROM policy
+             WHERE "policyTopicId" = $1
+               AND "decodeStatus" = 'decoded'
+             ORDER BY "createdAt" DESC
+             LIMIT 1`,
+            [policyTopicId],
+        );
+
+        if (policySchemaRows.length === 0) return [];
+
+        const pr = policySchemaRows[0];
+        const rawSchemaJson = (pr.rawSchemaJson ?? {}) as Record<string, unknown>;
+        const schemaNamesByIri = new Map<string, string | null>();
+        for (const [iri, schemaDoc] of Object.entries(rawSchemaJson)) {
+            const doc = (schemaDoc ?? {}) as Record<string, unknown>;
+            schemaNamesByIri.set(iri, typeof doc['name'] === 'string' ? doc['name'] : null);
+        }
+        const mrvSchemaUuids = collectExternalDataBlockSchemas(pr.rawPolicyJson);
+        return PgProjectRepository.buildPolicySchemas(
+            schemaNamesByIri,
+            (pr.policyMapping ?? {}) as Record<string, unknown[]>,
+            mrvSchemaUuids,
+        );
+    }
+
+    /**
+     * Full-precision boundary lives in its own table (see schema-bootstrap.ts
+     * for why) — sent to the frontend as-is, no point dropped. It's kept
+     * out of businessData specifically so this full-detail read never
+     * costs anything on the list/search path; it's a one-row lookup by
+     * primary key on this single project-detail fetch. Independent of
+     * resolveIssuances/resolvePolicySchemas — only needs projectKey, already
+     * known from the row query.
+     */
+    private async resolveGeometry(projectKey: string | null): Promise<string | null> {
+        if (!projectKey) return null;
+
+        const geometryRows: Array<{ geo_type: GeoJsonPolygonType; geojson: { coordinates: unknown } }> =
+            await this.dataSource.query(
+                `SELECT geo_type, geojson FROM project_geometry WHERE project_key = $1 LIMIT 1`,
+                [projectKey],
             );
+        if (geometryRows.length === 0) return null;
 
-            if (policySchemaRows.length > 0) {
-                const pr = policySchemaRows[0];
-                const rawSchemaJson = (pr.rawSchemaJson ?? {}) as Record<string, unknown>;
-                const schemaNamesByIri = new Map<string, string | null>();
-                for (const [iri, schemaDoc] of Object.entries(rawSchemaJson)) {
-                    const doc = (schemaDoc ?? {}) as Record<string, unknown>;
-                    schemaNamesByIri.set(iri, typeof doc['name'] === 'string' ? doc['name'] : null);
-                }
-                const mrvSchemaUuids = collectExternalDataBlockSchemas(pr.rawPolicyJson);
-                policySchemas = PgProjectRepository.buildPolicySchemas(
-                    schemaNamesByIri,
-                    (pr.policyMapping ?? {}) as Record<string, unknown[]>,
-                    mrvSchemaUuids,
-                );
-            }
-        }
-
-        // Full-precision boundary lives in its own table (see schema-bootstrap.ts
-        // for why) — sent to the frontend as-is, no point dropped. It's kept
-        // out of businessData specifically so this full-detail read never
-        // costs anything on the list/search path; it's a one-row lookup by
-        // primary key on this single project-detail fetch.
-        let polygon: string | null = null;
-        if (row.projectKey) {
-            const geometryRows: Array<{ geo_type: GeoJsonPolygonType; geojson: { coordinates: unknown } }> =
-                await this.dataSource.query(
-                    `SELECT geo_type, geojson FROM project_geometry WHERE project_key = $1 LIMIT 1`,
-                    [row.projectKey],
-                );
-            if (geometryRows.length > 0) {
-                const { geo_type, geojson } = geometryRows[0];
-                polygon = JSON.stringify({ type: geo_type, coordinates: geojson.coordinates });
-            }
-        }
-
-        return PgProjectRepository.mapRow(row, issuances, { totalIssued, totalDeclared, totalRetired, totalActive, totalTransferred }, policySchemas, issuanceEvents, issuanceCount, polygon);
+        const { geo_type, geojson } = geometryRows[0];
+        return JSON.stringify({ type: geo_type, coordinates: geojson.coordinates });
     }
 
     async findActivity(sourceTimestamp: string): Promise<ActivityEventRow[]> {
