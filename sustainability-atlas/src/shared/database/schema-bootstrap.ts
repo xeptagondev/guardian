@@ -671,6 +671,29 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         WHERE type = 'Standard Registry'
     `);
 
+    // Back the Network Activity feed's registry-scoped "Methodology
+    // Registered"/"Registry Registered" branches (PgActivityRepository
+    // filters by the resolved registryDid, not display name — see the
+    // repository's own comment on why display-name filtering through a join
+    // defeats bind-parameter planning). Without these, a registry-filtered
+    // request falls back to idx_message_published_policy_cts/
+    // idx_message_standard_registry_cts's time-only ordering and has to scan
+    // every matching message (20k+/16k+ rows) to find the registry's own —
+    // measured at 217/80ms per branch even after the query-shape fix.
+    // Expression + composite ordering lets Postgres seek directly to one
+    // registryDid's rows, already time-sorted: measured at <1ms per branch
+    // for a single-DID registry, versus that scan.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_published_policy_owner_cts
+        ON message (COALESCE(owner, options->>'did'), "consensusTimestamp" DESC)
+        WHERE type = 'Instance-Policy' AND action = 'publish-policy'
+    `);
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_standard_registry_owner_cts
+        ON message (COALESCE(owner, options->>'did'), "consensusTimestamp" DESC)
+        WHERE type = 'Standard Registry'
+    `);
+
     // Resolves a token's creation message by token id — the token/issuance
     // detail pages read the creation date and issuer DID from it.
     //

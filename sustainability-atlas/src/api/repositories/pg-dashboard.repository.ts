@@ -112,6 +112,49 @@ export interface MapPointRow {
     credits: string | null;
 }
 
+/**
+ * One row per PROJECT in scope, carrying every column the dashboard's 12
+ * per-project breakdowns (country/sector/vintage/status/developer/
+ * methodology/lifecycle/map/portfolio) need. Fetched once and aggregated in
+ * Node (see dashboard-aggregation.util.ts) instead of issuing one GROUP BY
+ * query per breakdown — at 363 PROJECT rows, re-scanning/re-sorting the same
+ * scope 12 times cost more than the single fetch + in-memory grouping does.
+ */
+export interface ProjectScopeRow {
+    projectKey: string;
+    displayName: string | null;
+    country: string | null;
+    sector: string | null;
+    vintage: string | null;
+    status: string | null;
+    developer: string | null;
+    methodology: string | null;
+    methodologyId: string | null;
+    category: string | null;
+    registryName: string | null;
+    lifecycleStage: string;
+    /** MIN(developer)/MIN(registryName) within this row's country, computed by Postgres via a window function so the country table's representative label matches the database's actual text collation. */
+    countryMinDeveloper: string | null;
+    countryMinRegistry: string | null;
+    credits: string; // bigint as string
+    totalIssued: string; // bigint as string
+    totalRetired: string; // bigint as string
+    lat: string | null;
+    lng: string | null;
+    /** Pre-validated in SQL (regex + 2000..2030 range) so Node only ever averages already-valid years. */
+    vintageYear: number | null;
+    /** Pre-computed in SQL (same date-parsing/guard logic getPortfolioMetrics used) so Node only ever averages already-valid durations. */
+    creditingPeriodYears: number | null;
+}
+
+/** Dropdown options and the two registry/methodology totals — both filter-independent, so cached and fetched separately from the per-project scope. */
+export interface GlobalDashboardStatsRow {
+    developers: string[] | null;
+    registries: string[] | null;
+    totalRegistries: string;
+    totalMethodologies: string;
+}
+
 export class PgDashboardRepository {
     constructor(private readonly dataSource: DataSource) {}
 
@@ -158,213 +201,62 @@ export class PgDashboardRepository {
     `;
 
     /**
-     * Deduplicated registry/methodology totals plus the filtered project count.
+     * Single fetch of every column the dashboard's 12 per-project breakdowns
+     * (country/registry/sector/vintage/status/developer/methodology/
+     * lifecycle/country×sector/country×registry/map/portfolio) need, scoped
+     * exactly like the old per-breakdown queries via buildProjectScope.
      *
-     * The registry and methodology counts use
-     * `COUNT(*) FILTER (key IS NULL) + COUNT(DISTINCT key) FILTER (key IS NOT NULL)`,
-     * which reproduces the canonical-row dedup semantics without a correlated
-     * subquery. That equivalence holds only because nothing here filters on a
-     * row-varying attribute — a filter could match a non-canonical row and the
-     * two forms would then disagree, which is why the list endpoints use a
-     * `DISTINCT ON` join instead. The registry count applies the same
-     * "non-empty registries only" rule as the registries list's hideEmpty.
-     */
-    async getTotals(query: DashboardMintQuery = {}): Promise<TotalsRow> {
-        const scope = this.buildProjectScope(query);
-
-        const sql = `
-            SELECT
-                (
-                    -- mv_registry_stats is already one row per registryDid (canonical),
-                    -- so this reads the count directly instead of deduplicating the raw
-                    -- REGISTRY population in business_view on every call.
-                    SELECT COUNT(*)::bigint
-                    FROM mv_registry_stats
-                    WHERE COALESCE(policy_count, 0) + COALESCE(project_count, 0)
-                        + COALESCE(issuance_count, 0) + COALESCE(user_count, 0) > 0
-                )                                                       AS registries,
-                (
-                    -- mv_methodology_stats is keyed by relatedTopicId (WHERE relatedTopicId
-                    -- IS NOT NULL), so it already equals COUNT(DISTINCT relatedTopicId);
-                    -- only the relatedTopicId IS NULL standalone rows still need a scan.
-                    (SELECT COUNT(*)::bigint FROM business_view
-                     WHERE "viewType" = 'METHODOLOGY' AND "relatedTopicId" IS NULL)
-                  + (SELECT COUNT(*)::bigint FROM mv_methodology_stats)
-                )                                                       AS methodologies,
-                agg.projects,
-                agg.filtered_registries,
-                agg.filtered_methodologies
-            FROM (
-                SELECT
-                    COUNT(*)::bigint                                            AS projects,
-                    COUNT(DISTINCT reg.registry_name)::bigint                   AS filtered_registries,
-                    COUNT(DISTINCT bv."businessData"->>'methodologyId')::bigint AS filtered_methodologies
-                FROM ${scope.from}
-                WHERE ${scope.where}
-            ) agg
-        `;
-
-        const rows: TotalsRow[] = await this.dataSource.query(sql, scope.params);
-        return rows[0] ?? {
-            registries: '0',
-            methodologies: '0',
-            projects: '0',
-            filtered_registries: '0',
-            filtered_methodologies: '0',
-        };
-    }
-
-    /**
-     * Distinct developer / registry labels for the dashboard's filter dropdowns.
+     * Replaces what used to be 12 separate GROUP BY queries against this same
+     * 363-row (PROJECT-scoped) FROM clause — each one re-scanning/re-sorting
+     * identical rows just to group them differently. At this row count,
+     * fetching once and aggregating in Node (dashboard-aggregation.util.ts)
+     * eliminates that repeated work; see docs/performance-audit-SE.md §4.6.
      *
-     * Ignores the active filters: the dropdowns must keep offering every
-     * option, otherwise selecting a developer would collapse the list to that
-     * one value and strand the user.
+     * vintageYear / creditingPeriodYears are pre-validated/pre-computed here
+     * (same regex + range guards getPortfolioMetrics used to apply in SQL) so
+     * the Node aggregation only ever needs to AVG already-valid numbers, never
+     * re-implement date/regex parsing.
      */
-    async getFilterOptions(): Promise<FilterOptionsRow> {
-        const sql = `
-            SELECT
-                ARRAY_AGG(DISTINCT developer) FILTER (WHERE developer <> '')       AS developers,
-                ARRAY_AGG(DISTINCT registry_name) FILTER (WHERE registry_name <> '') AS registries
-            FROM (
-                SELECT
-                    COALESCE(bv."businessData"->>'developer', '') AS developer,
-                    COALESCE(reg.registry_name, '')               AS registry_name
-                FROM business_view bv
-                LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
-                WHERE bv."viewType" = 'PROJECT'
-            ) opts
-        `;
-
-        const rows: FilterOptionsRow[] = await this.dataSource.query(sql);
-        return rows[0] ?? { developers: [], registries: [] };
-    }
-
-    /** Per-country project/credit/methodology counts in one GROUP BY. Raw country strings are returned as stored — the client owns ISO-code mapping and "Unknown" bucketing. */
-    async getCountryAggregates(query: DashboardMintQuery = {}): Promise<CountryAggRow[]> {
+    async getProjectScopeRows(query: DashboardMintQuery = {}): Promise<ProjectScopeRow[]> {
         const scope = this.buildProjectScope(query);
 
         const sql = `
             SELECT
-                bv."businessData"->>'country'                                  AS country,
-                COUNT(*)::bigint                                               AS projects,
-                COALESCE(SUM(${PgDashboardRepository.CREDITS_EXPR}), 0)::bigint AS credits,
-                COUNT(DISTINCT bv."businessData"->>'methodologyId')::bigint    AS methodologies,
-                MIN(bv."businessData"->>'developer')                           AS developer,
-                MIN(reg.registry_name)                                         AS registry
-            FROM ${scope.from}
-            WHERE ${scope.where}
-            GROUP BY bv."businessData"->>'country'
-            ORDER BY projects DESC
-        `;
-
-        return this.dataSource.query(sql, scope.params);
-    }
-
-    /** Project counts grouped by an arbitrary label expression (registry name, sector, vintage). */
-    private async getLabelAggregates(
-        labelSql: string,
-        query: DashboardMintQuery,
-    ): Promise<LabelAggRow[]> {
-        const scope = this.buildProjectScope(query);
-
-        const sql = `
-            SELECT
-                ${labelSql}                                                    AS label,
-                COUNT(*)::bigint                                               AS projects,
-                COALESCE(SUM(${PgDashboardRepository.CREDITS_EXPR}), 0)::bigint AS credits,
-                COUNT(DISTINCT bv."businessData"->>'methodologyId')::bigint    AS methodologies
-            FROM ${scope.from}
-            WHERE ${scope.where}
-            GROUP BY ${labelSql}
-            ORDER BY projects DESC
-        `;
-
-        return this.dataSource.query(sql, scope.params);
-    }
-
-    getRegistryAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
-        return this.getLabelAggregates('reg.registry_name', query);
-    }
-
-    getSectorAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
-        return this.getLabelAggregates(`bv."businessData"->>'sector'`, query);
-    }
-
-    getVintageAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
-        return this.getLabelAggregates(`bv."businessData"->>'vintage'`, query);
-    }
-
-    getStatusAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
-        return this.getLabelAggregates(`bv."businessData"->>'status'`, query);
-    }
-
-    /**
-     * Projects grouped by derived lifecycle stage:
-     * Registered -> Validation -> Monitoring -> Verified -> Issued.
-     *
-     * Reads the stage off mv_project_lifecycle instead of re-deriving it from
-     * policy.policyMapping x linkedVcs — that MV already computes this exact
-     * classification (see src/shared/materialized-views/project-lifecycle.mv.ts)
-     * on the same 60s refresh cadence this endpoint's cache TTL assumes.
-     * Re-deriving it live here cost ~520ms per call (EXPLAIN ANALYZE against
-     * the testnet dump); joining the MV costs ~7ms.
-     */
-    async getLifecycleStageAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
-        const scope = this.buildProjectScope(query);
-
-        const sql = `
-            SELECT
-                COALESCE(ml.lifecycle_stage, 'Registered')                    AS label,
-                COUNT(*)::bigint                                              AS projects,
-                COALESCE(SUM(${PgDashboardRepository.CREDITS_EXPR}), 0)::bigint AS credits,
-                COUNT(DISTINCT bv."businessData"->>'methodologyId')::bigint   AS methodologies
+                bv."projectKey"                                                 AS "projectKey",
+                bv."displayName"                                                AS "displayName",
+                bv."businessData"->>'country'                                   AS country,
+                bv."businessData"->>'sector'                                    AS sector,
+                bv."businessData"->>'vintage'                                   AS vintage,
+                bv."businessData"->>'status'                                    AS status,
+                bv."businessData"->>'developer'                                 AS developer,
+                bv."businessData"->>'methodology'                               AS methodology,
+                bv."businessData"->>'methodologyId'                             AS "methodologyId",
+                bv."businessData"->>'category'                                  AS category,
+                reg.registry_name                                               AS "registryName",
+                COALESCE(ml.lifecycle_stage, 'Registered')                      AS "lifecycleStage",
+                -- Computed by Postgres (not re-derived in Node) so the country
+                -- table's representative developer/registry label uses the
+                -- database's actual text collation, not an approximation of it.
+                MIN(bv."businessData"->>'developer') OVER (PARTITION BY bv."businessData"->>'country') AS "countryMinDeveloper",
+                MIN(reg.registry_name) OVER (PARTITION BY bv."businessData"->>'country')                AS "countryMinRegistry",
+                ${PgDashboardRepository.CREDITS_EXPR}::bigint                   AS credits,
+                COALESCE(ps.total_issued, 0)::bigint                            AS "totalIssued",
+                COALESCE(ps.total_retired, 0)::bigint                           AS "totalRetired",
+                bv."businessData"->>'lat'                                       AS lat,
+                bv."businessData"->>'lng'                                       AS lng,
+                CASE
+                    WHEN (bv."businessData"->>'vintage') ~ '^[0-9]{4}$'
+                     AND (bv."businessData"->>'vintage')::int BETWEEN 2000 AND 2030
+                    THEN (bv."businessData"->>'vintage')::int
+                END                                                              AS "vintageYear",
+                CASE
+                    WHEN cp.start_ts IS NOT NULL
+                     AND cp.end_ts   IS NOT NULL
+                     AND cp.end_ts > cp.start_ts
+                    THEN (EXTRACT(EPOCH FROM (cp.end_ts - cp.start_ts)) / (60 * 60 * 24 * 365.25))::double precision
+                END                                                              AS "creditingPeriodYears"
             FROM ${scope.from}
             LEFT JOIN mv_project_lifecycle ml ON ml."projectKey" = bv."projectKey"
-            WHERE ${scope.where}
-            GROUP BY COALESCE(ml.lifecycle_stage, 'Registered')
-        `;
-
-        return this.dataSource.query(sql, scope.params);
-    }
-
-    getMethodologyAggregates(query: DashboardMintQuery = {}): Promise<LabelAggRow[]> {
-        return this.getLabelAggregates(`bv."businessData"->>'methodology'`, query);
-    }
-
-    /**
-     * Portfolio-level metrics for the analytics page: lifecycle volumes plus the
-     * two averages it derives (vintage year, crediting-period length).
-     *
-     * Computed in one pass in Postgres. The vintage/crediting-period guards
-     * mirror the client-side ones exactly — vintage restricted to 2000..2030,
-     * crediting periods only counted when both ends parse and end > start —
-     * so the displayed averages are unchanged.
-     */
-    async getPortfolioMetrics(query: DashboardMintQuery = {}): Promise<PortfolioMetricsRow> {
-        const scope = this.buildProjectScope(query);
-
-        const sql = `
-            SELECT
-                COALESCE(SUM(ps.total_issued), 0)::bigint                        AS total_issued,
-                COALESCE(SUM(ps.total_retired), 0)::bigint                       AS total_retired,
-                COALESCE(SUM(ps.total_issued) - SUM(ps.total_retired), 0)::bigint AS total_active,
-                AVG(
-                    CASE
-                        WHEN (bv."businessData"->>'vintage') ~ '^[0-9]{4}$'
-                         AND (bv."businessData"->>'vintage')::int BETWEEN 2000 AND 2030
-                        THEN (bv."businessData"->>'vintage')::int
-                    END
-                )                                                                AS avg_vintage_year,
-                AVG(
-                    CASE
-                        WHEN cp.start_ts IS NOT NULL
-                         AND cp.end_ts   IS NOT NULL
-                         AND cp.end_ts > cp.start_ts
-                        THEN EXTRACT(EPOCH FROM (cp.end_ts - cp.start_ts)) / (60 * 60 * 24 * 365.25)
-                    END
-                )                                                                AS avg_crediting_period_years
-            FROM ${scope.from}
             LEFT JOIN LATERAL (
                 -- Dates arrive as free-form strings; a bad value must skip the
                 -- row, not abort the whole aggregate, so parse defensively.
@@ -377,127 +269,51 @@ export class PgDashboardRepository {
             WHERE ${scope.where}
         `;
 
-        const rows: PortfolioMetricsRow[] = await this.dataSource.query(sql, scope.params);
-        return rows[0] ?? {
-            total_issued: '0',
-            total_retired: '0',
-            total_active: '0',
-            avg_vintage_year: null,
-            avg_crediting_period_years: null,
-        };
-    }
-
-    /**
-     * (country, label) buckets for the country detail panel's donuts.
-     *
-     * Grouped server-side so clicking a country needs no extra round trip and
-     * no per-project data on the client. Bounded by
-     * distinct(country) x distinct(label), which stays small.
-     */
-    private async getCountryBreakdown(
-        labelSql: string,
-        query: DashboardMintQuery,
-    ): Promise<CountryBreakdownRow[]> {
-        const scope = this.buildProjectScope(query);
-
-        const sql = `
-            SELECT
-                bv."businessData"->>'country'                                  AS country,
-                ${labelSql}                                                    AS label,
-                COUNT(*)::bigint                                               AS projects,
-                COALESCE(SUM(${PgDashboardRepository.CREDITS_EXPR}), 0)::bigint AS credits
-            FROM ${scope.from}
-            WHERE ${scope.where}
-            GROUP BY bv."businessData"->>'country', ${labelSql}
-        `;
-
         return this.dataSource.query(sql, scope.params);
     }
 
     /**
-     * Developer leaderboard: per-developer project/credit volume plus the
-     * distinct country and sector counts the analytics table shows.
-     *
-     * The distinct counts are why this needs its own query rather than reusing
-     * getLabelAggregates — COUNT(DISTINCT) over two extra dimensions can't be
-     * derived from a per-developer row on the client without shipping every
-     * project.
+     * Filter-dropdown options plus the two registry/methodology totals that
+     * used to live inside getTotals's outer SELECT — both are independent of
+     * `query` (dropdowns must keep offering every option regardless of the
+     * active filter, and the two totals are unfiltered by construction in the
+     * original SQL too), so they're fetched once here rather than recomputed
+     * per filter combination.
      */
-    async getDeveloperAggregates(query: DashboardMintQuery = {}): Promise<DeveloperAggRow[]> {
-        const scope = this.buildProjectScope(query);
-
+    async getGlobalDashboardStats(): Promise<GlobalDashboardStatsRow> {
         const sql = `
             SELECT
-                bv."businessData"->>'developer'                                 AS label,
-                COUNT(*)::bigint                                               AS projects,
-                COALESCE(SUM(${PgDashboardRepository.CREDITS_EXPR}), 0)::bigint AS credits,
-                COUNT(DISTINCT NULLIF(bv."businessData"->>'country', ''))::bigint AS country_count,
-                COUNT(DISTINCT NULLIF(bv."businessData"->>'sector', ''))::bigint  AS sector_count
-            FROM ${scope.from}
-            WHERE ${scope.where}
-            GROUP BY bv."businessData"->>'developer'
-            ORDER BY credits DESC
+                ARRAY_AGG(DISTINCT developer) FILTER (WHERE developer <> '')       AS developers,
+                ARRAY_AGG(DISTINCT registry_name) FILTER (WHERE registry_name <> '') AS registries,
+                (
+                    -- mv_registry_stats is already one row per registryDid (canonical),
+                    -- so this reads the count directly instead of deduplicating the raw
+                    -- REGISTRY population in business_view on every call.
+                    SELECT COUNT(*)::bigint
+                    FROM mv_registry_stats
+                    WHERE COALESCE(policy_count, 0) + COALESCE(project_count, 0)
+                        + COALESCE(issuance_count, 0) + COALESCE(user_count, 0) > 0
+                )                                                                  AS "totalRegistries",
+                (
+                    -- mv_methodology_stats is keyed by relatedTopicId (WHERE relatedTopicId
+                    -- IS NOT NULL), so it already equals COUNT(DISTINCT relatedTopicId);
+                    -- only the relatedTopicId IS NULL standalone rows still need a scan.
+                    (SELECT COUNT(*)::bigint FROM business_view
+                     WHERE "viewType" = 'METHODOLOGY' AND "relatedTopicId" IS NULL)
+                  + (SELECT COUNT(*)::bigint FROM mv_methodology_stats)
+                )                                                                  AS "totalMethodologies"
+            FROM (
+                SELECT
+                    COALESCE(bv."businessData"->>'developer', '') AS developer,
+                    COALESCE(reg.registry_name, '')               AS registry_name
+                FROM business_view bv
+                LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
+                WHERE bv."viewType" = 'PROJECT'
+            ) opts
         `;
 
-        return this.dataSource.query(sql, scope.params);
-    }
-
-    /**
-     * (registry, lifecycle stage) cross-tab for the analytics registry throughput heatmap.
-     *
-     * Same mv_project_lifecycle join as getLifecycleStageAggregates, for the
-     * same reason — re-deriving the stage live here cost ~850ms per call
-     * (EXPLAIN ANALYZE against the testnet dump); the MV join costs ~16ms.
-     */
-    async getRegistryStatusBreakdown(query: DashboardMintQuery = {}): Promise<RegistryStatusRow[]> {
-        const scope = this.buildProjectScope(query);
-
-        const sql = `
-            SELECT
-                reg.registry_name                                          AS registry,
-                COALESCE(ml.lifecycle_stage, 'Registered')                  AS status,
-                COUNT(*)::bigint                                           AS projects
-            FROM ${scope.from}
-            LEFT JOIN mv_project_lifecycle ml ON ml."projectKey" = bv."projectKey"
-            WHERE ${scope.where}
-            GROUP BY reg.registry_name, COALESCE(ml.lifecycle_stage, 'Registered')
-        `;
-
-        return this.dataSource.query(sql, scope.params);
-    }
-
-    getCountrySectorBreakdown(query: DashboardMintQuery = {}): Promise<CountryBreakdownRow[]> {
-        // The detail panel's donut buckets by `category`, not `sector`.
-        return this.getCountryBreakdown(`bv."businessData"->>'category'`, query);
-    }
-
-    getCountryRegistryBreakdown(query: DashboardMintQuery = {}): Promise<CountryBreakdownRow[]> {
-        return this.getCountryBreakdown('reg.registry_name', query);
-    }
-
-    /**
-     * Map markers for projects that carry coordinates.
-     *
-     * Filtered to rows that actually have lat/lng, so this returns nothing at
-     * all for datasets without geo data instead of streaming every project —
-     * which is what the old client-side `fetchAll` + filter did.
-     */
-    async getMapPoints(query: DashboardMintQuery = {}): Promise<MapPointRow[]> {
-        const scope = this.buildProjectScope(query);
-
-        const sql = `
-            SELECT
-                bv."displayName"                                    AS name,
-                bv."businessData"->>'lat'                           AS lat,
-                bv."businessData"->>'lng'                           AS lng,
-                ${PgDashboardRepository.CREDITS_EXPR}::bigint       AS credits
-            FROM ${scope.from}
-            WHERE ${scope.where}
-              AND (bv."businessData"->>'lat') IS NOT NULL
-              AND (bv."businessData"->>'lng') IS NOT NULL
-        `;
-
-        return this.dataSource.query(sql, scope.params);
+        const rows: GlobalDashboardStatsRow[] = await this.dataSource.query(sql);
+        return rows[0] ?? { developers: [], registries: [], totalRegistries: '0', totalMethodologies: '0' };
     }
 
     async getMintAggregations(query: DashboardMintQuery = {}): Promise<MintAggRow[]> {
@@ -531,14 +347,7 @@ export class PgDashboardRepository {
             JOIN business_view bv
                 ON bv."projectKey" = pml.project_key
                AND bv."viewType" = 'PROJECT'
-            LEFT JOIN (
-                SELECT DISTINCT ON ("registryDid")
-                       "registryDid",
-                       "displayName" AS registry_name
-                FROM business_view
-                WHERE "viewType" = 'REGISTRY'
-                ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-            ) reg ON reg."registryDid" = bv."registryDid"
+            LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
             WHERE ${where}
             GROUP BY sector, registry, month
             ORDER BY month ASC NULLS LAST
@@ -664,14 +473,7 @@ export class PgDashboardRepository {
             JOIN business_view bv
                 ON bv."projectKey" = r.project_key
                AND bv."viewType" = 'PROJECT'
-            LEFT JOIN (
-                SELECT DISTINCT ON ("registryDid")
-                       "registryDid",
-                       "displayName" AS registry_name
-                FROM business_view
-                WHERE "viewType" = 'REGISTRY'
-                ORDER BY "registryDid", "createdAt" DESC NULLS LAST
-            ) reg ON reg."registryDid" = bv."registryDid"
+            LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg ON reg."registryDid" = bv."registryDid"
             ${where}
             GROUP BY sector, registry, month
             ORDER BY month ASC NULLS LAST
