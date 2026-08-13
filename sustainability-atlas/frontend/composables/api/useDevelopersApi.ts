@@ -87,7 +87,7 @@ export const useDevelopersApi = (opts: UseDevelopersApiOptions) => {
     const key = computed(() => `developers:${opts.network.value}:${JSON.stringify(buildQuery())}`);
 
     const { data, pending, error, refresh } = useAsyncData<DevelopersResponse>(
-        key.value,
+        () => key.value,
         async () => {
             try {
                 const res = await $fetch<DevelopersResponse>(url.value, {

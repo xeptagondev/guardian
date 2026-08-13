@@ -3,13 +3,16 @@ import { Users } from 'lucide-vue-next';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 
 const { t } = useI18n();
+const route = useRoute();
+const router = useRouter();
+const { network } = useNetwork();
 
-const currentPage = ref(1);
+const currentPage = ref(route.query.page ? (parseInt(route.query.page as string) || 1) : 1);
 const pageSize = ref(10);
-const searchQuery = ref('');
-const country = ref<string | undefined>(undefined);
-const sortKey = ref<DeveloperSortKey | null>('projects');
-const sortDir = ref<DeveloperSortDir | null>('desc');
+const searchQuery = ref(typeof route.query.q === 'string' ? route.query.q : '');
+const country = ref<string | undefined>(typeof route.query.country === 'string' ? route.query.country : undefined);
+const sortKey = ref<DeveloperSortKey | null>((route.query.sort as DeveloperSortKey) || 'projects');
+const sortDir = ref<DeveloperSortDir | null>((route.query.dir as DeveloperSortDir) || 'desc');
 
 const { developers, total, totalPages } = useDevelopers({
     page: currentPage,
@@ -24,6 +27,22 @@ function goToProjectsForDeveloper(name: string) {
     return navigateTo({ path: '/projects', query: { developer: name } });
 }
 
+function syncToUrl() {
+    const q: Record<string, string> = {};
+    if (searchQuery.value.trim()) q.q = searchQuery.value.trim();
+    if (currentPage.value > 1) q.page = String(currentPage.value);
+    const isDefaultSort = sortKey.value === 'projects' && sortDir.value === 'desc';
+    if (sortKey.value && sortDir.value && !isDefaultSort) {
+        q.sort = sortKey.value;
+        q.dir = sortDir.value;
+    }
+    if (country.value) q.country = country.value;
+    if (status.value) q.status = status.value;
+    const currentNetwork = route.query.network;
+    if (currentNetwork) q.network = currentNetwork as string;
+    router.replace({ query: q });
+}
+
 function toggleSort(key: DeveloperSortKey) {
     if (sortKey.value === key) {
         sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
@@ -32,12 +51,13 @@ function toggleSort(key: DeveloperSortKey) {
         sortDir.value = 'desc';
     }
     currentPage.value = 1;
+    syncToUrl();
 }
 
 // `status` is derived, not stored — every developer is reported Active — so it
 // is applied to the page rather than sent to the API.
 const STATUSES = ['Active', 'Inactive'] as const;
-const status = ref<string | undefined>(undefined);
+const status = ref<string | undefined>(typeof route.query.status === 'string' ? route.query.status : undefined);
 
 const rows = computed(() =>
     status.value ? developers.value.filter(d => d.status === status.value) : developers.value,
@@ -52,15 +72,30 @@ function setFilter(key: string, value: string) {
     if (key === 'country') country.value = value || undefined;
     if (key === 'status') status.value = value || undefined;
     currentPage.value = 1;
+    syncToUrl();
 }
 
 function clearFilters() {
     country.value = undefined;
     status.value = undefined;
+    searchQuery.value = '';
     currentPage.value = 1;
+    syncToUrl();
 }
 
-watch([searchQuery, pageSize], () => { currentPage.value = 1; });
+watch(searchQuery, () => {
+    currentPage.value = 1;
+    syncToUrl();
+});
+watch(currentPage, () => {
+    syncToUrl();
+});
+watch(pageSize, () => {
+    currentPage.value = 1;
+});
+watch(network, () => {
+    currentPage.value = 1;
+});
 
 const filters = computed<FilterOption[]>(() => [
     {
@@ -191,9 +226,9 @@ const statusColor: Record<string, string> = {
 
             <Pagination
                 v-model:current-page="currentPage"
+                v-model:page-size="pageSize"
                 :total-pages="totalPages"
                 :total-items="total"
-                :page-size="pageSize"
             />
         </div>
     </div>
