@@ -157,15 +157,17 @@ const statusColor: Record<string, string> = {
                                 :key="d.id"
                                 class="hover:bg-muted/30 transition-colors"
                             >
-                                <td class="py-3 px-4 max-w-[240px]">
-                                    <div class="flex items-center gap-2.5 min-w-0">
+                                <td class="py-3 px-4 align-middle font-medium">
+                                    <div class="flex items-center gap-2.5">
                                         <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-stat-blue/10">
                                             <Users class="h-4 w-4 text-stat-blue" />
                                         </div>
-                                        <TruncatedText
-                                            :text="d.name"
-                                            class="font-medium text-foreground hover:text-primary transition-colors cursor-pointer min-w-0"
-                                        />
+                                        <span
+                                            class="block line-clamp-2 text-foreground leading-relaxed"
+                                            :title="d.name"
+                                        >
+                                            {{ d.name }}
+                                        </span>
                                     </div>
                                 </td>
                                 <td class="py-3 px-4 text-muted-foreground whitespace-nowrap max-w-[150px]">
