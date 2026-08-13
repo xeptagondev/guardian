@@ -118,9 +118,8 @@ export class PgDashboardRepository {
     /**
      * Shared FROM/WHERE for the per-project aggregates.
      *
-     * Issued credits come from `mv_project_stats`, falling back to
-     * `businessData->>'credits'` for projects the mint linker hasn't
-     * attributed — matching what the project list DTO exposes as `credits`.
+     * Issued credits come strictly from `mv_project_stats` (actual on-chain minted
+     * credits) to maintain consistency with the portfolio totalIssued KPI.
      */
     private buildProjectScope(query: DashboardMintQuery): { from: string; where: string; params: unknown[] } {
         const params: unknown[] = [];
@@ -150,11 +149,7 @@ export class PgDashboardRepository {
 
     /** Issued-credit expression shared by every aggregate, so the tiles, country table and breakdowns always agree. */
     private static readonly CREDITS_EXPR = `
-        COALESCE(
-            ps.total_issued,
-            NULLIF(bv."businessData"->>'credits', '')::numeric,
-            0
-        )
+        COALESCE(ps.total_issued, 0)
     `;
 
     /**

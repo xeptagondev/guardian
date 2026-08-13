@@ -1425,9 +1425,9 @@
         },
         "kpis": {
             "activeSupply": "Oferta Activa",
-            "activeSupplyHint": "Créditos en circulación (emitidos − retirados)",
+            "activeSupplyHint": "Créditos en circulación (acuñados − retirados)",
             "retirementRate": "Tasa de Retiro",
-            "retirementRateHint": "Créditos emitidos que han sido retirados",
+            "retirementRateHint": "Créditos acuñados que han sido retirados",
             "pipelineProjects": "Proyectos en Desarrollo",
             "pipelineProjectsHint": "Proyectos pre-emisión: registrados → verificados",
             "avgVintageYear": "Año Promedio de Añada",
@@ -1442,23 +1442,23 @@
         },
         "vintage": {
             "title": "Distribución por Añada",
-            "subtitle": "Créditos emitidos agrupados por año de añada del proyecto",
+            "subtitle": "Créditos acuñados agrupados por año de añada del proyecto",
             "noData": "Sin datos de añada disponibles"
         },
         "supplyAge": {
             "title": "Perfil de Antigüedad de la Oferta",
-            "subtitle": "Distribución de créditos emitidos por antigüedad de añada — las añadas más recientes son preferidas por la mayoría de los compradores corporativos",
+            "subtitle": "Distribución de créditos acuñados por antigüedad de añada — las añadas más recientes son preferidas por la mayoría de los compradores corporativos",
             "fresh": "≤ 2 años (Reciente)",
             "recent": "3 – 5 años (Moderada)",
             "older": "6 – 10 años (Antigua)",
             "legacy": "> 10 años (Heredada)"
         },
         "sectors": {
-            "topCreditsTitle": "Principales Sectores por Créditos Emitidos",
+            "topCreditsTitle": "Principales Sectores por Créditos Acuñados",
             "availableSupplyTitle": "Oferta Disponible por Sector",
-            "availableSupplySub": "Créditos activos (emitidos − retirados)",
+            "availableSupplySub": "Créditos activos (acuñados − retirados)",
             "avgSizeTitle": "Tamaño Promedio del Proyecto por Sector",
-            "avgSizeSub": "Promedio de créditos emitidos por proyecto — referencia para evaluar nuevos proyectos",
+            "avgSizeSub": "Promedio de créditos acuñados por proyecto — referencia para evaluar nuevos proyectos",
             "contributionTitle": "Contribución del Sector a la Oferta Total"
         },
         "countries": {
@@ -1486,7 +1486,7 @@
         },
         "developers": {
             "title": "Clasificación de los Principales Desarrolladores",
-            "subtitle": "Clasificados por créditos totales emitidos — alcance multipaís y multisectorial",
+            "subtitle": "Clasificados por créditos acuñados — alcance multipaís y multisectorial",
             "noData": "Sin datos de desarrolladores disponibles",
             "columns": {
                 "rank": "Posición",
@@ -1499,14 +1499,14 @@
         },
         "registries": {
             "throughputTitle": "Rendimiento del Registro",
-            "throughputSub": "Promedio de créditos emitidos por proyecto, por registro — indicador de escala de calidad del proyecto",
+            "throughputSub": "Promedio de créditos acuñados por proyecto, por registro — indicador de escala de calidad del proyecto",
             "perProj": "/proy",
             "heatmapTitle": "Mapa de Calor de la Canalización por Registro",
             "heatmapSub": "Recuento de proyectos por etapa del ciclo de vida, principales registros",
             "colRegistry": "Registro",
             "noHeatData": "Sin datos del registro",
             "marketShareTitle": "Cuota de Mercado del Registro",
-            "marketShareSub": "Cuota del total de créditos emitidos"
+            "marketShareSub": "Cuota del total de créditos acuñados"
         },
         "vintageConcentration": {
             "title": "Concentración de Añadas",
