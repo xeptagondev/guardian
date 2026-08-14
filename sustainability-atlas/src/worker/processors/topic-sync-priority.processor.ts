@@ -10,12 +10,18 @@ import { TopicSyncJobData } from './topic-sync.processor';
 
 /**
  * Same sync logic as TopicSyncProcessor, on a physically separate queue that
- * only ever holds the root/registry topic + guardian-sync's event-triggered
- * syncs — never the six-figure routine-repoll backlog TOPIC_SYNC carries.
+ * holds the root/registry topic, guardian-sync's event-triggered syncs, and
+ * newly-discovered topics catching up on their first sync — never the
+ * six-figure routine-repoll backlog TOPIC_SYNC carries.
  *
  * A separate queue instead of `priority`/`lifo` on TOPIC_SYNC because neither
  * reliably jumped a job to the front once that queue hit 100k+ jobs (tested
  * against this project's Redict instance).
+ *
+ * `oneTimePriority` jobs (first discovery of a topic, see
+ * message-process.processor.ts) are handed back to the bulk TOPIC_SYNC queue
+ * once caught up, so this queue doesn't inherit TOPIC_SYNC's steady-state
+ * churn and grow the same way.
  */
 @Processor(QUEUE_NAMES.TOPIC_SYNC_PRIORITY)
 export class TopicSyncPriorityProcessor extends WorkerHost {
@@ -30,6 +36,7 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
         private readonly configService: ConfigService,
         @InjectQueue(QUEUE_NAMES.MESSAGE_PARSE) private readonly messageQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly priorityQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly bulkTopicQueue: Queue,
     ) {
         super();
         this.pollDelay = this.configService.get<number>('app.mirrorNodePollDelay') ?? 30000;
@@ -38,7 +45,7 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
     }
 
     async process(job: Job<TopicSyncJobData>): Promise<void> {
-        const { topicId, fromSequenceNumber, isOrgTopic, emptyPollStreak = 0 } = job.data;
+        const { topicId, fromSequenceNumber, isOrgTopic, emptyPollStreak = 0, oneTimePriority = false } = job.data;
 
         if (isTopicBlocked(topicId)) {
             this.logger.debug(`Topic ${topicId} is blocklisted — skipping sync`);
@@ -50,6 +57,25 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
         const { messages } = await this.hederaService.getMessages(topicId, fromSequenceNumber);
 
         if (messages.length === 0) {
+            // A one-time-priority topic that comes up empty is already caught
+            // up — hand steady-state re-polling back to the bulk queue instead
+            // of staying on the priority lane forever.
+            if (oneTimePriority) {
+                await this.bulkTopicQueue.add('sync', {
+                    topicId,
+                    fromSequenceNumber,
+                    isOrgTopic,
+                    emptyPollStreak: 0,
+                }, {
+                    jobId: `topic-${topicId}-poll-${Date.now()}`,
+                    delay: isOrgTopic ? this.orgPollDelay : this.pollDelay,
+                    removeOnComplete: true,
+                    removeOnFail: 1000,
+                });
+                this.logger.debug(`Topic ${topicId} caught up — handing off to bulk TOPIC_SYNC`);
+                return;
+            }
+
             const baseDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
             const streak = emptyPollStreak + 1;
             const delay = Math.min(baseDelay * 2 ** Math.min(streak, 10), this.maxPollDelay);
@@ -80,6 +106,7 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
                 data: {
                     consensusTimestamp: msg.consensus_timestamp,
                     topicId,
+                    fromPriorityLane: true,
                 },
                 opts: {
                     priority: 1,
@@ -101,12 +128,14 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
             [maxSequence, hasNext, now, topicId],
         );
 
+        const targetQueue = (!hasNext && oneTimePriority) ? this.bulkTopicQueue : this.priorityQueue;
         const nextDelay = hasNext ? 100 : (isOrgTopic ? this.orgPollDelay : this.pollDelay);
-        await this.priorityQueue.add('sync', {
+        await targetQueue.add('sync', {
             topicId,
             fromSequenceNumber: maxSequence,
             isOrgTopic,
             emptyPollStreak: 0,
+            oneTimePriority: hasNext ? oneTimePriority : false,
         }, {
             jobId: `topic-${topicId}-${maxSequence}-${Date.now()}`,
             delay: nextDelay,

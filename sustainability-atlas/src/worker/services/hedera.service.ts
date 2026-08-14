@@ -260,6 +260,33 @@ export class HederaService {
     }
 
     /**
+     * Resolves an EVM address to its Hedera account ID.
+     *
+     * Guardian's retirement events identify the retiring party by EVM address.
+     * For an ECDSA account that address is derived from the public key and
+     * carries no account number, so the ledger is the only place the mapping
+     * exists. Returns null when the address is not a known account — the caller
+     * keeps the raw address rather than dropping the retirement record.
+     */
+    async getAccountId(evmAddress: string): Promise<string | null> {
+        const url = `/api/v1/accounts/${evmAddress}`;
+        this.logger.debug(`GET ${url}`);
+        try {
+            const response = await this.client.get(url);
+            const account = response.data?.account;
+            return typeof account === 'string' ? account : null;
+        } catch (error) {
+            const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+            // 404 = no such account; 400 = the mirror node rejected the address
+            // format. Neither is retryable, and neither should stall the sweep.
+            if (status === 404 || status === 400) {
+                return null;
+            }
+            throw error;
+        }
+    }
+
+    /**
      * Fetches contract event logs, oldest-first.
      *
      * Used to read Guardian's RETIRE contracts, whose events are the only

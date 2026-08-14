@@ -28,8 +28,11 @@ const MAX_TOKENS_PER_EVENT = 64;
 const MAX_SERIALS_PER_TOKEN = 100_000;
 
 export interface RetiredToken {
-    /** Hedera token ID, converted from the EVM address in the log. */
-    tokenId: string;
+    /** Hedera token ID, or null when the log names the token by an address that
+     *  carries no entity number (see `toEntityId`). */
+    tokenId: string | null;
+    /** The token's EVM address exactly as the contract emitted it. */
+    tokenAddress: string;
     /** Fungible amount, in the token's smallest units. Zero for non-fungible. */
     count: number;
     /** Non-fungible serials. Empty for fungible. */
@@ -37,9 +40,41 @@ export interface RetiredToken {
 }
 
 export interface RetireEvent {
-    /** Hedera account ID that performed the retirement. */
-    accountId: string;
+    /** Hedera account ID of the retiring party, or null when the account is
+     *  identified by a key-derived address that has to be resolved against the
+     *  ledger (see `toEntityId`). */
+    accountId: string | null;
+    /** The retiring party's EVM address exactly as the contract emitted it. */
+    accountAddress: string;
     tokens: RetiredToken[];
+}
+
+/** An EVM address occupies the low 20 bytes of an ABI word. */
+const EVM_ADDRESS_MASK = (1n << 160n) - 1n;
+
+/** Hedera-native ("long-zero") addresses put the entity number in the low 8
+ *  bytes and leave the upper 12 zero, so anything above this is key-derived. */
+const LONG_ZERO_MAX = (1n << 64n) - 1n;
+
+/** Renders an ABI word as the canonical 20-byte EVM address. */
+function toEvmAddress(word: bigint): string {
+    return `0x${(word & EVM_ADDRESS_MASK).toString(16).padStart(40, '0')}`;
+}
+
+/**
+ * Converts an EVM address to a Hedera entity ID, or returns null when it cannot
+ * be converted.
+ *
+ * Hedera renders entities it created itself as "long-zero" addresses, where the
+ * address IS the entity number — those convert exactly. An ECDSA account, by
+ * contrast, is addressed by a hash of its public key, which encodes no account
+ * number at all; treating that address as a number yields a 49-digit "account"
+ * that belongs to no one. Tokens are always long-zero; retiring accounts are
+ * frequently not, so the caller must resolve those against the mirror node.
+ */
+function toEntityId(word: bigint): string | null {
+    const address = word & EVM_ADDRESS_MASK;
+    return address <= LONG_ZERO_MAX ? `0.0.${address}` : null;
 }
 
 /** Splits ABI-encoded hex into 32-byte words. */
@@ -120,11 +155,12 @@ export function decodeRetireEvent(data: string): RetireEvent | null {
         }
 
         tokens.push({
-            tokenId: `0.0.${w[elementAt]}`,
+            tokenId: toEntityId(w[elementAt]),
+            tokenAddress: toEvmAddress(w[elementAt]),
             count: Number(w[elementAt + 1]),
             serials,
         });
     }
 
-    return { accountId: `0.0.${w[0]}`, tokens };
+    return { accountId: toEntityId(w[0]), accountAddress: toEvmAddress(w[0]), tokens };
 }

@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { QUEUE_NAMES, getWorkerNetwork } from '@shared/config/bullmq.config';
+import { ROOT_TOPICS } from '@shared/config/configuration';
 import { GuardianEventLogService } from './guardian-event-log.service';
 
 interface AuditMeta {
@@ -33,13 +35,22 @@ export class GuardianEventRouter {
     private readonly logger = new Logger(GuardianEventRouter.name);
     private readonly network = getWorkerNetwork();
 
+    /** Hedera addresses every entity as `shard.realm.num`. */
+    private static readonly HEDERA_ENTITY_ID = /^\d+\.\d+\.\d+$/;
+    private readonly seedTopicId: string;
+
     constructor(
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly topicQueue: Queue,
         private readonly eventLog: GuardianEventLogService,
         private readonly dataSource: DataSource,
-    ) {}
+        private readonly configService: ConfigService,
+    ) {
+        this.seedTopicId = this.configService.get<string>('app.seedTopicId')
+            || ROOT_TOPICS[this.network]
+            || '';
+    }
 
     async route(subject: string, payload: unknown, instanceId: string): Promise<void> {
         const meta: AuditMeta = { instanceId, subject };
@@ -53,7 +64,7 @@ export class GuardianEventRouter {
 
             switch (key) {
                 case 'ipfs_added_file':
-                    await this.onIpfsAdded(meta, p);
+                    await this.onIpfsAdded(meta, payload);
                     break;
                 case 'token_minted':
                     await this.onTokenMinted(meta, p);
@@ -92,10 +103,24 @@ export class GuardianEventRouter {
         });
     }
 
-    /** A fresh CID was pinned → warm the IPFS cache via the canonical fetch path. */
-    private async onIpfsAdded(meta: AuditMeta, p: Record<string, unknown> | null): Promise<void> {
-        const cid = p && typeof p['cid'] === 'string' ? (p['cid'] as string) : null;
-        if (!cid) return;
+    /**
+     * A fresh CID was pinned → warm the IPFS cache via the canonical fetch path.
+     *
+     * The AEM docs show this payload as `{cid, url}`, but Guardian's actual
+     * publish call (worker-service `worker.ts`) sends the bare CID string —
+     * `this.publish(ExternalMessageEvents.IPFS_ADDED_FILE, cid)` — and the AEM
+     * HTTP layer forwards NATS payloads untouched. Accept both shapes.
+     */
+    private async onIpfsAdded(meta: AuditMeta, payload: unknown): Promise<void> {
+        const cid = typeof payload === 'string'
+            ? payload
+            : (payload && typeof payload === 'object' && typeof (payload as Record<string, unknown>)['cid'] === 'string')
+                ? (payload as Record<string, unknown>)['cid'] as string
+                : null;
+        if (!cid) {
+            this.logger.debug(`ipfs_added_file: no cid extracted from payload=${JSON.stringify(payload)}`);
+            return;
+        }
         await this.ipfsQueue.add(
             'fetch',
             { cid, messageTimestamp: '' },
@@ -105,10 +130,23 @@ export class GuardianEventRouter {
         await this.audit(meta, 'cid', cid, 'ipfs-fetch enqueued');
     }
 
-    /** A token was minted → refresh that token's serials/supply. */
+    /**
+     * A token was minted → refresh that token's serials/supply.
+     *
+     * Guardian also emits this event for draft tokens, which are configured in
+     * its own database and never created on Hedera. Those carry a generated UUID
+     * where a token ID belongs, so the identifier's shape is what separates a
+     * mint worth syncing from a draft the ledger has never heard of.
+     */
     private async onTokenMinted(meta: AuditMeta, p: Record<string, unknown> | null): Promise<void> {
         const tokenId = p && typeof p['tokenId'] === 'string' ? (p['tokenId'] as string) : null;
         if (!tokenId) return;
+        if (!GuardianEventRouter.HEDERA_ENTITY_ID.test(tokenId)) {
+            this.logger.debug(
+                `token_minted ignored: "${tokenId}" is a draft token, not a ledger token id`,
+            );
+            return;
+        }
         await this.tokenQueue.add(
             'sync',
             { tokenId, fetchNfts: true, fromSerial: 0 },
@@ -127,12 +165,23 @@ export class GuardianEventRouter {
         if (!policyId) return;
 
         const topicId = await this.resolvePolicyTopic(policyId);
-        if (topicId) await this.enqueueTopicSync(topicId);
+        if (topicId) {
+            await this.enqueueTopicSync(topicId);
+        } else {
+            // Policy not crawled locally yet — no topic to target. Wake the
+            // registry topic instead of doing nothing: it's where this policy
+            // gets announced, and it's likely sitting on the bulk queue's
+            // backoff rather than the priority lane (it was discovered long
+            // before this specific policy existed, so it never got
+            // oneTimePriority). The next block_complete (Guardian re-fires
+            // these every few seconds) resolves once that catches up.
+            await this.wakeSeedTopic();
+        }
         this.logger.log(
             `policy block settled policyId=${policyId} status=${status}` +
-            (topicId ? ` -> topic ${topicId} sync enqueued` : ' (policy topic not yet known locally)'),
+            (topicId ? ` -> topic ${topicId} sync enqueued` : ' (policy topic not yet known locally — woke registry topic)'),
         );
-        await this.audit(meta, 'policy', policyId, topicId ? `topic-sync ${topicId}` : 'no topic resolved');
+        await this.audit(meta, 'policy', policyId, topicId ? `topic-sync ${topicId}` : 'no topic resolved — woke registry');
     }
 
     /**
@@ -153,6 +202,9 @@ export class GuardianEventRouter {
                 await this.enqueueTopicSync(topicId);
                 this.logger.log(`policy block event (${type}) policyId=${policyId} -> topic ${topicId} sync enqueued`);
                 await this.audit(meta, 'policy', policyId, `topic-sync ${topicId}`);
+            } else {
+                await this.wakeSeedTopic();
+                await this.audit(meta, 'policy', policyId, 'no topic resolved — woke registry');
             }
         }
     }
@@ -180,6 +232,9 @@ export class GuardianEventRouter {
             await this.enqueueTopicSync(topicId);
             this.logger.log(`policy published/ready policyId=${policyId} -> topic ${topicId} sync enqueued`);
             await this.audit(meta, 'policy', policyId, `topic-sync ${topicId}`);
+        } else {
+            await this.wakeSeedTopic();
+            await this.audit(meta, 'policy', policyId, 'no topic resolved — woke registry');
         }
     }
 
@@ -193,6 +248,21 @@ export class GuardianEventRouter {
         const row = rows[0];
         if (!row) return null;
         return row.instanceTopicId || row.policyTopicId || null;
+    }
+
+    /**
+     * Forces an immediate priority re-poll of the registry/root topic. Used
+     * when a policy-related event can't be resolved to a specific topic (the
+     * policy hasn't been crawled locally yet, so `policy` has no row for it).
+     * The registry topic is where a new policy gets announced, but unlike a
+     * genuinely new topic it was discovered long ago, so it never got
+     * `oneTimePriority` — left alone, it can sit on the bulk queue's backoff
+     * for a long time even though a message relevant right now just landed
+     * on it. A no-op if no seed topic is configured.
+     */
+    private async wakeSeedTopic(): Promise<void> {
+        if (!this.seedTopicId) return;
+        await this.enqueueTopicSync(this.seedTopicId);
     }
 
     /**

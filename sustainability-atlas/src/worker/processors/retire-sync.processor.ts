@@ -29,6 +29,9 @@ export class RetireSyncProcessor extends WorkerHost {
      *  with a longer history finishes on later passes. */
     private static readonly MAX_PAGES = 20;
 
+    /** EVM address → Hedera account ID, memoised across jobs (see resolveAccountId). */
+    private readonly accountIdByAddress = new Map<string, string>();
+
     constructor(
         private readonly hederaService: HederaService,
         private readonly dataSource: DataSource,
@@ -66,7 +69,19 @@ export class RetireSyncProcessor extends WorkerHost {
                     continue;
                 }
 
+                const accountId = event.accountId ?? await this.resolveAccountId(event.accountAddress);
+
                 for (const token of event.tokens) {
+                    if (!token.tokenId) {
+                        // A retirement that names no identifiable token cannot be
+                        // attributed to a project's credits; recording it under a
+                        // guessed ID would misstate another token's retired total.
+                        this.logger.warn(
+                            `Contract ${contractId} log ${log.timestamp}#${log.index} retired token ` +
+                            `${token.tokenAddress}, which is not a Hedera token address — skipped`,
+                        );
+                        continue;
+                    }
                     // count vs serials is resolved downstream against the token's
                     // real type: several events populate both fields.
                     await this.dataSource.query(
@@ -83,7 +98,7 @@ export class RetireSyncProcessor extends WorkerHost {
                             log.index,
                             token.tokenId,
                             contractId,
-                            event.accountId,
+                            accountId,
                             token.count,
                             token.serials,
                         ],
@@ -106,6 +121,29 @@ export class RetireSyncProcessor extends WorkerHost {
         if (ingested > 0) {
             this.logger.log(`Contract ${contractId}: ingested ${ingested} retirement record(s)`);
         }
+    }
+
+    /**
+     * Turns the retiring party's EVM address into a Hedera account ID.
+     *
+     * A retirement submitted from an ECDSA account is signed by a key-derived
+     * address that encodes no account number, so only the ledger can name the
+     * account. Results are memoised for the life of the worker: retirements
+     * cluster heavily on a handful of registry accounts, and this would
+     * otherwise cost one mirror-node call per event.
+     *
+     * When the address resolves to nothing, the address itself is kept. The
+     * retirement is real either way, and an on-chain address still identifies
+     * the party — dropping the record instead would understate retired volume.
+     */
+    private async resolveAccountId(evmAddress: string): Promise<string> {
+        const cached = this.accountIdByAddress.get(evmAddress);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const resolved = (await this.hederaService.getAccountId(evmAddress)) ?? evmAddress;
+        this.accountIdByAddress.set(evmAddress, resolved);
+        return resolved;
     }
 
     @OnWorkerEvent('failed')

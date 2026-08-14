@@ -17,6 +17,29 @@ const METADATA_BACKFILL_BUDGET_MS = 60_000;
 const bootstrapLogger = new Logger('SchemaBootstrap');
 
 /**
+ * Adds a column only if it's missing. ALTER TABLE needs an ACCESS EXCLUSIVE
+ * lock even just to evaluate its own IF NOT EXISTS — on a table under
+ * constant read/write load (token_cache, nft_cache, project_mint_link), that
+ * lock request can queue for a long time and blocks every other query
+ * against the table behind it meanwhile. Checking information_schema first
+ * means steady state (column already present, the overwhelming common case)
+ * never requests the table lock at all.
+ */
+async function addColumnIfMissing(
+    dataSource: DataSource,
+    table: string,
+    column: string,
+    typeSql: string,
+): Promise<void> {
+    const [existing] = await dataSource.query(
+        `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+        [table, column],
+    );
+    if (existing) return;
+    await dataSource.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "${column}" ${typeSql}`);
+}
+
+/**
  * Post-TypeORM schema modifications that can't be expressed via decorators.
  * Runs after TypeORM's synchronize step to add:
  *   - tsvector generated column for full-text search
@@ -191,33 +214,18 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     // each NFT's metadata. nft_cache."metadataTimestamp" (added via the entity)
     // holds the decoded value; the columns below link each mint row to its VP
     // and carry the serial-count reconciliation computed by serial-mint-linker.
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        ADD COLUMN IF NOT EXISTS vp_consensus_timestamp VARCHAR(30)
-    `);
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        ADD COLUMN IF NOT EXISTS serial_count INT
-    `);
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        ADD COLUMN IF NOT EXISTS serial_retired_count INT
-    `);
+    await addColumnIfMissing(dataSource, 'project_mint_link', 'vp_consensus_timestamp', 'VARCHAR(30)');
+    await addColumnIfMissing(dataSource, 'project_mint_link', 'serial_count', 'INT');
+    await addColumnIfMissing(dataSource, 'project_mint_link', 'serial_retired_count', 'INT');
     // Serials of this mint no longer held by the token's treasury and not
     // retired — i.e. transferred to a third party. Non-fungible only: fungible
     // balances can't be traced back to the mint that created them.
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        ADD COLUMN IF NOT EXISTS serial_transferred_count INT
-    `);
+    await addColumnIfMissing(dataSource, 'project_mint_link', 'serial_transferred_count', 'INT');
     // Real amount actually minted on-chain, in display units: the serial count
     // for non-fungible tokens, the summed mint-transaction amount scaled by
     // token decimals for fungible ones. NUMERIC because fungible amounts are
     // fractional once decimals are applied.
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        ADD COLUMN IF NOT EXISTS minted_amount NUMERIC
-    `);
+    await addColumnIfMissing(dataSource, 'project_mint_link', 'minted_amount', 'NUMERIC');
     // verified | mismatch | unmatched | ambiguous | NULL (= no VP resolved yet).
     // Named for the mint, not the serial: fungible mints are reconciled too and
     // have no serials. Renamed in place so databases carrying the earlier
@@ -237,10 +245,7 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         END
         $$
     `);
-    await dataSource.query(`
-        ALTER TABLE project_mint_link
-        ADD COLUMN IF NOT EXISTS mint_match_status VARCHAR(16)
-    `);
+    await addColumnIfMissing(dataSource, 'project_mint_link', 'mint_match_status', 'VARCHAR(16)');
     await dataSource.query(`
         CREATE INDEX IF NOT EXISTS idx_pml_vp_ts
             ON project_mint_link (vp_consensus_timestamp)
@@ -251,17 +256,11 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     // bootstrapSchema also runs BEFORE TypeORM synchronize (worker pre-boot,
     // guardian-sync with synchronize off), so the backfill/index below cannot
     // rely on synchronize having created it. Same type as the entity column.
-    await dataSource.query(`
-        ALTER TABLE nft_cache
-        ADD COLUMN IF NOT EXISTS "metadataTimestamp" varchar(30)
-    `);
+    await addColumnIfMissing(dataSource, 'nft_cache', 'metadataTimestamp', 'varchar(30)');
     // Current holder per serial. Declared here as well as on the entity for the
     // same reason as metadataTimestamp: bootstrapSchema also runs before
     // TypeORM synchronize, and in guardian-sync where synchronize is off.
-    await dataSource.query(`
-        ALTER TABLE nft_cache
-        ADD COLUMN IF NOT EXISTS "accountId" varchar(30)
-    `);
+    await addColumnIfMissing(dataSource, 'nft_cache', 'accountId', 'varchar(30)');
 
     // Backfill nft_cache."metadataTimestamp" for rows synced before the column
     // existed. Set-based and batched: nft_cache holds millions of rows, so the
@@ -358,10 +357,7 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     `);
     // Highest TOKENMINT consensus timestamp already ingested for this token, so
     // each sync pass asks Mirror Node only for transactions newer than that.
-    await dataSource.query(`
-        ALTER TABLE token_cache
-        ADD COLUMN IF NOT EXISTS "mintTxWatermark" VARCHAR(30)
-    `);
+    await addColumnIfMissing(dataSource, 'token_cache', 'mintTxWatermark', 'VARCHAR(30)');
 
     // ── Retirement ledger ──────────────────────────────────────────────────
     // Guardian deploys a RETIRE smart contract per policy; executing a
@@ -397,6 +393,21 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
             PRIMARY KEY (consensus_timestamp, log_index, token_id)
         )
     `);
+    // The retiring party is named by EVM address. A key-derived (ECDSA) address
+    // resolves to an account ID through the mirror node, but when the ledger does
+    // not know it the 42-character address is kept as the identifier, which does
+    // not fit the original account-ID-sized column. The width is checked first:
+    // ALTER TABLE takes an ACCESS EXCLUSIVE lock even when it changes nothing,
+    // and this runs on every boot.
+    const [accountIdCol]: Array<{ character_maximum_length: number | null }> = await dataSource.query(`
+        SELECT character_maximum_length FROM information_schema.columns
+        WHERE table_name = 'token_retire_event' AND column_name = 'account_id'
+    `);
+    if (accountIdCol && (accountIdCol.character_maximum_length ?? 0) < 42) {
+        await dataSource.query(`
+            ALTER TABLE token_retire_event ALTER COLUMN account_id TYPE VARCHAR(42)
+        `);
+    }
     await dataSource.query(`
         CREATE INDEX IF NOT EXISTS idx_tre_token ON token_retire_event (token_id)
     `);
@@ -437,17 +448,11 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     // tokens (the busiest testnet account backs 1,072). A single walk of that
     // account therefore serves all of them and advances every row's watermark
     // together, so every token of a treasury always carries the same value.
-    await dataSource.query(`
-        ALTER TABLE token_cache
-        ADD COLUMN IF NOT EXISTS "transferTxWatermark" VARCHAR(30)
-    `);
+    await addColumnIfMissing(dataSource, 'token_cache', 'transferTxWatermark', 'VARCHAR(30)');
     // Lower bound for a treasury walk: no transfer of a token can predate the
     // token. Without it a sweep starts at genesis and pages through years of
     // unrelated account activity.
-    await dataSource.query(`
-        ALTER TABLE token_cache
-        ADD COLUMN IF NOT EXISTS "createdTimestamp" VARCHAR(30)
-    `);
+    await addColumnIfMissing(dataSource, 'token_cache', 'createdTimestamp', 'VARCHAR(30)');
     // Seed it for tokens cached before the column existed, so the first sweep
     // does not have to wait for every token to re-sync. A token's first mint is
     // a sound lower bound — serials cannot move before they exist — and the

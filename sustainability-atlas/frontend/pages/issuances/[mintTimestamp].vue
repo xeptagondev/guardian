@@ -466,21 +466,14 @@ useHead(() => ({
                     <p class="text-[11px] text-muted-foreground mt-0.5">{{ $t('issuances.transactions.subtitle') }}</p>
                 </div>
                 <!--
-                    Retirement is counted from Mirror Node's deleted flag, but a
-                    transaction only exists where the registry used Guardian's
-                    retirement contract. Credits wiped outside it are genuinely
-                    retired with no document behind them — say so rather than
-                    leaving the reader to wonder where the rows went.
+                    No blanket retirement notice here. Credits destroyed without
+                    the registry's retirement contract used to have no row at
+                    all, which needed explaining; they are now listed as
+                    Retirements dated by the credits' last movement, each marked
+                    inside or outside Guardian in its own tooltip. A banner
+                    saying retirements do not appear would contradict the table
+                    directly beneath it.
                 -->
-                <div
-                    v-if="(summary.serialRetiredCount ?? 0) > 0"
-                    class="mx-5 mt-4 flex items-start gap-3 rounded-lg border border-stat-amber/30 bg-stat-amber/5 px-4 py-3"
-                >
-                    <AlertTriangle class="h-4 w-4 text-stat-amber shrink-0 mt-0.5" />
-                    <p class="text-xs leading-relaxed text-muted-foreground">
-                        {{ $t('issuances.transactions.undocumentedRetirement', { count: summary.serialRetiredCount }) }}
-                    </p>
-                </div>
                 <!-- projectId stays null: the issuance-scoped route serves mints
                      that were never attributed to a project, which most are. -->
                 <CreditTransactions

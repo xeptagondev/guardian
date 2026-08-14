@@ -139,8 +139,8 @@ Hedera Mirror Node REST API          IPFS Gateways
 
 | Queue | Concurrency | Purpose |
 |-------|-------------|---------|
-| `mirror-node-topics` | 5 | Fetch HCS messages from Mirror Node by topic ID (bulk crawl — every tracked topic) |
-| `mirror-node-topics-priority` | 2 | Same job, separate queue: root/registry topic + guardian-sync's event-triggered syncs only. Kept physically apart from the bulk queue so these never queue behind it — `priority`/`lifo` job options were tried and don't reliably jump a job forward once the bulk queue has 100k+ entries. |
+| `mirror-node-topics` | 20 (autoscales to 80) | Fetch HCS messages from Mirror Node by topic ID (bulk crawl — every already-discovered topic's steady-state re-poll) |
+| `mirror-node-topics-priority` | 5 (autoscales) | Same job, separate queue: root/registry topic, guardian-sync's event-triggered syncs, and topics discovered from a priority-lane message (`oneTimePriority`, handed back to the bulk queue once caught up — see `topic-sync-priority.processor.ts`). Topics discovered from an ordinary bulk-crawl message stay on the bulk queue — the `fromPriorityLane` flag on `MESSAGE_PARSE` jobs scopes priority treatment to guardian-sync's own lineage instead of the whole crawl. Kept physically apart from the bulk queue so these never queue behind it — `priority`/`lifo` job options were tried and don't reliably jump a job forward once the bulk queue has 100k+ entries. |
 | `mirror-node-messages` | 10 | Decode, parse, and classify raw messages |
 | `mirror-node-tokens` | 2 | Fetch token metadata, NFT serials and owners, fungible mint transactions, and treasury transfers |
 | `mirror-node-retirements` | 2 | Read executed retirement events from Guardian's RETIRE contracts (see [credit lifecycle tracking](credit-lifecycle-tracking.md)) |
