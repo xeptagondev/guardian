@@ -203,6 +203,14 @@ export interface ProjectListQuery {
     expectedIssuanceYearRange?: string;
     /** `'true'` = pipeline (not yet issued), `'false'` = issued. No own column — see PgProjectRepository. */
     isPipeline?: string;
+    /**
+     * When provided, the count/summary queries are skipped and these values are
+     * returned as-is — the search predicate still runs once for the rows query,
+     * but not three times. Set by ProjectsService from a short-lived cache keyed
+     * on every field above except page/limit, since paging through an unchanged
+     * search always yields the same total/summary as page 1.
+     */
+    cachedCountAndSummary?: { total: number; summary: ProjectListSummary };
 }
 
 export interface ProjectListSummary {

@@ -631,13 +631,8 @@ export class PgCreditRepository extends CreditRepository {
                 COALESCE(meth.methodology_name, proj.proj_methodology_name) AS methodology_name
              FROM business_view bv
              LEFT JOIN token_cache tc ON tc."tokenId" = bv."businessData"->>'tokenId'
-             LEFT JOIN LATERAL (
-                 SELECT "displayName" AS registry_name
-                 FROM business_view
-                 WHERE "viewType" = 'REGISTRY' AND "registryDid" = bv."registryDid"
-                 ORDER BY "createdAt" DESC NULLS LAST
-                 LIMIT 1
-             ) reg ON true
+             LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg
+                 ON reg."registryDid" = bv."registryDid"
              LEFT JOIN LATERAL (
                  SELECT
                      bv_proj."projectKey"                    AS project_id,

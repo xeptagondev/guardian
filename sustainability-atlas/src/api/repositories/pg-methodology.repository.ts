@@ -96,11 +96,12 @@ const EFFECTIVE_DECODE_STATUS = effectiveDecodeStatus('canon.decode_status');
 /** Over a live `policy` join — used by findById, which resolves one row exactly. */
 const EFFECTIVE_DECODE_STATUS_LIVE = effectiveDecodeStatus('p."decodeStatus"');
 
-const SEARCH_TSVECTOR = `(
-    setweight(to_tsvector('english', coalesce(bv."displayName", '')), 'A') ||
-    setweight(to_tsvector('english', coalesce(bv."registryDid", '')), 'B') ||
-    setweight(to_tsvector('english', coalesce(bv."searchText", '')), 'C')
-)`;
+// business_view."searchVector" is a STORED generated column with this exact
+// expression (see schema-bootstrap.ts) — referencing it directly, rather than
+// recomputing the expression inline, lets the planner match it back to
+// idx_business_view_search_vector (GIN). An inline recompute is opaque to the
+// planner even though it's byte-identical, so it was never reaching that index.
+const SEARCH_TSVECTOR = `bv."searchVector"`;
 
 /** The `message` row backing this METHODOLOGY's own originating VC (`business_view.sourceTimestamp` = `message.consensusTimestamp`), supplying `source_system_id`/`ipfs_document_ref` for `findAllForExport`. */
 const SOURCE_MESSAGE_JOIN = `
