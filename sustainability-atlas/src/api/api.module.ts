@@ -10,7 +10,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { SystemDatabaseModule } from '@api/database/system-database.module';
 import { NetworkDatabaseModule } from '@api/database/network-database.module';
 import { RedisModule } from '@shared/redis/redis.module';
-import { SingleFlightModule } from '@shared/cache/single-flight.module';
+import { SingleFlightModule } from '@shared/single-flight/single-flight.module';
 
 // Controllers
 import { RegistriesController } from './controllers/registries.controller';
