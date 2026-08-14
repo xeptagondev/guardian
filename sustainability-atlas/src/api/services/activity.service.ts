@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { RedisService } from '@shared/redis/redis.service';
-import { SingleFlightService } from '@shared/cache/single-flight.service';
+import { SingleFlightService } from '@shared/single-flight/single-flight.service';
 import { NetworkDataSourceRegistry } from '../database/network-datasource.registry';
 import { PgActivityRepository, ActivityFilters } from '../repositories/pg-activity.repository';
 import { NetworkActivityItemDto } from '../dto/activity.dto';

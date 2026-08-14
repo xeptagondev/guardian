@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { RedisService } from '@shared/redis/redis.service';
-import { SingleFlightService } from '@shared/cache/single-flight.service';
+import { SingleFlightService } from '@shared/single-flight/single-flight.service';
 import { createHash } from 'crypto';
 import { CreditQueryDto, CreditResponseDto, CreditStatsDto } from '../dto/credit.dto';
 import { PaginatedResponse } from '../dto/pagination.dto';
