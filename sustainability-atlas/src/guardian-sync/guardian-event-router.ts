@@ -168,18 +168,15 @@ export class GuardianEventRouter {
         if (topicId) {
             await this.enqueueTopicSync(topicId);
         } else {
-            // Policy not crawled locally yet — no topic to target. Wake the
-            // registry topic instead of doing nothing: it's where this policy
-            // gets announced, and it's likely sitting on the bulk queue's
-            // backoff rather than the priority lane (it was discovered long
-            // before this specific policy existed, so it never got
-            // oneTimePriority). The next block_complete (Guardian re-fires
-            // these every few seconds) resolves once that catches up.
-            await this.wakeSeedTopic();
+            // Policy not crawled locally yet — no topic to target. Wake every
+            // known registry topic instead of doing nothing (see
+            // wakeRegistryTopics doc). The next block_complete (Guardian
+            // re-fires these every few seconds) resolves once that catches up.
+            await this.wakeRegistryTopics();
         }
         this.logger.log(
             `policy block settled policyId=${policyId} status=${status}` +
-            (topicId ? ` -> topic ${topicId} sync enqueued` : ' (policy topic not yet known locally — woke registry topic)'),
+            (topicId ? ` -> topic ${topicId} sync enqueued` : ' (policy topic not yet known locally — woke registry topics)'),
         );
         await this.audit(meta, 'policy', policyId, topicId ? `topic-sync ${topicId}` : 'no topic resolved — woke registry');
     }
@@ -203,7 +200,7 @@ export class GuardianEventRouter {
                 this.logger.log(`policy block event (${type}) policyId=${policyId} -> topic ${topicId} sync enqueued`);
                 await this.audit(meta, 'policy', policyId, `topic-sync ${topicId}`);
             } else {
-                await this.wakeSeedTopic();
+                await this.wakeRegistryTopics();
                 await this.audit(meta, 'policy', policyId, 'no topic resolved — woke registry');
             }
         }
@@ -233,7 +230,7 @@ export class GuardianEventRouter {
             this.logger.log(`policy published/ready policyId=${policyId} -> topic ${topicId} sync enqueued`);
             await this.audit(meta, 'policy', policyId, `topic-sync ${topicId}`);
         } else {
-            await this.wakeSeedTopic();
+            await this.wakeRegistryTopics();
             await this.audit(meta, 'policy', policyId, 'no topic resolved — woke registry');
         }
     }
@@ -251,18 +248,39 @@ export class GuardianEventRouter {
     }
 
     /**
-     * Forces an immediate priority re-poll of the registry/root topic. Used
-     * when a policy-related event can't be resolved to a specific topic (the
-     * policy hasn't been crawled locally yet, so `policy` has no row for it).
-     * The registry topic is where a new policy gets announced, but unlike a
-     * genuinely new topic it was discovered long ago, so it never got
-     * `oneTimePriority` — left alone, it can sit on the bulk queue's backoff
-     * for a long time even though a message relevant right now just landed
-     * on it. A no-op if no seed topic is configured.
+     * Forces an immediate priority re-poll of every topic where a
+     * policy-related announcement could land. Used when a policy-related
+     * event can't be resolved to a specific topic (the policy hasn't been
+     * crawled locally yet, so `policy` has no row for it).
+     *
+     * Two distinct cases, two distinct topics:
+     *   - A brand-new Standard Registry announces itself on the network's
+     *     global seed/root topic (ROOT_TOPICS / SEED_TOPIC_ID).
+     *   - A new policy published by an ALREADY-registered Standard Registry
+     *     lands on that SR's own topic instead — never the global root. That
+     *     topic was discovered long ago (at SR registration), so it never got
+     *     `oneTimePriority` and sits on the bulk queue's backoff like any of
+     *     the other 100k+ topics, even though a message relevant right now
+     *     just landed on it. Waking only the global seed can never surface
+     *     this case, no matter how many times it's retried.
+     *
+     * So this wakes the seed topic (covers new-SR discovery) AND every
+     * already-known Standard Registry topic (covers new-policy-on-existing-SR)
+     * — a small, bounded set, one per registry.
      */
-    private async wakeSeedTopic(): Promise<void> {
-        if (!this.seedTopicId) return;
-        await this.enqueueTopicSync(this.seedTopicId);
+    private async wakeRegistryTopics(): Promise<void> {
+        if (this.seedTopicId) {
+            await this.enqueueTopicSync(this.seedTopicId);
+        }
+
+        const rows: Array<{ topicId: string }> = await this.dataSource.query(
+            `SELECT DISTINCT "topicId" FROM message WHERE type = 'Standard Registry'`,
+        );
+        for (const row of rows) {
+            if (row.topicId && row.topicId !== this.seedTopicId) {
+                await this.enqueueTopicSync(row.topicId);
+            }
+        }
     }
 
     /**
