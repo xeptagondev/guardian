@@ -6,6 +6,7 @@ import {
     resolveMethod,
     loadResolutionMaps,
     extractLatLng,
+    unwrapGeoJsonGeometry,
     resolveCountryName,
     findCountryInText,
 } from '../project-mapper/helpers';
@@ -954,17 +955,18 @@ function collectFromArray(arr: any[], rest: string[]): unknown[] {
 
 /**
  * Coerces a raw VC field value into a [lng, lat] pair if possible.
- * Handles standard GeoJSON, array-of-GeoJSON (VM0047), and lat/lng-string blocks.
+ * Handles standard GeoJSON, array-of-GeoJSON (VM0047), Feature /
+ * FeatureCollection wrappers (Guardian's map widget), and lat/lng-string blocks.
  */
 function parseGeoValue(raw: unknown): [number, number] | null {
+    const geom = unwrapGeoJsonGeometry(raw);
+    if (geom) return extractLatLng(geom);
+
+    // Not GeoJSON-shaped — fall back to a `{latitude, longitude}`-style block.
     let v: unknown = raw;
     if (Array.isArray(v) && v.length > 0) v = v[0];
     if (!v || typeof v !== 'object') return null;
-    const obj = v as Record<string, any>;
-    if ('type' in obj) {
-        return extractLatLng(obj);
-    }
-    return extractLatLngStrings(obj);
+    return extractLatLngStrings(v as Record<string, any>);
 }
 
 interface ParsedGeoPolygon {
@@ -974,7 +976,8 @@ interface ParsedGeoPolygon {
 
 /**
  * Returns the full-precision `{ type, coordinates }` when the geo field value
- * is strictly a GeoJSON Polygon or MultiPolygon. Every other geometry (Point,
+ * resolves (after unwrapping any Feature / FeatureCollection container — see
+ * unwrapGeoJsonGeometry) to a GeoJSON Polygon or MultiPolygon. Every other geometry (Point,
  * LineString, etc.) — and any non-GeoJSON lat/lng-string block — yields null,
  * since only an actual area has a shape worth persisting alongside the
  * centroid lat/lng. No size cap here: the full geometry is stored as-is in
@@ -982,13 +985,11 @@ interface ParsedGeoPolygon {
  * frontend — every vertex is kept.
  */
 function parseGeoPolygon(raw: unknown): ParsedGeoPolygon | null {
-    let v: unknown = raw;
-    if (Array.isArray(v) && v.length > 0) v = v[0];
-    if (!v || typeof v !== 'object') return null;
-    const obj = v as Record<string, any>;
-    const type = obj['type'];
+    const geom = unwrapGeoJsonGeometry(raw);
+    if (!geom) return null;
+    const type = geom['type'];
     if (type !== 'Polygon' && type !== 'MultiPolygon') return null;
-    const coords = obj['coordinates'];
+    const coords = geom['coordinates'];
     if (!Array.isArray(coords)) return null;
     return { type, coordinates: coords };
 }
