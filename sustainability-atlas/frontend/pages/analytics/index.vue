@@ -7,8 +7,10 @@ import {
 } from 'lucide-vue-next';
 import { formatCredits } from '~/lib/format';
 import { naturalCompare } from '~/lib/utils';
+import { niceAxis } from '~/lib/chart-scale';
 import { allocateDonutColors } from '~/lib/chart-colors';
 import { SDG_LIST, getLocalizedSDGName } from '~/lib/sdgs';
+import { LIFECYCLE_STAGES as CANONICAL_LIFECYCLE_STAGES } from '~/lib/lifecycle';
 import { SECTOR_I18N_KEYS } from '~/types/enums';
 import type { LabelCount } from '~/types/dashboard';
 
@@ -76,26 +78,29 @@ const headlineKpis = computed(() => [
 
 // ─── Lifecycle funnel (Market Overview) ──────────────────────────────────────
 
-const LIFECYCLE_STAGES = computed<Array<{ key: string; label: string }>>(() => [
-    { key: 'Registered',       label: t('projects.lifecycleStages.Registered') },
-    { key: 'Under Validation', label: t('projects.lifecycleStages.Validation') },
-    { key: 'Verified',         label: t('projects.lifecycleStages.Verified') },
-    { key: 'Issued',          label: t('projects.lifecycleStages.Issued') },
-    { key: 'Completed',        label: t('projects.lifecycleStages.Completed') },
-]);
+const LIFECYCLE_STAGES = computed<Array<{ key: string; label: string }>>(() =>
+    CANONICAL_LIFECYCLE_STAGES.map(key => ({
+        key,
+        label: t(`projects.lifecycleStages.${key}`),
+    }))
+);
 
 const lifecycleFunnel = computed(() => {
     const counts: Record<string, number> = {};
     for (const s of summary.value.lifecycleStages) {
         if (s.label) counts[s.label] = (counts[s.label] ?? 0) + s.projectCount;
     }
-    const max = Math.max(1, ...Object.values(counts));
-    return LIFECYCLE_STAGES.value.map(s => ({
-        ...s,
-        count: counts[s.key] ?? 0,
-        pct: Math.round(((counts[s.key] ?? 0) / Math.max(1, totalProjects.value)) * 100),
-        width: Math.max(8, Math.round(((counts[s.key] ?? 0) / max) * 100)),
-    }));
+    const total = totalProjects.value || 0;
+    return LIFECYCLE_STAGES.value.map(s => {
+        const count = counts[s.key] ?? 0;
+        const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+        return {
+            ...s,
+            count,
+            pct,
+            width: count > 0 ? Math.min(100, Math.max(1, pct)) : 0,
+        };
+    });
 });
 
 // ─── Vintage distribution + retirement age ──────────────────────────────────
@@ -114,6 +119,17 @@ const vintageBuckets = computed(() => {
 });
 
 const maxVintageCredits = computed(() => Math.max(1, ...vintageBuckets.value.map(b => b.credits)));
+
+const vintageAxis = computed(() => {
+    const rawMax = Math.max(0, ...vintageBuckets.value.map(b => b.credits));
+    return niceAxis(rawMax, 4);
+});
+
+function vintageTickAnchorClass(i: number, len: number): string {
+    if (i === 0) return 'bottom-0';
+    if (i === len - 1) return 'top-0 -translate-y-1/2';
+    return 'translate-y-1/2';
+}
 
 // ─── Sector breakdown (used by Buyer + Climate Impact) ───────────────────────
 
@@ -313,8 +329,14 @@ const supplyAge = computed(() => {
 });
 
 function fmtCompact(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    if (n >= 1_000_000) {
+        const s = (n / 1_000_000).toFixed(1).replace(/\.0$/, '');
+        return `${s}M`;
+    }
+    if (n >= 1_000) {
+        const s = (n / 1_000).toFixed(1).replace(/\.0$/, '');
+        return `${s}k`;
+    }
     return n.toString();
 }
 </script>
@@ -383,16 +405,22 @@ function fmtCompact(n: number): string {
                 <div class="px-5 py-5 space-y-2.5">
                     <div v-for="s in lifecycleFunnel" :key="s.key" class="flex items-center gap-3">
                         <span class="text-xs text-foreground w-28 shrink-0 font-medium">{{ s.label }}</span>
-                        <div class="flex-1 h-9 bg-muted/40 rounded-md overflow-hidden relative">
-                            <div
-                                class="h-full bg-primary/80 transition-all duration-500"
-                                :style="{ width: `${s.width}%` }"
-                            />
-                            <div class="absolute inset-0 flex items-center justify-end pr-3 gap-3">
-                                <span class="text-[11px] font-semibold text-foreground tabular-nums">{{ s.count.toLocaleString() }}</span>
-                                <span class="text-[10px] text-muted-foreground tabular-nums w-9 text-right">{{ s.pct }}%</span>
+                        <InfoTooltip
+                            :text="$t('analytics.lifecycle.stageTooltip', { stage: s.label, count: s.count.toLocaleString(), pct: s.pct })"
+                            class="flex-1 flex min-w-0"
+                        >
+                            <div class="w-full h-9 bg-muted/40 rounded-md overflow-hidden relative group cursor-pointer hover:bg-muted/60 transition-colors">
+                                <div
+                                    v-if="s.count > 0"
+                                    class="h-full bg-primary/80 transition-all duration-500 rounded-l-md group-hover:bg-primary"
+                                    :style="{ width: `${s.width}%` }"
+                                />
+                                <div class="absolute inset-0 flex items-center justify-end pr-3 gap-3 pointer-events-none">
+                                    <span class="text-[11px] font-semibold text-foreground tabular-nums">{{ s.count.toLocaleString() }}</span>
+                                    <span class="text-[10px] text-muted-foreground tabular-nums w-9 text-right">{{ s.pct }}%</span>
+                                </div>
                             </div>
-                        </div>
+                        </InfoTooltip>
                     </div>
                 </div>
             </div>
@@ -410,15 +438,80 @@ function fmtCompact(n: number): string {
                     <div v-if="vintageBuckets.length === 0" class="text-xs text-muted-foreground text-center py-8">
                         {{ $t('analytics.vintage.noData') }}
                     </div>
-                    <div v-else class="flex items-end gap-2 h-40">
-                        <div v-for="b in vintageBuckets" :key="b.vintage" class="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-                            <div class="text-[10px] font-medium text-foreground tabular-nums">{{ fmtCompact(b.credits) }}</div>
-                            <div
-                                class="w-full bg-primary/70 hover:bg-primary transition-colors rounded-sm relative group"
-                                :style="{ height: `${(b.credits / maxVintageCredits) * 100}%`, minHeight: b.credits > 0 ? '3px' : '0' }"
-                                :title="`${b.vintage}: ${formatCredits(b.credits)} credits across ${b.projects} project(s)`"
-                            />
-                            <div class="text-[10px] text-muted-foreground truncate w-full text-center">{{ b.vintage }}</div>
+                    <div v-else class="flex flex-col pt-5">
+                        <!-- Chart plot area with Y-axis -->
+                        <div class="flex gap-2">
+                            <!-- Y-axis tick column -->
+                            <div class="relative w-12 shrink-0 h-44">
+                                <span
+                                    v-for="(tick, i) in vintageAxis.ticks"
+                                    :key="i"
+                                    class="absolute right-1 text-[10px] text-muted-foreground tabular-nums"
+                                    :class="vintageTickAnchorClass(i, vintageAxis.ticks.length)"
+                                    :style="i !== 0 && i !== vintageAxis.ticks.length - 1 ? { bottom: `${(tick / vintageAxis.max) * 100}%` } : (i === 0 ? { bottom: '0px' } : { top: '0px' })"
+                                >{{ fmtCompact(tick) }}</span>
+                            </div>
+
+                            <!-- Plot area with gridlines and bars -->
+                            <div class="relative flex-1 min-w-0 h-44">
+                                <!-- Horizontal grid lines -->
+                                <div
+                                    v-for="(tick, i) in vintageAxis.ticks"
+                                    :key="i"
+                                    class="absolute left-0 right-0 h-px"
+                                    :class="i === 0 ? 'bg-border' : 'bg-border/40'"
+                                    :style="{ bottom: `${(tick / vintageAxis.max) * 100}%` }"
+                                />
+
+                                <!-- Bars anchored to baseline -->
+                                <div class="absolute inset-0 flex items-end gap-2 px-1">
+                                    <div
+                                        v-for="b in vintageBuckets"
+                                        :key="b.vintage"
+                                        class="flex-1 min-w-0 h-full flex items-end justify-center"
+                                    >
+                                        <!-- Bar wrapper with exact percentage height -->
+                                        <div
+                                            class="w-full relative flex flex-col justify-end items-center"
+                                            :style="{
+                                                height: b.credits > 0 ? `${(b.credits / vintageAxis.max) * 100}%` : '0px',
+                                                minHeight: b.credits > 0 ? '3px' : '0px',
+                                            }"
+                                        >
+                                            <!-- Top label positioned above the bar -->
+                                            <span
+                                                v-if="b.credits > 0"
+                                                class="absolute bottom-full mb-1 text-[10px] font-medium text-foreground tabular-nums whitespace-nowrap pointer-events-none"
+                                            >{{ fmtCompact(b.credits) }}</span>
+
+                                            <!-- The interactive bar -->
+                                            <InfoTooltip
+                                                :text="$t('analytics.vintage.vintageTooltip', { vintage: b.vintage, credits: formatCredits(b.credits), projects: b.projects })"
+                                                class="w-full h-full flex"
+                                            >
+                                                <div
+                                                    class="w-full h-full bg-primary/80 hover:bg-primary transition-all duration-500 rounded-t-sm cursor-pointer"
+                                                />
+                                            </InfoTooltip>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- X-axis labels (vintage years) aligned with plot area -->
+                        <div class="flex gap-2 mt-2">
+                            <div class="w-12 shrink-0" />
+                            <div class="flex-1 flex gap-2 px-1 min-w-0">
+                                <span
+                                    v-for="b in vintageBuckets"
+                                    :key="b.vintage"
+                                    class="flex-1 min-w-0 text-center text-[10px] text-muted-foreground font-medium truncate"
+                                    :title="b.vintage"
+                                >
+                                    {{ b.vintage }}
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -603,10 +696,19 @@ function fmtCompact(n: number): string {
                     <div class="px-5 py-5 space-y-2.5">
                         <div v-for="s in lifecycleFunnel" :key="s.key" class="flex items-center gap-3">
                             <span class="text-xs text-foreground w-24 shrink-0 font-medium">{{ s.label }}</span>
-                            <div class="flex-1 h-5 bg-muted/40 rounded overflow-hidden">
-                                <div class="h-full bg-stat-amber transition-all duration-500" :style="{ width: `${s.width}%` }" />
-                            </div>
-                            <span class="text-[11px] tabular-nums text-foreground w-12 text-right">{{ s.count }}</span>
+                            <InfoTooltip
+                                :text="$t('analytics.lifecycle.stageTooltip', { stage: s.label, count: s.count.toLocaleString(), pct: s.pct })"
+                                class="flex-1 flex min-w-0"
+                            >
+                                <div class="w-full h-5 bg-muted/40 rounded overflow-hidden relative group cursor-pointer hover:bg-muted/60 transition-colors">
+                                    <div
+                                        v-if="s.count > 0"
+                                        class="h-full bg-stat-amber transition-all duration-500 rounded-l group-hover:brightness-110"
+                                        :style="{ width: `${s.width}%` }"
+                                    />
+                                </div>
+                            </InfoTooltip>
+                            <span class="text-[11px] tabular-nums text-foreground w-12 text-right">{{ s.count.toLocaleString() }}</span>
                             <span class="text-[10px] text-muted-foreground tabular-nums w-9 text-right">{{ s.pct }}%</span>
                         </div>
                     </div>
