@@ -63,7 +63,7 @@ export const IWA_TO_CDOP: Record<string, string> = {
     "AccountableImpactOrganization.address.postalCode": "facility.postal code",
     "ActivityImpactModule.geographicLocation.geographicLocationFile": "geolocation_file.file name",
     "ActivityImpactModule.geographicLocation.geoJsonOrKml": "geolocation_file.file format",
-    "ActivityImpactModule.geographicLocation": "geolocation_file.validity start date",
+    "ActivityImpactModule.geographicLocation": "geolocation_file.geolocation_data",
     "ActivityImpactModule.name": "crediting_program.crediting_program_name",
     "QualityStandard.standard": "crediting_program.standard_name",
     "QualityStandard.version": "crediting_program.current_standard_version",
