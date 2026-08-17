@@ -560,7 +560,7 @@ async function downloadMethodologies() {
                 v-for="r in methodologies"
                 :key="r.id"
                 class="hover:bg-muted/30 transition-colors cursor-pointer align-top"
-                @click="r.topicId && navigateTo('/methodologies/' + r.topicId)"
+                @click="navigateTo('/methodologies/' + (r.topicId || r.id))"
               >
                 <td class="py-3 px-4">
                   <div class="flex items-start gap-2.5">

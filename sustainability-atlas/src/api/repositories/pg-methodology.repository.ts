@@ -480,7 +480,7 @@ export class PgMethodologyRepository extends MethodologyRepository {
             ${REGISTRY_NAME_JOIN}
             ${POLICY_DECODE_STATUS_JOIN}
             WHERE bv."viewType" = 'METHODOLOGY'
-              AND bv."relatedTopicId" = $1
+              AND (bv."relatedTopicId" = $1 OR bv.id::text = $1)
             ORDER BY bv."sourceTimestamp"::numeric DESC NULLS LAST, bv.id DESC
             LIMIT 1
             `,
