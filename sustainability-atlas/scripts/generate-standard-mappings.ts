@@ -105,6 +105,9 @@ function parseCadtrust(csv: string): StandardMap {
             map[iwaPath] = standardPath;
         }
     }
+    if (!map['ActivityImpactModule.projectScale']) {
+        map['ActivityImpactModule.projectScale'] = 'project.project_scale';
+    }
     return map;
 }
 
@@ -138,6 +141,9 @@ function parseCdop(csv: string): StandardMap {
 
     if (!map['ActivityImpactModule.geographicLocation'] || map['ActivityImpactModule.geographicLocation'].includes('validity')) {
         map['ActivityImpactModule.geographicLocation'] = 'geolocation_file.geolocation_data';
+    }
+    if (!map['ActivityImpactModule.projectScale']) {
+        map['ActivityImpactModule.projectScale'] = 'project.project_scale';
     }
 
     return map;

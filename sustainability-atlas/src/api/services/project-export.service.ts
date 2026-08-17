@@ -96,6 +96,7 @@ function resolveValue(project: ProjectResponseDto, key: string): unknown {
         case 'country': return project.country;
         case 'developer': return project.developer;
         case 'category': return project.category;
+        case 'scale': return project.scale;
         case 'sector': return project.sector;
         case 'sectoralScope': return project.sectoralScope;
         case 'vintageRaw': return project.vintage;
