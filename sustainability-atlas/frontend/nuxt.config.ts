@@ -54,9 +54,9 @@ export default defineNuxtConfig({
         '/api/v1/**': {
             proxy: 'http://localhost:3030/api/v1/**',
         },
-        // Static, rarely-changing geo boundary data — safe to cache hard.
+        // Static geo boundary data — cache for a week, revalidate in the background.
         '/geo/**': {
-            headers: { 'cache-control': 'public, max-age=31536000, immutable' },
+            headers: { 'cache-control': 'public, max-age=604800, stale-while-revalidate=86400' },
         },
     },
 
