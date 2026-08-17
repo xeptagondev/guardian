@@ -164,7 +164,7 @@ export function mapApiProject(raw: Record<string, any>): Project {
         registry: raw.registryName ?? raw.registry ?? raw.registryDid ?? 'Unknown Registry',
         developer: raw.developer ?? '',
         credits: raw.credits ?? 0,
-        status: raw.status ?? 'Issuing',
+        status: raw.lifecycleStage ?? raw.status ?? 'Registered',
         vintage: raw.vintage ?? '',
         sdgs: parseSdgs(raw.sdgs),
         category: raw.category ?? '',

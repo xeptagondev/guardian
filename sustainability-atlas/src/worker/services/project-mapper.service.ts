@@ -554,7 +554,6 @@ export class ProjectMapperService {
             newFields.estimatedAnnualCredits = estimatedAmount;
             if (explicitOverrideFields.has('estimatedAnnualCredits')) overrideBusinessKeys.add('estimatedAnnualCredits');
         }
-        newFields.status = 'Issuing';
         newFields.decodeMethod = resolvedProject.method;
         // Method-specific resolution anchor (M1: dynamic topic id; M2/M3/M4: root
         // VC timestamp the cs.id key was derived from). Merge-friendly: only

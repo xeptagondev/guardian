@@ -111,7 +111,7 @@ function resolveValue(project: ProjectResponseDto, key: string): unknown {
         case 'lat': return project.lat;
         case 'lng': return project.lng;
         case 'registry': return project.registryName;
-        case 'status': return project.status;
+        case 'status': return project.lifecycleStage;
         case 'methodology': return project.methodology;
         case 'credits': return project.credits;
         case 'sourceTimestamp': return project.sourceTimestamp;
