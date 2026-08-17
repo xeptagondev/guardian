@@ -54,6 +54,16 @@ export default defineNuxtConfig({
         '/api/v1/**': {
             proxy: 'http://localhost:3030/api/v1/**',
         },
+        // Static, rarely-changing geo boundary data — safe to cache hard.
+        '/geo/**': {
+            headers: { 'cache-control': 'public, max-age=31536000, immutable' },
+        },
+    },
+
+    // Pre-builds .gz/.br companions for public/ assets at build time, served
+    // automatically when the client sends a matching Accept-Encoding.
+    nitro: {
+        compressPublicAssets: true,
     },
 
     runtimeConfig: {
