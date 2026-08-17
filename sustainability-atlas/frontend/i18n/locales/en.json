@@ -1446,7 +1446,8 @@
         "vintage": {
             "title": "Vintage Distribution",
             "subtitle": "Minted credits grouped by project vintage year",
-            "noData": "No vintage data available"
+            "noData": "No vintage data available",
+            "vintageTooltip": "{vintage}: {credits} credits across {projects} projects"
         },
         "supplyAge": {
             "title": "Supply Age Profile",
