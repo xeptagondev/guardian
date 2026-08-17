@@ -96,6 +96,7 @@ function resolveValue(project: ProjectResponseDto, key: string): unknown {
         case 'country': return project.country;
         case 'developer': return project.developer;
         case 'category': return project.category;
+        case 'scale': return project.scale;
         case 'sector': return project.sector;
         case 'sectoralScope': return project.sectoralScope;
         case 'vintageRaw': return project.vintage;
@@ -105,13 +106,33 @@ function resolveValue(project: ProjectResponseDto, key: string): unknown {
         case 'sdgs':
             return project.sdgs?.length ? project.sdgs.map(n => `UN-SDG-${n}`) : null;
         case 'geo':
+            if (project.polygon) {
+                try {
+                    return typeof project.polygon === 'string'
+                        ? JSON.parse(project.polygon)
+                        : project.polygon;
+                } catch {
+                    // Fall through to coordinates if polygon parsing fails
+                }
+            }
             return project.lat != null && project.lng != null
                 ? { latitude: project.lat, longitude: project.lng }
                 : null;
+        case 'polygon':
+            if (project.polygon) {
+                try {
+                    return typeof project.polygon === 'string'
+                        ? JSON.parse(project.polygon)
+                        : project.polygon;
+                } catch {
+                    return project.polygon;
+                }
+            }
+            return null;
         case 'lat': return project.lat;
         case 'lng': return project.lng;
         case 'registry': return project.registryName;
-        case 'status': return project.status;
+        case 'status': return project.lifecycleStage;
         case 'methodology': return project.methodology;
         case 'credits': return project.credits;
         case 'sourceTimestamp': return project.sourceTimestamp;

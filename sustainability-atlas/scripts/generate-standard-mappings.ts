@@ -105,6 +105,9 @@ function parseCadtrust(csv: string): StandardMap {
             map[iwaPath] = standardPath;
         }
     }
+    if (!map['ActivityImpactModule.projectScale']) {
+        map['ActivityImpactModule.projectScale'] = 'project.project_scale';
+    }
     return map;
 }
 
@@ -125,11 +128,24 @@ function parseCdop(csv: string): StandardMap {
         const iwaPath = extractIwaPath(iwaRaw);
         if (!iwaPath) continue;
 
+        // Skip invalid validity start date mapping for geographicLocation
+        if (iwaPath === 'ActivityImpactModule.geographicLocation' && fieldName.includes('validity')) {
+            continue;
+        }
+
         const standardPath = `${entity || 'project'}.${fieldName}`;
         if (!map[iwaPath]) {
             map[iwaPath] = standardPath;
         }
     }
+
+    if (!map['ActivityImpactModule.geographicLocation'] || map['ActivityImpactModule.geographicLocation'].includes('validity')) {
+        map['ActivityImpactModule.geographicLocation'] = 'geolocation_file.geolocation_data';
+    }
+    if (!map['ActivityImpactModule.projectScale']) {
+        map['ActivityImpactModule.projectScale'] = 'project.project_scale';
+    }
+
     return map;
 }
 

@@ -597,6 +597,9 @@ export class ProjectResponseDto {
     @ApiProperty({ nullable: true, description: 'Project category' })
     category: string | null;
 
+    @ApiProperty({ nullable: true, description: 'Project scale (e.g. Large-scale, Small-scale)' })
+    scale: string | null;
+
     @ApiProperty({ nullable: true, description: 'Project sector' })
     sector: string | null;
 
@@ -1001,6 +1004,7 @@ export class ProjectResponseDto {
             sdgs: Array.isArray(data['sdgs']) ? (data['sdgs'] as number[]) : [],
             cobenefits: typeof data['cobenefits'] === 'string' ? data['cobenefits'] : null,
             category: typeof data['category'] === 'string' ? data['category'] : null,
+            scale: typeof data['scale'] === 'string' ? data['scale'] : null,
             sector: typeof data['sector'] === 'string' ? data['sector'] : null,
             sectoralScope: typeof data['sectoralScope'] === 'string' ? data['sectoralScope'] : null,
             createdAt: typeof data['createdAt'] === 'string' ? data['createdAt'] : null,
