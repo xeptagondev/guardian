@@ -1438,7 +1438,8 @@
         },
         "lifecycle": {
             "title": "Embudos de Ciclo de Vida del Proyecto",
-            "subtitle": "Distribución a través de las etapas del flujo de trabajo de la política Guardian"
+            "subtitle": "Distribución a través de las etapas del flujo de trabajo de la política Guardian",
+            "stageTooltip": "{stage}: {count} proyectos ({pct}% del total)"
         },
         "vintage": {
             "title": "Distribución por Añada",

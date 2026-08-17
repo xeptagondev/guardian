@@ -9,6 +9,7 @@ import { formatCredits } from '~/lib/format';
 import { naturalCompare } from '~/lib/utils';
 import { allocateDonutColors } from '~/lib/chart-colors';
 import { SDG_LIST, getLocalizedSDGName } from '~/lib/sdgs';
+import { LIFECYCLE_STAGES as CANONICAL_LIFECYCLE_STAGES } from '~/lib/lifecycle';
 import { SECTOR_I18N_KEYS } from '~/types/enums';
 import type { LabelCount } from '~/types/dashboard';
 
@@ -76,26 +77,29 @@ const headlineKpis = computed(() => [
 
 // ─── Lifecycle funnel (Market Overview) ──────────────────────────────────────
 
-const LIFECYCLE_STAGES = computed<Array<{ key: string; label: string }>>(() => [
-    { key: 'Registered',       label: t('projects.lifecycleStages.Registered') },
-    { key: 'Under Validation', label: t('projects.lifecycleStages.Validation') },
-    { key: 'Verified',         label: t('projects.lifecycleStages.Verified') },
-    { key: 'Issued',          label: t('projects.lifecycleStages.Issued') },
-    { key: 'Completed',        label: t('projects.lifecycleStages.Completed') },
-]);
+const LIFECYCLE_STAGES = computed<Array<{ key: string; label: string }>>(() =>
+    CANONICAL_LIFECYCLE_STAGES.map(key => ({
+        key,
+        label: t(`projects.lifecycleStages.${key}`),
+    }))
+);
 
 const lifecycleFunnel = computed(() => {
     const counts: Record<string, number> = {};
     for (const s of summary.value.lifecycleStages) {
         if (s.label) counts[s.label] = (counts[s.label] ?? 0) + s.projectCount;
     }
-    const max = Math.max(1, ...Object.values(counts));
-    return LIFECYCLE_STAGES.value.map(s => ({
-        ...s,
-        count: counts[s.key] ?? 0,
-        pct: Math.round(((counts[s.key] ?? 0) / Math.max(1, totalProjects.value)) * 100),
-        width: Math.max(8, Math.round(((counts[s.key] ?? 0) / max) * 100)),
-    }));
+    const total = totalProjects.value || 0;
+    return LIFECYCLE_STAGES.value.map(s => {
+        const count = counts[s.key] ?? 0;
+        const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+        return {
+            ...s,
+            count,
+            pct,
+            width: count > 0 ? Math.min(100, Math.max(1, pct)) : 0,
+        };
+    });
 });
 
 // ─── Vintage distribution + retirement age ──────────────────────────────────
@@ -383,16 +387,22 @@ function fmtCompact(n: number): string {
                 <div class="px-5 py-5 space-y-2.5">
                     <div v-for="s in lifecycleFunnel" :key="s.key" class="flex items-center gap-3">
                         <span class="text-xs text-foreground w-28 shrink-0 font-medium">{{ s.label }}</span>
-                        <div class="flex-1 h-9 bg-muted/40 rounded-md overflow-hidden relative">
-                            <div
-                                class="h-full bg-primary/80 transition-all duration-500"
-                                :style="{ width: `${s.width}%` }"
-                            />
-                            <div class="absolute inset-0 flex items-center justify-end pr-3 gap-3">
-                                <span class="text-[11px] font-semibold text-foreground tabular-nums">{{ s.count.toLocaleString() }}</span>
-                                <span class="text-[10px] text-muted-foreground tabular-nums w-9 text-right">{{ s.pct }}%</span>
+                        <InfoTooltip
+                            :text="$t('analytics.lifecycle.stageTooltip', { stage: s.label, count: s.count.toLocaleString(), pct: s.pct })"
+                            class="flex-1 flex min-w-0"
+                        >
+                            <div class="w-full h-9 bg-muted/40 rounded-md overflow-hidden relative group cursor-pointer hover:bg-muted/60 transition-colors">
+                                <div
+                                    v-if="s.count > 0"
+                                    class="h-full bg-primary/80 transition-all duration-500 rounded-l-md group-hover:bg-primary"
+                                    :style="{ width: `${s.width}%` }"
+                                />
+                                <div class="absolute inset-0 flex items-center justify-end pr-3 gap-3 pointer-events-none">
+                                    <span class="text-[11px] font-semibold text-foreground tabular-nums">{{ s.count.toLocaleString() }}</span>
+                                    <span class="text-[10px] text-muted-foreground tabular-nums w-9 text-right">{{ s.pct }}%</span>
+                                </div>
                             </div>
-                        </div>
+                        </InfoTooltip>
                     </div>
                 </div>
             </div>
@@ -603,10 +613,19 @@ function fmtCompact(n: number): string {
                     <div class="px-5 py-5 space-y-2.5">
                         <div v-for="s in lifecycleFunnel" :key="s.key" class="flex items-center gap-3">
                             <span class="text-xs text-foreground w-24 shrink-0 font-medium">{{ s.label }}</span>
-                            <div class="flex-1 h-5 bg-muted/40 rounded overflow-hidden">
-                                <div class="h-full bg-stat-amber transition-all duration-500" :style="{ width: `${s.width}%` }" />
-                            </div>
-                            <span class="text-[11px] tabular-nums text-foreground w-12 text-right">{{ s.count }}</span>
+                            <InfoTooltip
+                                :text="$t('analytics.lifecycle.stageTooltip', { stage: s.label, count: s.count.toLocaleString(), pct: s.pct })"
+                                class="flex-1 flex min-w-0"
+                            >
+                                <div class="w-full h-5 bg-muted/40 rounded overflow-hidden relative group cursor-pointer hover:bg-muted/60 transition-colors">
+                                    <div
+                                        v-if="s.count > 0"
+                                        class="h-full bg-stat-amber transition-all duration-500 rounded-l group-hover:brightness-110"
+                                        :style="{ width: `${s.width}%` }"
+                                    />
+                                </div>
+                            </InfoTooltip>
+                            <span class="text-[11px] tabular-nums text-foreground w-12 text-right">{{ s.count.toLocaleString() }}</span>
                             <span class="text-[10px] text-muted-foreground tabular-nums w-9 text-right">{{ s.pct }}%</span>
                         </div>
                     </div>
