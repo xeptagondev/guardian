@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { FileJson, Sparkles, Download, Loader2, Save } from 'lucide-vue-next';
+import { useDebounceFn } from '@vueuse/core';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import { formatCredits } from '~/lib/format';
 import { naturalCompare, decodeMultiValue } from '~/lib/utils';
@@ -19,6 +20,7 @@ const formatDate = (d: string | null) => {
 };
 
 const route = useRoute();
+const router = useRouter();
 const projectKeyFilter = computed(() => route.query.projectKey as string | undefined);
 const methodologyIdFilter = computed(() => route.query.methodologyId as string | undefined);
 const registryDidFilter = computed(() => route.query.registryDid as string | undefined);
@@ -58,16 +60,58 @@ if (import.meta.client) {
     );
 }
 
-const currentPage = ref(1);
+const currentPage = ref(
+    route.query.page ? parseInt(route.query.page as string) || 1 : 1,
+);
 const pageSize = ref(10);
-const searchQuery = ref('');
-const sortKey = ref<CreditSortKey | null>('mintDate');
-const sortDir = ref<CreditSortDir | null>('desc');
+const searchQuery = ref(typeof route.query.q === 'string' ? route.query.q : '');
+const apiSearch = ref(searchQuery.value);
+const debouncedSetSearch = useDebounceFn((val: string) => {
+    apiSearch.value = val;
+}, 300);
+
+const sortKey = ref<CreditSortKey | null>(
+    (route.query.sort as CreditSortKey) || 'mintDate',
+);
+const sortDir = ref<CreditSortDir | null>(
+    (route.query.dir as CreditSortDir) || 'desc',
+);
 
 const hideUnlinked = ref(route.query.linkedOnly === 'true');
 
+function initialFiltersFromQuery(): Record<string, string> {
+    const reserved = new Set(['q', 'page', 'sort', 'dir', 'network', 'projectKey', 'methodologyId', 'registryDid', 'sdg', 'sdgs', 'linkedOnly']);
+    const initial: Record<string, string> = {};
+    for (const [key, val] of Object.entries(route.query)) {
+        if (!reserved.has(key) && typeof val === 'string' && val) initial[key] = val;
+    }
+    return initial;
+}
+
 // Column filters in API terms. FilterBar emits range types as "from|to".
-const activeFilters = ref<Record<string, string>>({});
+const activeFilters = ref<Record<string, string>>(initialFiltersFromQuery());
+
+function syncToUrl() {
+    const q: Record<string, string> = {};
+    if (searchQuery.value.trim()) q.q = searchQuery.value.trim();
+    if (currentPage.value > 1) q.page = String(currentPage.value);
+    const isDefaultSort = sortKey.value === 'mintDate' && sortDir.value === 'desc';
+    if (sortKey.value && sortDir.value && !isDefaultSort) {
+        q.sort = sortKey.value;
+        q.dir = sortDir.value;
+    }
+    if (hideUnlinked.value) q.linkedOnly = 'true';
+    for (const [key, val] of Object.entries(activeFilters.value)) {
+        if (val && val !== 'all') q[key] = val;
+    }
+    if (projectKeyFilter.value) q.projectKey = projectKeyFilter.value;
+    if (methodologyIdFilter.value) q.methodologyId = methodologyIdFilter.value;
+    if (registryDidFilter.value) q.registryDid = registryDidFilter.value;
+    if (sdgFilter.value) q.sdg = sdgFilter.value;
+    const currentNetwork = route.query.network;
+    if (currentNetwork) q.network = currentNetwork as string;
+    router.replace({ query: q });
+}
 
 const apiFilters = computed<Record<string, string | string[]>>(() => {
     const f: Record<string, string | string[]> = {};
@@ -98,7 +142,7 @@ const apiFilters = computed<Record<string, string | string[]>>(() => {
 const { credits, total, totalPages, pending, filters: creditFilters } = useCredits({
     page: currentPage,
     limit: pageSize,
-    search: searchQuery,
+    search: apiSearch,
     sortBy: sortKey,
     sortDir,
     filters: apiFilters,
@@ -108,7 +152,7 @@ const { credits, total, totalPages, pending, filters: creditFilters } = useCredi
     projectKeys: sdgProjectKeys,
 });
 
-const { stats: summaryStats } = useCreditStats(searchQuery, creditFilters);
+const { stats: summaryStats } = useCreditStats(apiSearch, creditFilters);
 
 function toggleSort(key: CreditSortKey) {
     if (sortKey.value === key) {
@@ -118,25 +162,44 @@ function toggleSort(key: CreditSortKey) {
         sortDir.value = 'desc';
     }
     currentPage.value = 1;
+    syncToUrl();
 }
 
 function setFilter(key: string, value: string) {
-    if (value === 'all' || !value) delete activeFilters.value[key];
-    else activeFilters.value = { ...activeFilters.value, [key]: value };
+    const next = { ...activeFilters.value };
+    if (value === 'all' || !value) delete next[key];
+    else next[key] = value;
+    activeFilters.value = next;
     currentPage.value = 1;
+    syncToUrl();
 }
 
 function clearFilters() {
     activeFilters.value = {};
+    searchQuery.value = '';
+    apiSearch.value = '';
     currentPage.value = 1;
+    syncToUrl();
 }
 
 function applyPreset(preset: Record<string, string>) {
     activeFilters.value = { ...preset };
     currentPage.value = 1;
+    syncToUrl();
 }
 
-watch([searchQuery, pageSize, hideUnlinked], () => { currentPage.value = 1; });
+watch(searchQuery, (val) => {
+    debouncedSetSearch(val);
+    currentPage.value = 1;
+    syncToUrl();
+});
+watch(hideUnlinked, () => {
+    currentPage.value = 1;
+    syncToUrl();
+});
+watch(pageSize, () => { currentPage.value = 1; });
+watch(currentPage, () => { syncToUrl(); });
+watch(network, () => { currentPage.value = 1; });
 
 const config = useRuntimeConfig();
 const apiBaseURL = import.meta.server
