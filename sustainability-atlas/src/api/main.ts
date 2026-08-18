@@ -292,6 +292,19 @@ async function bootstrap() {
         customSiteTitle: 'Sustainability Atlas API Docs — Admin',
     });
 
+    // Without this the API never runs onModuleDestroy, so QueueRegistry's own
+    // (correct) teardown never fires and its Queue/QueueEvents connections — the
+    // bulk of this process's Redict clients, most of them parked on a blocking
+    // XREAD — are only closed by the socket dying with the process. Redict then
+    // carries them until its own timeout notices.
+    //
+    // This registers Nest's own SIGTERM/SIGINT handling, so do NOT also add
+    // manual signal handlers that call app.close(): both would fire on one
+    // signal, running every onModuleDestroy twice (closing already-closed
+    // queues, disconnecting the shared client twice), and a manual process.exit
+    // would cut Nest's shutdown short — defeating the point of adding it.
+    app.enableShutdownHooks();
+
     const port = parseInt(process.env.API_PORT || '3030', 10);
     await app.listen(port);
 

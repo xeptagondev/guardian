@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
-import { QUEUE_NAMES } from '@shared/config/bullmq.config';
+import { QUEUE_NAMES, getWorkerOptions, getTopicPollMode, TopicPollMode } from '@shared/config/bullmq.config';
 import { HederaService, TopicMessage } from '../services/hedera.service';
 import { isTopicBlocked } from '@shared/config/topic-blocklist';
 import { TopicSyncJobData } from './topic-sync.processor';
@@ -23,12 +23,13 @@ import { TopicSyncJobData } from './topic-sync.processor';
  * once caught up, so this queue doesn't inherit TOPIC_SYNC's steady-state
  * churn and grow the same way.
  */
-@Processor(QUEUE_NAMES.TOPIC_SYNC_PRIORITY)
+@Processor(QUEUE_NAMES.TOPIC_SYNC_PRIORITY, getWorkerOptions(QUEUE_NAMES.TOPIC_SYNC_PRIORITY))
 export class TopicSyncPriorityProcessor extends WorkerHost {
     private readonly logger = new Logger(TopicSyncPriorityProcessor.name);
     private readonly pollDelay: number;
     private readonly orgPollDelay: number;
     private readonly maxPollDelay: number;
+    private readonly pollMode: TopicPollMode = getTopicPollMode();
 
     constructor(
         private readonly hederaService: HederaService,
@@ -52,26 +53,32 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
             return;
         }
 
-        this.logger.log(`Syncing topic ${topicId} from seq ${fromSequenceNumber} (priority lane)`);
+        const fromSeq = await this.resolveFromSequence(topicId, fromSequenceNumber);
 
-        const { messages } = await this.hederaService.getMessages(topicId, fromSequenceNumber);
+        this.logger.log(`Syncing topic ${topicId} from seq ${fromSeq} (priority lane)`);
+
+        const { messages } = await this.hederaService.getMessages(topicId, fromSeq);
 
         if (messages.length === 0) {
             // A one-time-priority topic that comes up empty is already caught
             // up — hand steady-state re-polling back to the bulk queue instead
             // of staying on the priority lane forever.
             if (oneTimePriority) {
-                await this.bulkTopicQueue.add('sync', {
-                    topicId,
-                    fromSequenceNumber,
-                    isOrgTopic,
-                    emptyPollStreak: 0,
-                }, {
-                    jobId: `topic-${topicId}-poll-${Date.now()}`,
-                    delay: isOrgTopic ? this.orgPollDelay : this.pollDelay,
-                    removeOnComplete: true,
-                    removeOnFail: 1000,
-                });
+                const handoffDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
+                await this.recordNextPoll(topicId, handoffDelay);
+                if (this.pollMode === 'chain') {
+                    await this.bulkTopicQueue.add('sync', {
+                        topicId,
+                        fromSequenceNumber: fromSeq,
+                        isOrgTopic,
+                        emptyPollStreak: 0,
+                    }, {
+                        jobId: `topic-${topicId}-poll-${Date.now()}`,
+                        delay: handoffDelay,
+                        removeOnComplete: true,
+                        removeOnFail: 1000,
+                    });
+                }
                 this.logger.debug(`Topic ${topicId} caught up — handing off to bulk TOPIC_SYNC`);
                 return;
             }
@@ -79,17 +86,20 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
             const baseDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
             const streak = emptyPollStreak + 1;
             const delay = Math.min(baseDelay * 2 ** Math.min(streak, 10), this.maxPollDelay);
-            await this.priorityQueue.add('sync', {
-                topicId,
-                fromSequenceNumber,
-                isOrgTopic,
-                emptyPollStreak: streak,
-            }, {
-                jobId: `topic-${topicId}-poll-${Date.now()}`,
-                delay,
-                removeOnComplete: true,
-                removeOnFail: 1000,
-            });
+            await this.recordNextPoll(topicId, delay);
+            if (this.pollMode === 'chain') {
+                await this.priorityQueue.add('sync', {
+                    topicId,
+                    fromSequenceNumber: fromSeq,
+                    isOrgTopic,
+                    emptyPollStreak: streak,
+                }, {
+                    jobId: `topic-${topicId}-poll-${Date.now()}`,
+                    delay,
+                    removeOnComplete: true,
+                    removeOnFail: 1000,
+                });
+            }
             this.logger.debug(`No new messages for topic ${topicId}, re-polling in ${delay}ms (streak=${streak})`);
             return;
         }
@@ -130,22 +140,80 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
 
         const targetQueue = (!hasNext && oneTimePriority) ? this.bulkTopicQueue : this.priorityQueue;
         const nextDelay = hasNext ? 100 : (isOrgTopic ? this.orgPollDelay : this.pollDelay);
-        await targetQueue.add('sync', {
-            topicId,
-            fromSequenceNumber: maxSequence,
-            isOrgTopic,
-            emptyPollStreak: 0,
-            oneTimePriority: hasNext ? oneTimePriority : false,
-        }, {
-            jobId: `topic-${topicId}-${maxSequence}-${Date.now()}`,
-            delay: nextDelay,
-            removeOnComplete: true,
-            removeOnFail: 1000,
-        });
+
+        // Park mid-catch-up rather than scheduling — see
+        // TopicSyncProcessor.parkFromDispatcher for why recording the 100 ms page
+        // delay would make the dispatcher double-page this topic.
+        if (hasNext) {
+            await this.parkFromDispatcher(topicId);
+        } else {
+            await this.recordNextPoll(topicId, nextDelay);
+        }
+
+        // Catch-up paging stays on the queue in both modes — see the equivalent
+        // comment in TopicSyncProcessor. Only idle re-polling moves to the
+        // dispatcher.
+        if (hasNext || this.pollMode === 'chain') {
+            await targetQueue.add('sync', {
+                topicId,
+                fromSequenceNumber: maxSequence,
+                isOrgTopic,
+                emptyPollStreak: 0,
+                oneTimePriority: hasNext ? oneTimePriority : false,
+            }, {
+                jobId: `topic-${topicId}-${maxSequence}-${Date.now()}`,
+                delay: nextDelay,
+                removeOnComplete: true,
+                removeOnFail: 1000,
+            });
+        }
 
         this.logger.log(
             `Topic ${topicId} (priority lane): ${messages.length} messages, maxSeq=${maxSequence}, hasNext=${hasNext}`,
         );
+    }
+
+    /**
+     * Records this topic's next poll time — see
+     * TopicSyncProcessor.recordNextPoll for the full rationale.
+     */
+    private async recordNextPoll(topicId: string, delayMs: number): Promise<void> {
+        const seconds = Math.max(1, Math.round(delayMs / 1000));
+        await this.dataSource.query(
+            `UPDATE topic_cache
+                SET "nextPollAt"      = now() + ($2::int * interval '1 second'),
+                    "pollIntervalSec" = $2::int
+              WHERE "topicId" = $1`,
+            [topicId, seconds],
+        );
+    }
+
+    /** Holds a topic out of the dispatcher while its catch-up chain runs. */
+    private async parkFromDispatcher(topicId: string): Promise<void> {
+        const seconds = Math.max(60, Math.round(this.pollDelay / 1000));
+        await this.dataSource.query(
+            `UPDATE topic_cache
+                SET "nextPollAt"      = now() + ($2::int * interval '1 second'),
+                    "pollIntervalSec" = $2::int
+              WHERE "topicId" = $1`,
+            [topicId, seconds],
+        );
+    }
+
+    /**
+     * Clamps the requested start sequence to the persisted watermark — see
+     * TopicSyncProcessor.resolveFromSequence for the full rationale. This lane
+     * is where it matters most: guardian-sync routes every event here with
+     * `fromSequenceNumber: 0`, so without the clamp each event re-crawls the
+     * whole topic and the priority lane starves under its own re-ingestion.
+     */
+    private async resolveFromSequence(topicId: string, requested: number): Promise<number> {
+        const rows: Array<{ messages: number | string }> = await this.dataSource.query(
+            `SELECT messages FROM topic_cache WHERE "topicId" = $1 LIMIT 1`,
+            [topicId],
+        );
+        const watermark = Number(rows[0]?.messages ?? 0);
+        return Math.max(requested || 0, Number.isFinite(watermark) ? watermark : 0);
     }
 
     /** Same batching approach as TopicSyncProcessor — see that file for rationale. */

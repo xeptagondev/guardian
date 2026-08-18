@@ -448,6 +448,37 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
     // tokens (the busiest testnet account backs 1,072). A single walk of that
     // account therefore serves all of them and advances every row's watermark
     // together, so every token of a treasury always carries the same value.
+    // --- Topic poll scheduling (TOPIC_POLL_MODE=dispatcher) -----------------
+    //
+    // Moves a topic's polling schedule out of BullMQ and into its own row.
+    //
+    // Today a topic keeps polling only because each topic-sync job enqueues its
+    // successor, so ~100k idle testnet topics sit in Redis as ~100k perpetually
+    // re-created delayed jobs — a structural floor of tens of jobs per second
+    // that scales with topic COUNT, not with activity, and that no amount of
+    // concurrency removes. With these columns the queue holds only the topics
+    // that are due right now; Postgres holds the schedule.
+    //
+    // Written in both modes so the switch has no cold start: in `chain` mode the
+    // processors keep their self-enqueue chains AND maintain nextPollAt, so the
+    // dispatcher has a fully populated schedule the moment it is enabled.
+    await addColumnIfMissing(dataSource, 'topic_cache', 'nextPollAt', 'TIMESTAMPTZ');
+    // Current backoff for this topic, in seconds. The processors own it (they
+    // compute the empty-poll backoff); the dispatcher only reads it to re-arm
+    // nextPollAt when it hands a topic out.
+    await addColumnIfMissing(dataSource, 'topic_cache', 'pollIntervalSec', 'INT NOT NULL DEFAULT 30');
+    // Non-zero jumps a topic to the front of the next dispatch and routes it to
+    // the priority lane — how a Guardian event asks for "poll this one now".
+    // Named pollPriority to stay clear of the unrelated priority* columns.
+    await addColumnIfMissing(dataSource, 'topic_cache', 'pollPriority', 'SMALLINT NOT NULL DEFAULT 0');
+    // Partial index: the dispatcher's only query is "due, not disabled, most
+    // urgent first". Excluding DISABLED rows keeps the index to the working set.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_topic_cache_next_poll
+        ON topic_cache ("pollPriority" DESC, "nextPollAt")
+        WHERE status <> 'DISABLED'
+    `);
+
     await addColumnIfMissing(dataSource, 'token_cache', 'transferTxWatermark', 'VARCHAR(30)');
     // Lower bound for a treasury walk: no transfer of a token can predate the
     // token. Without it a sweep starts at genesis and pages through years of

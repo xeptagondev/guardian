@@ -3,7 +3,7 @@ import { Inject, Logger } from "@nestjs/common";
 import { Job } from "bullmq";
 import { DataSource } from "typeorm";
 import Redis from "ioredis";
-import { QUEUE_NAMES } from "@shared/config/bullmq.config";
+import { QUEUE_NAMES, getWorkerOptions } from "@shared/config/bullmq.config";
 import { buildMintProjectLinks } from "../project-mapper/mint-project-linker";
 import { linkSerialsToMints } from "../project-mapper/serial-mint-linker";
 
@@ -22,7 +22,7 @@ const TYPE_MAPPINGS: Record<string, string> = {
     'Token': 'CREDIT',
 };
 
-@Processor(QUEUE_NAMES.BUSINESS_VIEW_BUILD)
+@Processor(QUEUE_NAMES.BUSINESS_VIEW_BUILD, getWorkerOptions(QUEUE_NAMES.BUSINESS_VIEW_BUILD))
 export class BusinessViewBuilderProcessor extends WorkerHost {
     private readonly logger = new Logger(BusinessViewBuilderProcessor.name);
 
