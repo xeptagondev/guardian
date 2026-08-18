@@ -4,16 +4,22 @@ import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import Redis from 'ioredis';
-import { QUEUE_NAMES, getWorkerNetwork } from '@shared/config/bullmq.config';
+import { QUEUE_NAMES, envInt, getTopicPollMode, getWorkerNetwork } from '@shared/config/bullmq.config';
+import { LeaderLock } from '@shared/redis/leader-lock';
+import { canEnqueueBulk } from '@shared/redis/redis-headroom';
 import { ROOT_TOPICS } from '@shared/config/configuration';
 import { PolicyDecodeJobData } from '../processors/policy-decode.processor';
 import { TREASURY_TRANSFERS_JOB } from '../processors/token-sync.processor';
 import { ProjectMapperService } from '../services/project-mapper.service';
 
+/** Shape accepted by Queue.addBulk. */
+type BulkJob = Parameters<Queue['addBulk']>[0][number];
+
 /**
  * Orchestrates initial sync jobs on startup.
  * Uses Redict-based leader election (scoped per network) so only one instance
- * per network schedules repeating jobs when running multiple workers horizontally.
+ * per network seeds jobs and schedules repeatables when running multiple
+ * workers horizontally.
  */
 @Injectable()
 export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -23,6 +29,26 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
     private readonly leaderKey = `se:scheduler:leader:${this.network}`;
     private leaderInterval: ReturnType<typeof setInterval> | null = null;
     private isLeader = false;
+    /** Boot seeding is one-shot per process, even across a leadership takeover. */
+    private seedingRan = false;
+    /** Jobs per addBulk pipeline — see addBulkChunked. */
+    private static readonly BULK_CHUNK = 500;
+    private leaderLock!: LeaderLock;
+
+    /** Liveness reconciler — see runReconcile(). */
+    private reconcileInterval: ReturnType<typeof setInterval> | null = null;
+    private reconcileRunning = false;
+    private readonly reconcileEveryMs = envInt('RECONCILE_INTERVAL_MS', 300_000);
+    private readonly reconcileTopicLimit = envInt('RECONCILE_TOPIC_LIMIT', 2000);
+    private readonly reconcileMessageLimit = envInt('RECONCILE_MESSAGE_LIMIT', 1000);
+    private readonly stuckMessageAfterMs = envInt('RECONCILE_STUCK_MESSAGE_MS', 3_600_000);
+
+    /** Topic poll dispatcher — see runDispatcher(). */
+    private dispatchInterval: ReturnType<typeof setInterval> | null = null;
+    private dispatchRunning = false;
+    private readonly pollMode = getTopicPollMode();
+    private readonly dispatchEveryMs = envInt('TOPIC_DISPATCH_INTERVAL_MS', 5_000);
+    private readonly dispatchBatch = envInt('TOPIC_DISPATCH_BATCH', 500);
 
     constructor(
         private readonly dataSource: DataSource,
@@ -31,69 +57,85 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         @Inject('REDICT_PUB') private readonly redis: Redis,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC) private readonly topicQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOPIC_SYNC_PRIORITY) private readonly topicPriorityQueue: Queue,
+        @InjectQueue(QUEUE_NAMES.MESSAGE_PARSE) private readonly messageQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
         @InjectQueue(QUEUE_NAMES.RETIRE_SYNC) private readonly retireQueue: Queue,
         @InjectQueue(QUEUE_NAMES.MV_REFRESH) private readonly mvRefreshQueue: Queue,
         @InjectQueue(QUEUE_NAMES.BUSINESS_VIEW_BUILD) private readonly businessViewQueue: Queue,
         @InjectQueue(QUEUE_NAMES.POLICY_DECODE) private readonly policyDecodeQueue: Queue,
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
-    ) {}
+    ) {
+        this.leaderLock = new LeaderLock(this.redis, this.leaderKey, this.instanceId, 30);
+    }
 
     async onModuleInit(): Promise<void> {
         this.logger.log(`Scheduler starting (instance: ${this.instanceId})`);
 
-        // Try to acquire leadership
-        this.isLeader = await this.tryAcquireLeader();
+        this.isLeader = await this.leaderLock.tryAcquire();
 
         if (this.isLeader) {
-            this.logger.log('Acquired scheduler leadership — scheduling jobs');
-            await this.scheduleAllJobs();
+            this.logger.log('Acquired scheduler leadership — seeding sync jobs');
+            // Deliberately not awaited. Seeding walks six-figure tables and
+            // enqueues in bulk; awaiting it here would hold up onModuleInit and
+            // keep every processor from starting to drain until it finished.
+            void this.runBootSeeding();
         } else {
-            this.logger.log('Another instance is leader — skipping repeating job scheduling');
+            this.logger.log('Another instance is leader — skipping boot seeding');
         }
 
-        // Always seed the root topic (idempotent upsert — resets hasNext to true
-        // so a restart will resume crawling even if the topic was previously exhausted).
-        await this.seedRootTopic();
-
-        // Always schedule initial topic/token syncs (idempotent via jobId)
-        await this.scheduleTopicSyncs();
-        await this.scheduleTokenSyncs();
-        await this.scheduleRetireSyncs();
-        await this.schedulePolicyDecodeJobs();
-        await this.rescheduleOrphanedTopics();
-
-        // Backfill IPFS fetches for VCs whose parent policy is now decoded but whose
-        // fetch was skipped (they arrived before their policy was decoded).
-        await this.backfillSuccessfulPolicyVcFetches();
-
-        // Backfill IPFS fetches for Standard Registry profile-topic VCs. These
-        // carry OrganizationName, the fallback display-name source for the 50+
-        // registries that don't publish a name inline on their announcement.
-        await this.backfillRegistryProfileVcFetches();
-
-        // Re-run eager project mapping for already-fetched VCs.
-        // Opt-in via BACKFILL_PROJECTS_ON_BOOT=true. Used when the mapper logic
-        // changed and existing PROJECT rows need to be regenerated from scratch.
-        // The backfill DELETEs all PROJECT rows before replaying, so credits
-        // don't double-count. After it produces rows, unset the env var on the
-        // next restart to skip the O(n) replay cost.
-        if (process.env.BACKFILL_PROJECTS_ON_BOOT === 'true') {
-            this.logger.log('BACKFILL_PROJECTS_ON_BOOT=true — replaying VCs through project mapper');
-            await this.backfillProjectMappings();
-        }
-
-        // Renew leadership periodically
+        // Renew leadership periodically. renew() is a compare-and-swap, so a
+        // false result means another instance now owns the lock.
         this.leaderInterval = setInterval(async () => {
             try {
-                this.isLeader = await this.tryAcquireLeader();
                 if (this.isLeader) {
-                    await this.redis.expire(this.leaderKey, 30);
+                    this.isLeader = await this.leaderLock.renew();
+                    if (!this.isLeader) {
+                        this.logger.warn('Lost scheduler leadership');
+                    }
+                    return;
+                }
+                // Standby: take over once the previous leader's TTL lapses.
+                if (await this.leaderLock.tryAcquire()) {
+                    this.isLeader = true;
+                    // runBootSeeding is one-shot per process, so on an instance
+                    // that already seeded this only resumes leader-gated timers.
+                    this.logger.log(
+                        this.seedingRan
+                            ? 'Took over scheduler leadership'
+                            : 'Took over scheduler leadership — seeding sync jobs',
+                    );
+                    void this.runBootSeeding();
                 }
             } catch {
                 // Silent — will retry next interval
             }
         }, 15000);
+
+        // Leader-gated inside the tick so a takeover starts reconciling without
+        // a restart.
+        if (this.reconcileEveryMs > 0) {
+            this.reconcileInterval = setInterval(() => {
+                void this.runReconcile();
+            }, this.reconcileEveryMs);
+            this.logger.log(`Liveness reconciler enabled (every ${this.reconcileEveryMs}ms)`);
+        }
+
+        // Deliberately a timer rather than a repeatable BullMQ job: the whole
+        // point of the dispatcher is to stop the queue carrying one job per
+        // topic, and creating a job every 5s to achieve that would put back a
+        // slice of what it removes. Leader-gated inside the tick, like the
+        // reconciler, so a takeover starts dispatching without a restart.
+        if (this.pollMode === 'dispatcher' && this.dispatchEveryMs > 0) {
+            this.dispatchInterval = setInterval(() => {
+                void this.runDispatcher();
+            }, this.dispatchEveryMs);
+            this.logger.log(
+                `Topic poll dispatcher enabled (every ${this.dispatchEveryMs}ms, ` +
+                `up to ${this.dispatchBatch} topics per tick)`,
+            );
+        } else {
+            this.logger.log('Topic poll mode: chain (self-enqueueing poll jobs)');
+        }
     }
 
     onModuleDestroy(): void {
@@ -101,10 +143,348 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
             clearInterval(this.leaderInterval);
             this.leaderInterval = null;
         }
-        // Release leadership
-        if (this.isLeader) {
-            this.redis.del(this.leaderKey).catch(() => {});
+        if (this.reconcileInterval) {
+            clearInterval(this.reconcileInterval);
+            this.reconcileInterval = null;
         }
+        if (this.dispatchInterval) {
+            clearInterval(this.dispatchInterval);
+            this.dispatchInterval = null;
+        }
+        // Compare-and-swap release: never frees a lock another instance has
+        // since taken over.
+        if (this.isLeader) {
+            this.leaderLock.release().catch(() => {});
+        }
+    }
+
+    /**
+     * Enqueues in bulk, in chunks.
+     *
+     * Seeding walks six-figure tables, and issuing one `add()` per row meant
+     * tens of thousands of sequential round-trips against a half-a-core Redict
+     * on every boot. addBulk pipelines a chunk into a single round-trip; the
+     * chunk cap keeps one pipeline from getting large enough to stall the event
+     * loop or spike Redict's memory while it buffers the reply.
+     */
+    private async addBulkChunked(queue: Queue, jobs: BulkJob[]): Promise<number> {
+        for (let i = 0; i < jobs.length; i += SyncSchedulerService.BULK_CHUNK) {
+            await queue.addBulk(jobs.slice(i, i + SyncSchedulerService.BULK_CHUNK));
+        }
+        return jobs.length;
+    }
+
+    /**
+     * One-shot boot seeding. Leader-only: every step here is a full-table sweep
+     * that enqueues one job per row, and running it on every replica multiplied
+     * tens of thousands of Redis round-trips by the replica count for no extra
+     * coverage — the enqueued jobs are identical. Anything a dying leader misses
+     * is picked up by the reconciler or by the next leader's seeding pass.
+     */
+    private async runBootSeeding(): Promise<void> {
+        if (this.seedingRan) return;
+        this.seedingRan = true;
+        try {
+            await this.scheduleAllJobs();
+
+            // Idempotent upsert — resets hasNext to true so a restart resumes
+            // crawling even if the topic was previously exhausted.
+            await this.seedRootTopic();
+
+            await this.scheduleTopicSyncs();
+            await this.scheduleTokenSyncs();
+            await this.scheduleRetireSyncs();
+            await this.schedulePolicyDecodeJobs();
+            await this.rescheduleOrphanedTopics();
+
+            // Backfill IPFS fetches for VCs whose parent policy is now decoded but
+            // whose fetch was skipped (they arrived before their policy was decoded).
+            await this.backfillSuccessfulPolicyVcFetches();
+
+            // Backfill IPFS fetches for Standard Registry profile-topic VCs. These
+            // carry OrganizationName, the fallback display-name source for the 50+
+            // registries that don't publish a name inline on their announcement.
+            await this.backfillRegistryProfileVcFetches();
+
+            // Re-run eager project mapping for already-fetched VCs.
+            // Opt-in via BACKFILL_PROJECTS_ON_BOOT=true. Used when the mapper logic
+            // changed and existing PROJECT rows need to be regenerated from scratch.
+            // The backfill DELETEs all PROJECT rows before replaying, so credits
+            // don't double-count. After it produces rows, unset the env var on the
+            // next restart to skip the O(n) replay cost.
+            if (process.env.BACKFILL_PROJECTS_ON_BOOT === 'true') {
+                this.logger.log('BACKFILL_PROJECTS_ON_BOOT=true — replaying VCs through project mapper');
+                await this.backfillProjectMappings();
+            }
+
+            this.logger.log('Boot seeding complete');
+        } catch (error) {
+            // Never rethrow: this runs detached, so an unhandled rejection here
+            // would take down the worker process.
+            this.logger.error(`Boot seeding failed: ${(error as Error).message}`);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Liveness reconciler
+    // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // Topic poll dispatcher (TOPIC_POLL_MODE=dispatcher)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Hands out the topics that are due to be polled right now.
+     *
+     * In `chain` mode every known topic parks a delayed BullMQ job so that it can
+     * re-poll itself, which means ~100k idle testnet topics cost ~100k resident
+     * jobs and a steady stream of re-creations — load proportional to how many
+     * topics EXIST rather than how many have anything to say. Here the schedule
+     * lives in topic_cache and the queue only ever holds the due set.
+     *
+     * `FOR UPDATE SKIP LOCKED` makes the claim safe without a lock of its own:
+     * two dispatchers running concurrently (a leadership handover, an operator
+     * running a second worker) each take disjoint rows rather than duplicating
+     * work or blocking each other.
+     */
+    private async runDispatcher(): Promise<void> {
+        if (!this.isLeader || this.dispatchRunning) return;
+        this.dispatchRunning = true;
+        try {
+            // Claim and re-arm in one statement: the row's next poll is scheduled
+            // before its job is enqueued, so a crash between the two costs one
+            // skipped poll rather than a topic that stops being scheduled at all.
+            const due: Array<{ topicId: string; messages: number; wasPriority: number }> =
+                await this.dataSource.query(
+                    `WITH due AS (
+                         SELECT "topicId", "pollPriority"
+                           FROM topic_cache
+                          WHERE status <> 'DISABLED'
+                            AND "nextPollAt" IS NOT NULL
+                            AND "nextPollAt" <= now()
+                          ORDER BY "pollPriority" DESC, "nextPollAt"
+                          LIMIT $1
+                            FOR UPDATE SKIP LOCKED
+                     )
+                     UPDATE topic_cache t
+                        SET "nextPollAt"   = now() + (t."pollIntervalSec" * interval '1 second'),
+                            "pollPriority" = 0
+                       FROM due
+                      WHERE t."topicId" = due."topicId"
+                  RETURNING t."topicId", t.messages, due."pollPriority" AS "wasPriority"`,
+                    [this.dispatchBatch],
+                );
+
+            if (due.length === 0) return;
+
+            // A topic flagged by a Guardian event goes to the priority lane; the
+            // rest are routine re-polls.
+            const priority: BulkJob[] = [];
+            const bulk: BulkJob[] = [];
+            for (const row of due) {
+                const job: BulkJob = {
+                    name: 'sync',
+                    data: {
+                        topicId: row.topicId,
+                        fromSequenceNumber: row.messages ?? 0,
+                        isOrgTopic: Number(row.wasPriority) > 0,
+                        emptyPollStreak: 0,
+                    },
+                    opts: {
+                        // Distinct per dispatch so a re-add can never collide with
+                        // the job still running from the previous tick.
+                        jobId: `topic-${row.topicId}-disp-${Date.now()}`,
+                        removeOnComplete: true,
+                        removeOnFail: 1000,
+                    },
+                };
+                (Number(row.wasPriority) > 0 ? priority : bulk).push(job);
+            }
+
+            await this.addBulkChunked(this.topicPriorityQueue, priority);
+            await this.addBulkChunked(this.topicQueue, bulk);
+
+            this.logger.debug(
+                `Dispatcher: released ${bulk.length} routine + ${priority.length} priority topic poll(s)`,
+            );
+        } catch (error) {
+            this.logger.warn(`Dispatcher failed: ${(error as Error).message}`);
+        } finally {
+            this.dispatchRunning = false;
+        }
+    }
+
+    /**
+     * Restarts work that fell off the queues.
+     *
+     * Both ingestion paths are chains, not schedules: a topic keeps syncing only
+     * because the previous topic-sync job enqueued the next one, and a message is
+     * parsed only because topic-sync enqueued a job for it. Anything that ends a
+     * chain — an exhausted retry, a job lost to a Redict restart, an OOM at
+     * enqueue time — stops that topic or message permanently, and until now the
+     * only recovery was restarting the worker so boot seeding ran again.
+     *
+     * Rescue counts trending to zero is the signal that ingestion is healthy;
+     * a persistently non-zero count means chains are still dying somewhere.
+     */
+    private async runReconcile(): Promise<void> {
+        if (!this.isLeader || this.reconcileRunning) return;
+        this.reconcileRunning = true;
+        try {
+            const topics = await this.rescueDeadTopicChains();
+            const messages = await this.rescueStuckMessages();
+            if (topics > 0 || messages > 0) {
+                this.logger.log(
+                    `Reconciler: restarted ${topics} topic chain(s), re-queued ${messages} stuck message(s)`,
+                );
+            }
+        } catch (error) {
+            this.logger.warn(`Reconciler failed: ${(error as Error).message}`);
+        } finally {
+            this.reconcileRunning = false;
+        }
+    }
+
+    /**
+     * Finds topics with no job on either topic queue and starts a fresh poll.
+     *
+     * Liveness cannot be read from topic_cache: `lastUpdate` only moves when
+     * messages actually arrive, so a topic idle for a week looks identical to
+     * one whose chain died. The queues are the source of truth instead.
+     *
+     * The scan reads job IDs only (ZRANGE/LRANGE), never job hashes. Every topic
+     * job ID embeds its topic — `topic-0.0.1234-poll-<ts>` — so a few range reads
+     * replace what would otherwise be one HGETALL per queued job, the pattern
+     * that saturates the connection on queues this size.
+     */
+    private async rescueDeadTopicChains(): Promise<number> {
+        // In dispatcher mode a topic having no queued job is the NORMAL state —
+        // that is the entire point — so the queue-derived liveness check below
+        // would classify every topic as dead and re-enqueue the whole table on
+        // every tick. Here the schedule itself is the liveness signal, and the
+        // only way to fall out of it is to have no nextPollAt at all (a row
+        // created while the dispatcher was not running).
+        if (this.pollMode === 'dispatcher') {
+            const armed = await this.dataSource.query(
+                `UPDATE topic_cache
+                    SET "nextPollAt" = now()
+                  WHERE status <> 'DISABLED'
+                    AND "nextPollAt" IS NULL
+              RETURNING 1`,
+            );
+            return Array.isArray(armed) ? armed.length : 0;
+        }
+
+        const live = new Set<string>();
+        const topicIdFromJobId = /^topic-(\d+\.\d+\.\d+)-/;
+
+        for (const queueName of [QUEUE_NAMES.TOPIC_SYNC, QUEUE_NAMES.TOPIC_SYNC_PRIORITY]) {
+            // 'paused' is scanned too: BullMQ implements pause by RENAMING the
+            // wait list to paused. Without it, an operator pausing a topic queue
+            // to let a backlog drain would make every topic whose job sat in
+            // wait look dead, and this reconciler would bulk-enqueue thousands
+            // of duplicates into the paused queue every tick — growing exactly
+            // the backlog the pause was meant to drain.
+            const [delayed, prioritized, waiting, active, paused] = await Promise.all([
+                this.redis.zrange(`bull:${queueName}:delayed`, 0, -1),
+                this.redis.zrange(`bull:${queueName}:prioritized`, 0, -1),
+                this.redis.lrange(`bull:${queueName}:wait`, 0, -1),
+                this.redis.lrange(`bull:${queueName}:active`, 0, -1),
+                this.redis.lrange(`bull:${queueName}:paused`, 0, -1),
+            ]);
+            for (const jobId of [...delayed, ...prioritized, ...waiting, ...active, ...paused]) {
+                const match = topicIdFromJobId.exec(jobId);
+                if (match) live.add(match[1]);
+            }
+        }
+
+        // Nothing queued at all usually means Redict was just flushed or the
+        // queues have not been populated yet; boot seeding covers that case and
+        // rescuing every topic here would enqueue the whole table at once.
+        if (live.size === 0) return 0;
+
+        // The live set is diffed in memory rather than passed to Postgres. Both
+        // sides run to five and six figures here, and every SQL formulation of
+        // "not in this list" (`<> ALL`, or an anti-join against unnest) plans as
+        // a nested loop, because the planner has no cardinality estimate for an
+        // array parameter — that is 10^9-comparison territory on this table.
+        const candidates: Array<{ topicId: string; messages: number }> =
+            await this.dataSource.query(
+                // Bounded: enough rows to be sure of finding reconcileTopicLimit
+                // that are NOT already live, without pulling a six-figure table
+                // into the worker heap every tick.
+                `SELECT "topicId", messages
+                   FROM topic_cache
+                  WHERE status <> 'DISABLED'
+                  ORDER BY "lastUpdate" ASC
+                  LIMIT $1`,
+                [this.reconcileTopicLimit + live.size],
+            );
+
+        const rows: Array<{ topicId: string; messages: number }> = [];
+        for (const row of candidates) {
+            if (live.has(row.topicId)) continue;
+            rows.push(row);
+            if (rows.length >= this.reconcileTopicLimit) break;
+        }
+        if (rows.length === 0) return 0;
+
+        const stamp = Date.now();
+        await this.topicQueue.addBulk(
+            rows.map(row => ({
+                name: 'sync',
+                data: {
+                    topicId: row.topicId,
+                    fromSequenceNumber: row.messages ?? 0,
+                    isOrgTopic: false,
+                    emptyPollStreak: 0,
+                },
+                opts: {
+                    // Fresh chain head. Unique per rescue so it can never collide
+                    // with a chain job that is still running.
+                    jobId: `topic-${row.topicId}-rescue-${stamp}`,
+                    removeOnComplete: true,
+                },
+            })),
+        );
+        return rows.length;
+    }
+
+    /**
+     * Re-queues messages stranded at LOADED — written to message_cache but never
+     * parsed, because the parse job was lost. `msg-<consensusTimestamp>` is the
+     * same deterministic ID the topic-sync processors use, so a message whose job
+     * is still queued is a no-op rather than a duplicate.
+     */
+    private async rescueStuckMessages(): Promise<number> {
+        const cutoff = Date.now() - this.stuckMessageAfterMs;
+        const rows: Array<{ consensusTimestamp: string; topicId: string }> =
+            await this.dataSource.query(
+                `SELECT "consensusTimestamp", "topicId"
+                   FROM message_cache
+                  WHERE status = 'LOADED'
+                    AND "lastUpdate" < $1
+                  ORDER BY "lastUpdate" ASC
+                  LIMIT $2`,
+                [cutoff, this.reconcileMessageLimit],
+            );
+        if (rows.length === 0) return 0;
+
+        await this.messageQueue.addBulk(
+            rows.map(row => ({
+                name: 'process',
+                data: {
+                    consensusTimestamp: row.consensusTimestamp,
+                    topicId: row.topicId,
+                },
+                opts: {
+                    jobId: `msg-${row.consensusTimestamp}`,
+                    removeOnComplete: true,
+                    removeOnFail: 1000,
+                },
+            })),
+        );
+        return rows.length;
     }
 
     /**
@@ -112,17 +492,7 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
      * Lock TTL is 30s, renewed every 15s by the leader.
      */
     private async tryAcquireLeader(): Promise<boolean> {
-        const result = await this.redis.set(
-            this.leaderKey,
-            this.instanceId,
-            'EX', 30,
-            'NX',
-        );
-        if (result === 'OK') return true;
-
-        // Check if we already hold the lock
-        const current = await this.redis.get(this.leaderKey);
-        return current === this.instanceId;
+        return this.leaderLock.tryAcquire();
     }
 
     /**
@@ -181,27 +551,51 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         const seedTopicId = this.configService.get<string>('app.seedTopicId')
             || ROOT_TOPICS[network];
 
-        let enqueued = 0;
+        // In dispatcher mode the schedule IS the seeding. Enqueueing a job per
+        // topic here would recreate at boot exactly the six-figure resident job
+        // set the dispatcher exists to remove, so instead arm any topic that has
+        // no schedule yet and let the dispatcher release them a batch per tick.
+        if (this.pollMode === 'dispatcher') {
+            const armed = await this.dataSource.query(
+                `UPDATE topic_cache
+                    SET "nextPollAt" = now()
+                  WHERE status <> 'DISABLED'
+                    AND "nextPollAt" IS NULL
+              RETURNING 1`,
+            );
+            this.logger.log(
+                `Armed ${Array.isArray(armed) ? armed.length : 0} unscheduled topic(s) for dispatch ` +
+                `(${topics.length} total, released ${this.dispatchBatch} per tick)`,
+            );
+            return;
+        }
+
+        // Stable jobId on (topicId, watermark), and NO pre-remove. Seeding means
+        // "make sure this topic has a sync job", not "force a new one": if a job
+        // at this watermark is already waiting, delayed or running, the topic is
+        // covered and re-adding is a no-op. Removing first was a cross-replica
+        // race — one instance's remove could land between another's remove and
+        // add, or delete a job a worker had already picked up.
+        const priorityJobs: BulkJob[] = [];
+        const bulkJobs: BulkJob[] = [];
+
         for (const topic of topics) {
             const isOrgTopic = topic.topicId === seedTopicId;
-            const queue = isOrgTopic ? this.topicPriorityQueue : this.topicQueue;
-            // Stable jobId on (topicId, watermark) so concurrent worker boots dedupe
-            // to a single job. Pre-remove clears any completed/failed job from a prior
-            // boot at the same watermark so this boot still re-runs the sync.
             const fromSeq = topic.messages || 0;
-            const jobId = `topic-${topic.topicId}-${fromSeq}`;
-            try {
-                await queue.remove(jobId);
-            } catch {
-                // Job didn't exist — fine.
-            }
-            await queue.add('sync', {
-                topicId: topic.topicId,
-                fromSequenceNumber: fromSeq,
-                isOrgTopic,
-            }, { jobId });
-            enqueued++;
+            (isOrgTopic ? priorityJobs : bulkJobs).push({
+                name: 'sync',
+                data: {
+                    topicId: topic.topicId,
+                    fromSequenceNumber: fromSeq,
+                    isOrgTopic,
+                },
+                opts: { jobId: `topic-${topic.topicId}-${fromSeq}` },
+            });
         }
+
+        const enqueued =
+            await this.addBulkChunked(this.topicPriorityQueue, priorityJobs) +
+            await this.addBulkChunked(this.topicQueue, bulkJobs);
 
         this.logger.log(`Enqueued ${enqueued} topic sync jobs from cache`);
     }
@@ -214,38 +608,33 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
      *   (deleted=true in nft_cache) that occurred since the last sync are detected.
      */
     private async scheduleTokenSyncs(): Promise<void> {
+        // All three passes below use a stable jobId per (token, purpose) and no
+        // pre-remove — see scheduleTopicSyncs for why removing first is unsafe
+        // once more than one instance can be booting.
         const pendingTokens = await this.dataSource.query(
             `SELECT "tokenId", "serialNumber" FROM token_cache WHERE "hasNext" = true`,
         );
-        for (const token of pendingTokens) {
-            await this.tokenQueue.add('sync', {
+        await this.addBulkChunked(this.tokenQueue, pendingTokens.map((token: {
+            tokenId: string; serialNumber: number | null;
+        }) => ({
+            name: 'sync',
+            data: {
                 tokenId: token.tokenId,
                 fetchNfts: true,
                 fromSerial: token.serialNumber || 0,
-            }, {
-                jobId: `token-${token.tokenId}-init`,
-            });
-        }
+            },
+            opts: { jobId: `token-${token.tokenId}-init` },
+        })));
 
         // Re-sync all NFT tokens from serial 0 to detect retirements.
-        // Stable jobId so concurrent worker boots dedupe to a single job per token;
-        // pre-remove clears the prior boot's completed job so this boot re-runs the check.
         const nftTokens = await this.dataSource.query(
             `SELECT "tokenId" FROM token_cache WHERE type = 'NON_FUNGIBLE_UNIQUE'`,
         );
-        for (const token of nftTokens) {
-            const jobId = `token-${token.tokenId}-retirement`;
-            try {
-                await this.tokenQueue.remove(jobId);
-            } catch {
-                // Job didn't exist — fine.
-            }
-            await this.tokenQueue.add('sync', {
-                tokenId: token.tokenId,
-                fetchNfts: true,
-                fromSerial: 0,
-            }, { jobId });
-        }
+        await this.addBulkChunked(this.tokenQueue, nftTokens.map((token: { tokenId: string }) => ({
+            name: 'sync',
+            data: { tokenId: token.tokenId, fetchNfts: true, fromSerial: 0 },
+            opts: { jobId: `token-${token.tokenId}-retirement` },
+        })));
 
         // Fungible tokens carry no serials, so the hasNext watermark above never
         // brings them back. Re-sync them here to pick up mint transactions added
@@ -253,19 +642,11 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         const fungibleTokens = await this.dataSource.query(
             `SELECT "tokenId" FROM token_cache WHERE type = 'FUNGIBLE_COMMON'`,
         );
-        for (const token of fungibleTokens) {
-            const jobId = `token-${token.tokenId}-fungible-mints`;
-            try {
-                await this.tokenQueue.remove(jobId);
-            } catch {
-                // Job didn't exist — fine.
-            }
-            await this.tokenQueue.add('sync', {
-                tokenId: token.tokenId,
-                fetchNfts: false,
-                fromSerial: 0,
-            }, { jobId });
-        }
+        await this.addBulkChunked(this.tokenQueue, fungibleTokens.map((token: { tokenId: string }) => ({
+            name: 'sync',
+            data: { tokenId: token.tokenId, fetchNfts: false, fromSerial: 0 },
+            opts: { jobId: `token-${token.tokenId}-fungible-mints` },
+        })));
 
         const treasuries = await this.scheduleTreasuryTransferSweeps();
 
@@ -306,19 +687,13 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
             ORDER BY MAX("transferTxWatermark") ASC NULLS FIRST, treasury
         `);
 
-        for (const { treasury } of treasuries) {
-            const jobId = `treasury-${treasury}-sweep`;
-            try {
-                await this.tokenQueue.remove(jobId);
-            } catch {
-                // Job didn't exist — fine.
-            }
-            await this.tokenQueue.add(
-                TREASURY_TRANSFERS_JOB,
-                { treasury },
-                { jobId },
-            );
-        }
+        // addBulk preserves the ordering established above, so never-scanned
+        // accounts still enter the queue first.
+        await this.addBulkChunked(this.tokenQueue, treasuries.map(({ treasury }) => ({
+            name: TREASURY_TRANSFERS_JOB,
+            data: { treasury },
+            opts: { jobId: `treasury-${treasury}-sweep` },
+        })));
 
         return treasuries.length;
     }
@@ -387,15 +762,11 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         const retireContracts: Array<{ contract_id: string }> = await this.dataSource.query(
             `SELECT contract_id FROM contract_cache WHERE contract_type = 'RETIRE'`,
         );
-        for (const c of retireContracts) {
-            const jobId = `retire-${c.contract_id}`;
-            try {
-                await this.retireQueue.remove(jobId);
-            } catch {
-                // Job didn't exist — fine.
-            }
-            await this.retireQueue.add('sync', { contractId: c.contract_id }, { jobId });
-        }
+        await this.addBulkChunked(this.retireQueue, retireContracts.map(c => ({
+            name: 'sync',
+            data: { contractId: c.contract_id },
+            opts: { jobId: `retire-${c.contract_id}` },
+        })));
 
         this.logger.log(`Enqueued ${retireContracts.length} retirement contract sync(s)`);
     }
@@ -440,19 +811,21 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
                   )
             `);
 
-        for (const row of rows) {
-            const jobData: PolicyDecodeJobData = {
+        // Keyed on the CID alone, matching the unit of work: the decode lease in
+        // policy-decode.processor.ts conflicts on "sourceCid", and the zip a CID
+        // names is immutable. The previous Date.now() suffix meant this jobId
+        // could never dedupe, so every boot enqueued a fresh decode for every
+        // not-yet-decoded policy — on top of whatever was already queued.
+        await this.addBulkChunked(this.policyDecodeQueue, rows.map(row => ({
+            name: 'decode',
+            data: {
                 cid: row.cid,
                 messageTimestamp: row.consensus_timestamp,
                 policyTopicId: row.policy_topic_id,
                 instanceTopicId: row.instance_topic_id,
-            };
-            // Timestamp suffix ensures a fresh job even if an old completed/failed
-            // job with the same logical ID exists in BullMQ history.
-            await this.policyDecodeQueue.add('decode', jobData, {
-                jobId: `policy-decode-${row.policy_topic_id}-${row.instance_topic_id}-${row.cid}-${Date.now()}`,
-            });
-        }
+            } satisfies PolicyDecodeJobData,
+            opts: { jobId: `policy-decode-${row.cid}` },
+        })));
 
         this.logger.log(`Enqueued ${rows.length} missing policy decode job(s)`);
     }
@@ -485,21 +858,18 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
               )
         `);
 
-        let enqueued = 0;
-        for (const row of rows) {
-            const jobId = `topic-${row.topic_id}-0`;
-            try {
-                await this.topicQueue.remove(jobId);
-            } catch {
-                // Job didn't exist — fine.
-            }
-            await this.topicQueue.add('sync', {
+        // Distinct jobId from the discovery path's `topic-<id>-0`: these two
+        // producers used to share an id, so when discovery's job was mid-flight
+        // the rescue silently collapsed into it and the orphan stayed unrescued.
+        const enqueued = await this.addBulkChunked(this.topicQueue, rows.map(row => ({
+            name: 'sync',
+            data: {
                 topicId: row.topic_id,
                 fromSequenceNumber: 0,
                 isOrgTopic: false,
-            }, { jobId });
-            enqueued++;
-        }
+            },
+            opts: { jobId: `topic-${row.topic_id}-rescue` },
+        })));
 
         if (enqueued > 0) {
             this.logger.log(`Rescued ${enqueued} orphaned topic(s) missing from topic_cache`);
@@ -538,12 +908,25 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
      * so BullMQ deduplicates against any already-queued or completed jobs.
      */
     private async backfillSuccessfulPolicyVcFetches(): Promise<void> {
+        // This sweep is unbounded by nature — every un-fetched VC across every
+        // decoded policy's whole topic subtree — and IPFS_FETCH is the narrowest
+        // lane in the system. Check Redict headroom and the lane's existing depth
+        // before adding to it; whatever is skipped is picked up on a later pass.
+        if (!await canEnqueueBulk(this.redis, this.ipfsQueue, 'policy VC backfill')) return;
+
         const policies: Array<{ policyTopicId: string }> = await this.dataSource.query(
             `SELECT DISTINCT "policyTopicId" FROM policy WHERE "decodeStatus" = 'decoded'`,
         );
 
+        const budget = envInt('BACKFILL_BATCH', 2000);
         let total = 0;
         for (const policy of policies) {
+            if (total >= budget) {
+                this.logger.log(
+                    `Boot backfill: stopped at ${budget} deferred VC fetch(es) — resumes next pass`,
+                );
+                break;
+            }
             const rows: Array<{ consensusTimestamp: string; cid: string }> =
                 await this.dataSource.query(
                     `WITH RECURSIVE descendants AS (
@@ -588,6 +971,8 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
      * they have no parent policy.
      */
     private async backfillRegistryProfileVcFetches(): Promise<void> {
+        if (!await canEnqueueBulk(this.redis, this.ipfsQueue, 'registry profile backfill')) return;
+
         const rows: Array<{ consensusTimestamp: string; cid: string }> =
             await this.dataSource.query(
                 `SELECT m."consensusTimestamp", c.cid
@@ -604,7 +989,9 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
                    )
                    AND NOT EXISTS (
                        SELECT 1 FROM ipfs_fetch_failure ff WHERE ff.cid = c.cid
-                   )`,
+                   )
+                 LIMIT $1`,
+                [envInt('BACKFILL_BATCH', 2000)],
             );
 
         for (const row of rows) {
@@ -630,6 +1017,34 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
      * Skipped when there are no fetched VCs to replay (cheap probe).
      */
     private async backfillProjectMappings(): Promise<void> {
+        // Serialized across processes for the whole delete-and-replay span.
+        // The mapper accumulates credits with SUM semantics, so two overlapping
+        // replays double-count: one instance's DELETE landing partway through
+        // another's replay produces silently wrong credit totals. Leader
+        // election alone does not cover this — a failover mid-backfill would
+        // start a second replay while the first is still running.
+        const runner = this.dataSource.createQueryRunner();
+        await runner.connect();
+        const acquired: Array<{ locked: boolean }> = await runner.query(
+            `SELECT pg_try_advisory_lock(hashtext('se:project-backfill')) AS locked`,
+        );
+        if (!acquired[0]?.locked) {
+            this.logger.warn('Project backfill already running elsewhere — skipping');
+            await runner.release();
+            return;
+        }
+
+        try {
+            await this.runProjectBackfill();
+        } finally {
+            await runner
+                .query(`SELECT pg_advisory_unlock(hashtext('se:project-backfill'))`)
+                .catch(() => {});
+            await runner.release();
+        }
+    }
+
+    private async runProjectBackfill(): Promise<void> {
         const probe: Array<{ count: string }> = await this.dataSource.query(
             `SELECT COUNT(*)::text AS count FROM message
              WHERE type='VC-Document' AND documents IS NOT NULL`,
@@ -674,41 +1089,48 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
     private async scheduleMvRefresh(): Promise<void> {
         const mvRefreshInterval = this.configService.get<number>('app.mvRefreshInterval')! * 1000;
 
-        const repeatableJobs = await this.mvRefreshQueue.getRepeatableJobs();
-        for (const rJob of repeatableJobs) {
-            await this.mvRefreshQueue.removeRepeatableByKey(rJob.key);
-        }
-
-        await this.mvRefreshQueue.add('refresh-mvs', {}, {
-            repeat: { every: mvRefreshInterval },
-            jobId: 'mv-refresh',
-        });
+        // upsertJobScheduler is atomic and idempotent, replacing a
+        // delete-every-repeatable-then-re-add sequence that was neither. That
+        // pattern deleted repeatables belonging to *any* scheduler on the queue,
+        // so during the brief window where two instances both believed they were
+        // leader, one could delete the other's freshly-created schedule and MV
+        // refresh would silently stop until the next boot.
+        await this.mvRefreshQueue.upsertJobScheduler(
+            'mv-refresh',
+            { every: mvRefreshInterval },
+            { name: 'refresh-mvs' },
+        );
 
         this.logger.log(`Scheduled MV refresh every ${mvRefreshInterval / 1000}s`);
     }
 
     private async scheduleBusinessViewBuilder(): Promise<void> {
-        // 60-minute cadence: registry/methodology/credit upserts still run here,
-        // but project mapping is now primarily handled by eager per-VC upserts in
-        // IpfsFetchProcessor. This batch job is the reconciliation/cleanup pass.
-        const interval = 2 * 60 * 1000;
-
-        const repeatableJobs = await this.businessViewQueue.getRepeatableJobs();
-        for (const rJob of repeatableJobs) {
-            await this.businessViewQueue.removeRepeatableByKey(rJob.key);
-        }
+        // Registry/methodology/credit upserts still run here, but project mapping
+        // is now primarily handled by eager per-VC upserts in IpfsFetchProcessor.
+        // This batch job is the reconciliation/cleanup pass.
+        //
+        // Every run is a full scan of `message`, so the cadence is a real cost.
+        // It is now configurable and stated once: the code, its comment and the
+        // log line previously disagreed (2 minutes, "60-minute", "every 60
+        // minutes"), so nobody reading this could tell how often it actually ran.
+        const interval = envInt('BUSINESS_VIEW_BUILD_INTERVAL_MS', 2 * 60 * 1000);
 
         // Immediate one-shot so registries/methodologies/credits populate within
-        // seconds of boot rather than waiting a full hour for the first repeat fire.
+        // seconds of boot rather than waiting for the first repeat to fire.
         await this.businessViewQueue.add('build-business-views', {}, {
             jobId: `business-view-build-initial-${Date.now()}`,
         });
 
-        await this.businessViewQueue.add('build-business-views', {}, {
-            repeat: { every: interval },
-            jobId: 'business-view-build',
-        });
+        // Atomic + idempotent — see scheduleMvRefresh for why the previous
+        // purge-then-re-add was unsafe with more than one instance.
+        await this.businessViewQueue.upsertJobScheduler(
+            'business-view-build',
+            { every: interval },
+            { name: 'build-business-views' },
+        );
 
-        this.logger.log('Scheduled business view builder: initial run + every 60 minutes');
+        this.logger.log(
+            `Scheduled business view builder: initial run + every ${interval / 1000}s`,
+        );
     }
 }

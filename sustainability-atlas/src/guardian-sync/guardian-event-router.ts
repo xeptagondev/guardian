@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
+import Redis from 'ioredis';
 import { DataSource } from 'typeorm';
-import { QUEUE_NAMES, getWorkerNetwork } from '@shared/config/bullmq.config';
+import { QUEUE_NAMES, envInt, getWorkerNetwork } from '@shared/config/bullmq.config';
 import { ROOT_TOPICS } from '@shared/config/configuration';
 import { GuardianEventLogService } from './guardian-event-log.service';
 
@@ -39,6 +40,14 @@ export class GuardianEventRouter {
     private static readonly HEDERA_ENTITY_ID = /^\d+\.\d+\.\d+$/;
     private readonly seedTopicId: string;
 
+    /**
+     * Guardian re-fires the same events every few seconds while a policy runs,
+     * and an unresolvable one fans out to every registry topic. These cooldowns
+     * collapse that storm to at most one wake per topic per window.
+     */
+    private readonly wakeCooldownSec = envInt('GUARDIAN_WAKE_COOLDOWN_S', 60);
+    private readonly registrySweepCooldownSec = envInt('GUARDIAN_REGISTRY_SWEEP_COOLDOWN_S', 30);
+
     constructor(
         @InjectQueue(QUEUE_NAMES.IPFS_FETCH) private readonly ipfsQueue: Queue,
         @InjectQueue(QUEUE_NAMES.TOKEN_SYNC) private readonly tokenQueue: Queue,
@@ -46,6 +55,7 @@ export class GuardianEventRouter {
         private readonly eventLog: GuardianEventLogService,
         private readonly dataSource: DataSource,
         private readonly configService: ConfigService,
+        @Inject('REDICT_PUB') private readonly redis: Redis,
     ) {
         this.seedTopicId = this.configService.get<string>('app.seedTopicId')
             || ROOT_TOPICS[this.network]
@@ -269,6 +279,15 @@ export class GuardianEventRouter {
      * — a small, bounded set, one per registry.
      */
     private async wakeRegistryTopics(): Promise<void> {
+        // Guardian re-fires unresolvable policy events every few seconds, and
+        // each one fans out across every registry topic. Without this gate the
+        // sweep runs continuously and the priority lane never drains.
+        if (!await this.acquireCooldown(
+            `se:wake-registries:${this.network}`, this.registrySweepCooldownSec)) {
+            this.logger.debug('Registry wake sweep skipped — still within cooldown');
+            return;
+        }
+
         if (this.seedTopicId) {
             await this.enqueueTopicSync(this.seedTopicId);
         }
@@ -284,19 +303,70 @@ export class GuardianEventRouter {
     }
 
     /**
-     * Targeted topic sync. Pre-remove the stable jobId then re-add so a repeated
-     * event still fires (the topic-sync paging is watermark-based + idempotent).
-     * fromSequenceNumber:0 lets topic-sync resume from the persisted watermark.
+     * Best-effort distributed cooldown: SET NX EX succeeds only for the first
+     * caller in the window. Redis being unavailable must never stop an event
+     * from routing, so a failure here falls through to "not throttled".
+     */
+    private async acquireCooldown(key: string, ttlSec: number): Promise<boolean> {
+        if (ttlSec <= 0) return true;
+        try {
+            return await this.redis.set(key, '1', 'EX', ttlSec, 'NX') === 'OK';
+        } catch {
+            return true;
+        }
+    }
+
+    /**
+     * Targeted topic sync onto TOPIC_SYNC_PRIORITY (injected as topicQueue),
+     * never the bulk TOPIC_SYNC crawl — see the class doc comment for why.
+     *
+     * `fromSequenceNumber: 0` means "resume from the persisted watermark"; the
+     * topic-sync processors clamp it to topic_cache.messages, so this is a cheap
+     * head-poll rather than a full re-crawl of the topic.
+     *
+     * Rather than remove-then-add (which races another producer and can delete a
+     * job a worker has already picked up), this promotes an existing delayed job
+     * and otherwise leaves in-flight work alone: a waiting or active job is
+     * already going to do exactly what this event is asking for.
      */
     private async enqueueTopicSync(topicId: string): Promise<void> {
-        const jobId = `topic-${topicId}-evt`;
-        try {
-            await this.topicQueue.remove(jobId);
-        } catch {
-            // Job didn't exist — fine.
+        if (!await this.acquireCooldown(
+            `se:wake:${this.network}:${topicId}`, this.wakeCooldownSec)) {
+            this.logger.debug(`Topic ${topicId} wake skipped — still within cooldown`);
+            return;
         }
-        // Targets TOPIC_SYNC_PRIORITY (injected as topicQueue above), not the
-        // bulk TOPIC_SYNC crawl — see the class doc comment for why.
+
+        // Mark the topic as due now and urgent. In dispatcher mode this is what
+        // makes the poll happen; the direct enqueue below still runs so latency
+        // does not depend on the next dispatcher tick. In chain mode it simply
+        // keeps the persisted schedule honest.
+        await this.dataSource.query(
+            `UPDATE topic_cache
+                SET "nextPollAt" = now(), "pollPriority" = 10
+              WHERE "topicId" = $1`,
+            [topicId],
+        ).catch(() => {
+            // The topic may not be in topic_cache yet — the enqueue below still
+            // discovers it.
+        });
+
+        const jobId = `topic-${topicId}-evt`;
+        const existing = await this.topicQueue.getJob(jobId).catch(() => undefined);
+
+        if (existing) {
+            const state = await existing.getState().catch(() => 'unknown');
+            if (state === 'delayed') {
+                // Bring the backoff-delayed poll forward instead of duplicating it.
+                await existing.promote().catch(() => {});
+                return;
+            }
+            if (state === 'waiting' || state === 'active' || state === 'prioritized') {
+                return;
+            }
+            // Finished (completed/failed) — clear it so the id is free to re-add.
+            await existing.remove().catch(() => {});
+        }
+
         await this.topicQueue.add(
             'sync',
             { topicId, fromSequenceNumber: 0, isOrgTopic: true },

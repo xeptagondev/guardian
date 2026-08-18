@@ -2,7 +2,7 @@ import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullm
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
-import { QUEUE_NAMES } from '@shared/config/bullmq.config';
+import { QUEUE_NAMES, getWorkerOptions } from '@shared/config/bullmq.config';
 import { HederaService } from '../services/hedera.service';
 
 export interface TokenSyncJobData {
@@ -27,7 +27,7 @@ export interface TreasuryTransferJobData {
 /** Job name for {@link TreasuryTransferJobData}; anything else is a token sync. */
 export const TREASURY_TRANSFERS_JOB = 'treasury-transfers';
 
-@Processor(QUEUE_NAMES.TOKEN_SYNC)
+@Processor(QUEUE_NAMES.TOKEN_SYNC, getWorkerOptions(QUEUE_NAMES.TOKEN_SYNC))
 export class TokenSyncProcessor extends WorkerHost {
     private readonly logger = new Logger(TokenSyncProcessor.name);
 
