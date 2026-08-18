@@ -24,13 +24,14 @@ import {
     ApiProperty,
     ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { AdminWrite } from '../auth/decorators/admin-write.decorator';
+import { AdminWrite, AdminRead } from '../auth/decorators/admin-write.decorator';
 import { Job } from 'bullmq';
 import { Observable } from 'rxjs';
 import { IsBoolean, IsInt, IsOptional, IsString, IsIn, Min, Max } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import CID from 'cids';
 import { BASE_QUEUE_NAMES } from '@shared/config/bullmq.config';
+import { getHeadroom, canEnqueueBulk } from '@shared/redis/redis-headroom';
 import { QueueRegistry } from '../queues/queue.registry';
 import { QueueEventsBus } from '../queues/queue-events-bus.service';
 import { NetworkDataSourceRegistry } from '../database/network-datasource.registry';
@@ -198,6 +199,36 @@ class RetryByTopicBodyDto {
     includeChildTopics?: boolean;
 }
 
+class CleanQueueBodyDto {
+    @ApiPropertyOptional({
+        description: 'Which finished set to clean. Only finished jobs are eligible.',
+        enum: ['completed', 'failed'],
+        default: 'completed',
+    })
+    @IsOptional()
+    @IsString()
+    @IsIn(['completed', 'failed'])
+    status?: 'completed' | 'failed';
+
+    @ApiPropertyOptional({
+        description: 'Only remove jobs finished longer ago than this, in ms.',
+        default: 3600000,
+    })
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(0)
+    graceMs?: number;
+
+    @ApiPropertyOptional({ description: 'Maximum jobs removed per call.', default: 5000 })
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    @Max(50000)
+    limit?: number;
+}
+
 class RequeueTopicBodyDto {
     @ApiProperty({ description: 'Hedera topic ID to enqueue for sync (e.g. 0.0.43065)' })
     @IsString()
@@ -277,6 +308,15 @@ class IpfsCidStatusListDto {
 // Controller
 // ---------------------------------------------------------------------------
 
+/** Failed jobs hydrated per round-trip — see retryAllFailed. */
+const FAILED_FETCH_CHUNK = 100;
+/** Ceiling on CIDs re-queued by one retry-by-topic call. */
+const RETRY_BY_TOPIC_MAX = 2000;
+/** TTL for the cached /queues counts snapshot. */
+const QUEUE_COUNTS_TTL_MS = 5_000;
+/** Newest failed jobs scanned when grouping by reason (public endpoint). */
+const GROUP_SCAN_MAX = 2000;
+
 // The sync-status page is VIEWABLE by everyone (read-only): all GET/SSE endpoints
 // here are PUBLIC so guests/users can see queue + sync + IPFS status. Only the
 // state-changing ACTIONS (retry / requeue / ipfs-retry POSTs) are admin-gated via
@@ -295,6 +335,12 @@ export class QueueStatusController {
     private readonly syncStatusCache = new Map<
         string,
         { maxSeconds: number | null; totalTopics: number; syncedTopics: number; totalMessages: number; expiresAt: number }
+    >();
+
+    /** Short-lived /queues snapshot per network — see listQueues. */
+    private readonly queueCountsCache = new Map<
+        string,
+        { items: QueueStatusItemDto[]; expiresAt: number }
     >();
 
     constructor(
@@ -322,9 +368,73 @@ export class QueueStatusController {
     @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
     @ApiResponse({ status: 200, description: 'SSE stream established' })
     streamQueueEvents(@Param('network') network: string): Observable<MessageEvent> {
-        // Validate that the network is known before establishing the stream
-        this.queueRegistry.getConfiguredNetworks(); // noop — just proves the service is available
+        // Actually validate the network. The previous call discarded its own
+        // result, so any string opened a stream — and now that streams are
+        // created on demand, an unknown network would also register subscriber
+        // bookkeeping for a network that does not exist.
+        const configured = this.queueRegistry.getConfiguredNetworks();
+        if (!configured.includes(network.toLowerCase())) {
+            throw new HttpException(
+                `Network "${network}" is not configured on this API instance. ` +
+                `Available: ${configured.join(', ')}.`,
+                HttpStatus.NOT_FOUND,
+            );
+        }
         return this.queueEventsBus.streamForNetwork(network);
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /:network/queues/redis-health — memory + connection pressure
+    // -------------------------------------------------------------------------
+
+    /**
+     * The metric that predicts the failure mode operators actually hit: Redict
+     * runs `noeviction`, so at maxmemory it starts refusing writes and job
+     * production fails outright rather than degrading. Watching this alongside
+     * pending depth gives warning before that point.
+     */
+    @Get(':network/queues/redis-health')
+    @AdminRead()
+    @ApiOperation({
+        summary: 'Redis/Redict memory and connection pressure',
+        description:
+            'One INFO call, cached briefly. Reports memory used against maxmemory, ' +
+            'the configured eviction policy, and connected client count.',
+    })
+    @ApiResponse({ status: 200, description: 'Current Redis pressure' })
+    async redisHealth(): Promise<{
+        usedBytes: number;
+        maxBytes: number;
+        usedPercent: number | null;
+        healthy: boolean;
+        maxmemoryPolicy: string | null;
+        connectedClients: number | null;
+    }> {
+        const connection = this.queueRegistry.getConnection();
+        const headroom = await getHeadroom(connection);
+
+        let maxmemoryPolicy: string | null = null;
+        let connectedClients: number | null = null;
+        try {
+            const info = await connection.info('memory');
+            maxmemoryPolicy = /^maxmemory_policy:(.*)$/m.exec(info)?.[1]?.trim() ?? null;
+            const clients = await connection.info('clients');
+            const parsed = /^connected_clients:(\d+)$/m.exec(clients)?.[1];
+            connectedClients = parsed ? parseInt(parsed, 10) : null;
+        } catch {
+            // Diagnostics only — report what was readable.
+        }
+
+        return {
+            usedBytes: headroom.usedBytes,
+            maxBytes: headroom.maxBytes,
+            usedPercent: headroom.maxBytes > 0
+                ? Number((headroom.usedFraction * 100).toFixed(2))
+                : null,
+            healthy: headroom.ok,
+            maxmemoryPolicy,
+            connectedClients,
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -349,6 +459,15 @@ export class QueueStatusController {
             );
         }
 
+        // This endpoint is public and costs ~7 Redis commands per queue, so an
+        // auto-refreshing dashboard (or a crawler) turns it into steady load on a
+        // half-a-core Redict. A few seconds of staleness is invisible on a page
+        // that is already event-driven over SSE.
+        const cached = this.queueCountsCache.get(network);
+        if (cached && cached.expiresAt > Date.now()) {
+            return cached.items;
+        }
+
         const baseNames = this.queueRegistry.listBaseNames();
         const items: QueueStatusItemDto[] = [];
 
@@ -357,10 +476,17 @@ export class QueueStatusController {
                 const queue = this.queueRegistry.getQueue(network, base);
                 const qConfig = this.queueRegistry.getQueueConfig(network, base);
                 const [rawCounts, isPaused] = await Promise.all([
-                    queue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed', 'paused'),
+                    queue.getJobCounts(
+                        'waiting', 'active', 'completed', 'failed', 'delayed', 'paused', 'prioritized',
+                    ),
                     queue.isPaused(),
                 ]);
 
+                // 'prioritized' is reported separately because BullMQ keeps
+                // priority-carrying jobs in their own structure: 'waiting' counts
+                // only the plain wait list, so a queue whose producers all set a
+                // priority reads as empty here no matter how deep it is. Showing
+                // just `waiting` hid a ~1M-job backlog from operators.
                 const counts: JobCountsDto = {
                     waiting: rawCounts['waiting'] ?? 0,
                     active: rawCounts['active'] ?? 0,
@@ -368,6 +494,7 @@ export class QueueStatusController {
                     failed: rawCounts['failed'] ?? 0,
                     delayed: rawCounts['delayed'] ?? 0,
                     paused: rawCounts['paused'] ?? 0,
+                    prioritized: rawCounts['prioritized'] ?? 0,
                 };
 
                 const config: QueueConfigDto = qConfig
@@ -389,7 +516,16 @@ export class QueueStatusController {
             }
         }
 
+        this.queueCountsCache.set(network, {
+            items,
+            expiresAt: Date.now() + QUEUE_COUNTS_TTL_MS,
+        });
         return items;
+    }
+
+    /** Drops the cached counts for a network after an action that changes them. */
+    private invalidateQueueCounts(network: string): void {
+        this.queueCountsCache.delete(network);
     }
 
     // -------------------------------------------------------------------------
@@ -477,12 +613,21 @@ export class QueueStatusController {
         };
 
         if (groupByReason) {
-            // Scan all IDs in chunks of 500 then pipeline-fetch their hashes
+            // Scan IDs in chunks of 500 then pipeline-fetch their hashes.
+            //
+            // Bounded by GROUP_SCAN_MAX. This endpoint is public and previously
+            // walked the ENTIRE failed set — with removeOnFail counts in the
+            // thousands per queue, one unauthenticated request could pull every
+            // failed job hash out of Redict, and repeat requests could keep the
+            // shared connection busy indefinitely. The newest N failures are what
+            // an operator is actually grouping by, so the scan stops there and
+            // says so.
             const ID_CHUNK = 500;
+            const scanLimit = Math.min(total, GROUP_SCAN_MAX);
             const groupMap = new Map<string, { count: number; sampleJobIds: string[] }>();
 
-            for (let batchStart = 0; batchStart < total; batchStart += ID_CHUNK) {
-                const ids = await getIds(batchStart, Math.min(batchStart + ID_CHUNK - 1, total - 1));
+            for (let batchStart = 0; batchStart < scanLimit; batchStart += ID_CHUNK) {
+                const ids = await getIds(batchStart, Math.min(batchStart + ID_CHUNK - 1, scanLimit - 1));
                 if (ids.length === 0) break;
 
                 const jobs = await fetchJobs(ids);
@@ -629,10 +774,22 @@ export class QueueStatusController {
             `retryAllFailed: network=${network} queue=${baseName} limit=${limit} force=${force}`,
         );
 
-        const rawFailed = await queue.getFailed(0, limit - 1);
-        const failedJobs = (rawFailed as (Job | undefined | null)[]).filter(
-            (j): j is Job => j != null,
-        );
+        // Paged rather than one getFailed(0, limit-1). BullMQ v5 resolves a
+        // getFailed range with one HGETALL per job through Promise.all, so a
+        // single 500-job call fires 500 concurrent commands down one socket —
+        // the exact saturation this controller documents against the failed-jobs
+        // listing below, and now worse, because every queue in the API shares one
+        // connection. Windowing keeps in-flight commands bounded while preserving
+        // this endpoint's per-job semantics (retry budget + age filter), which a
+        // server-side queue.retryJobs() sweep cannot express.
+        const failedJobs: Job[] = [];
+        for (let start = 0; start < limit; start += FAILED_FETCH_CHUNK) {
+            const end = Math.min(start + FAILED_FETCH_CHUNK, limit) - 1;
+            const page = await queue.getFailed(start, end);
+            const jobs = (page as (Job | undefined | null)[]).filter((j): j is Job => j != null);
+            failedJobs.push(...jobs);
+            if (jobs.length === 0 || failedJobs.length >= limit) break;
+        }
 
         let retried = 0;
         let skipped = 0;
@@ -675,25 +832,94 @@ export class QueueStatusController {
     }
 
     // -------------------------------------------------------------------------
-    // POST /:network/queues/:baseName/pause   [RESERVED — admin panel phase]
-    // POST /:network/queues/:baseName/resume  [RESERVED — admin panel phase]
+    // POST /:network/queues/:baseName/pause | /resume | /clean
     // -------------------------------------------------------------------------
-    // These endpoints are intentionally disabled on the public API.
-    // Re-enable when the operator admin panel with authentication is shipped.
     //
-    // @Post(':network/queues/:baseName/pause')
-    // async pauseQueue(@Param('network') network: string, @Param('baseName') baseName: string) {
-    //     const queue = this.queueRegistry.getQueue(network, baseName);
-    //     await queue.pause();
-    //     return { paused: true };
-    // }
+    // These were commented out pending "the operator admin panel with
+    // authentication" — that shipped, and @AdminWrite (JWT + admin role + CSRF)
+    // is the same gate every other mutating endpoint here uses.
     //
-    // @Post(':network/queues/:baseName/resume')
-    // async resumeQueue(@Param('network') network: string, @Param('baseName') baseName: string) {
-    //     const queue = this.queueRegistry.getQueue(network, baseName);
-    //     await queue.resume();
-    //     return { paused: false };
-    // }
+    // They are the in-band tools for the failure this system actually hits:
+    // Redict filling up. Pausing the noisiest queue stops new work while a
+    // backlog drains, and clean() reclaims memory from finished-job history —
+    // previously only reachable by hand with redis-cli against production.
+
+    @Post(':network/queues/:baseName/pause')
+    @AdminWrite()
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({
+        summary: 'Pause a queue',
+        description:
+            'Stops workers picking up NEW jobs from this queue. Jobs already running ' +
+            'continue to completion, and producers can still enqueue — the backlog ' +
+            'simply stops being consumed.',
+    })
+    @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
+    @ApiParam({ name: 'baseName', description: 'Base queue name' })
+    @ApiResponse({ status: 200, description: 'Queue paused' })
+    async pauseQueue(
+        @Param('network') network: string,
+        @Param('baseName') baseName: string,
+    ): Promise<{ baseName: string; isPaused: boolean }> {
+        const queue = this.queueRegistry.getQueue(network, baseName);
+        await queue.pause();
+        this.invalidateQueueCounts(network);
+        this.logger.warn(`pauseQueue: network=${network} queue=${baseName}`);
+        return { baseName, isPaused: true };
+    }
+
+    @Post(':network/queues/:baseName/resume')
+    @AdminWrite()
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Resume a paused queue' })
+    @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
+    @ApiParam({ name: 'baseName', description: 'Base queue name' })
+    @ApiResponse({ status: 200, description: 'Queue resumed' })
+    async resumeQueue(
+        @Param('network') network: string,
+        @Param('baseName') baseName: string,
+    ): Promise<{ baseName: string; isPaused: boolean }> {
+        const queue = this.queueRegistry.getQueue(network, baseName);
+        await queue.resume();
+        this.invalidateQueueCounts(network);
+        this.logger.warn(`resumeQueue: network=${network} queue=${baseName}`);
+        return { baseName, isPaused: false };
+    }
+
+    @Post(':network/queues/:baseName/clean')
+    @AdminWrite()
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({
+        summary: 'Remove finished jobs from a queue',
+        description:
+            'Deletes completed or failed jobs older than `graceMs`, up to `limit` per ' +
+            'call. Only finished jobs are eligible — waiting, delayed and active jobs ' +
+            'are never touched, so no pending work is lost. Repeat until `removed` ' +
+            'comes back smaller than `limit`.',
+    })
+    @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
+    @ApiParam({ name: 'baseName', description: 'Base queue name' })
+    @ApiBody({ type: CleanQueueBodyDto })
+    @ApiResponse({ status: 200, description: 'Jobs removed' })
+    async cleanQueue(
+        @Param('network') network: string,
+        @Param('baseName') baseName: string,
+        @Body() body: CleanQueueBodyDto,
+    ): Promise<{ baseName: string; status: string; removed: number; limit: number }> {
+        const queue = this.queueRegistry.getQueue(network, baseName);
+        const status = body.status ?? 'completed';
+        const graceMs = body.graceMs ?? 3_600_000;
+        const limit = body.limit ?? 5000;
+
+        const removed = await queue.clean(graceMs, limit, status);
+        this.invalidateQueueCounts(network);
+
+        this.logger.warn(
+            `cleanQueue: network=${network} queue=${baseName} status=${status} ` +
+            `graceMs=${graceMs} removed=${removed.length}`,
+        );
+        return { baseName, status, removed: removed.length, limit };
+    }
 
     // -------------------------------------------------------------------------
     // GET /:network/sync-status
@@ -1305,7 +1531,7 @@ export class QueueStatusController {
     async retryIpfsFailuresByTopic(
         @Param('network') network: string,
         @Body() body: RetryByTopicBodyDto,
-    ): Promise<{ queued: number; topicId: string }> {
+    ): Promise<{ queued: number; topicId: string; hasMore: boolean }> {
         const ds = this.dataSources.getDataSource(network);
         const { topicId, includeChildTopics } = body;
 
@@ -1325,21 +1551,30 @@ export class QueueStatusController {
             ? `m."topicId" IN (SELECT "topicId" FROM _topic_tree)`
             : `m."topicId" = $1`;
 
+        // Capped. A topic subtree can carry an unbounded number of failed CIDs,
+        // and this previously re-queued every one of them — with no limit, three
+        // sequential Redis round-trips each, into the narrowest lane in the
+        // system. `hasMore` lets the operator repeat until it comes back false.
         const failureRows: Array<{ cid: string; messageTimestamp: string | null; manualRetryCount: number }> =
             await ds.query(
                 `${cte}SELECT f.cid, f."messageTimestamp", f."manualRetryCount"
                  FROM ipfs_fetch_failure f
                  JOIN message m
                       ON f.cid = ANY(m.files)
-                 WHERE ${topicCondition}`,
+                 WHERE ${topicCondition}
+                 ORDER BY f."lastFailedAt" DESC, f.cid
+                 LIMIT ${RETRY_BY_TOPIC_MAX + 1}`,
                 [topicId],
             );
+
+        const hasMore = failureRows.length > RETRY_BY_TOPIC_MAX;
+        if (hasMore) failureRows.length = RETRY_BY_TOPIC_MAX;
 
         if (failureRows.length === 0) {
             this.logger.log(
                 `retryIpfsFailuresByTopic: no failures found for topicId=${topicId} on ${network}`,
             );
-            return { queued: 0, topicId };
+            return { queued: 0, topicId, hasMore: false };
         }
 
         const cids = failureRows.map((r) => r.cid);
@@ -1351,32 +1586,46 @@ export class QueueStatusController {
         );
 
         const ipfsQueue = this.queueRegistry.getQueue(network, BASE_QUEUE_NAMES.IPFS_FETCH);
-        let queued = 0;
 
-        for (const row of failureRows) {
-            const { cid, messageTimestamp, manualRetryCount } = row;
-            const updatedRetryCount = Number(manualRetryCount) + 1;
-            const jobId = `ipfs-${cid}`;
-
-            try {
-                const stale = await ipfsQueue.getJob(jobId);
-                if (stale) await stale.remove();
-            } catch {
-                // Job not present — continue.
-            }
-
-            await ipfsQueue.add(
-                'fetch',
-                { cid, messageTimestamp: messageTimestamp ?? undefined, manualRetryCount: updatedRetryCount },
-                { jobId },
+        if (!await canEnqueueBulk(this.queueRegistry.getConnection(), ipfsQueue, 'retryIpfsByTopic')) {
+            throw new HttpException(
+                'Redis is under memory pressure or the IPFS queue is already deep. ' +
+                'Wait for it to drain and retry.',
+                HttpStatus.SERVICE_UNAVAILABLE,
             );
-            queued++;
         }
 
+        // Clear stale jobs in bounded batches, then re-add in one bulk call,
+        // instead of getJob + remove + add per CID. The batching is not
+        // cosmetic: every queue in this process shares one Redis connection, so
+        // firing all 2,000 removes at once would saturate the socket for every
+        // other queue too — the same failure mode retryAllFailed windows against.
+        for (let i = 0; i < failureRows.length; i += FAILED_FETCH_CHUNK) {
+            await Promise.all(
+                failureRows.slice(i, i + FAILED_FETCH_CHUNK).map(row =>
+                    ipfsQueue.remove(`ipfs-${row.cid}`).catch(() => {
+                        // Absent, or locked by a running worker — the add below is
+                        // a no-op then, which is the correct outcome anyway.
+                    }),
+                ),
+            );
+        }
+
+        await ipfsQueue.addBulk(failureRows.map(row => ({
+            name: 'fetch',
+            data: {
+                cid: row.cid,
+                messageTimestamp: row.messageTimestamp ?? undefined,
+                manualRetryCount: Number(row.manualRetryCount) + 1,
+            },
+            opts: { jobId: `ipfs-${row.cid}` },
+        })));
+
+        const queued = failureRows.length;
         this.logger.log(
-            `retryIpfsFailuresByTopic: network=${network} topicId=${topicId} queued=${queued}`,
+            `retryIpfsFailuresByTopic: network=${network} topicId=${topicId} queued=${queued} hasMore=${hasMore}`,
         );
 
-        return { queued, topicId };
+        return { queued, topicId, hasMore };
     }
 }

@@ -8,7 +8,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
-import { QUEUE_NAMES } from '@shared/config/bullmq.config';
+import { QUEUE_NAMES, getWorkerOptions } from '@shared/config/bullmq.config';
 import { ROOT_TOPICS } from '@shared/config/configuration';
 import {
     ParsedMessage,
@@ -36,7 +36,7 @@ const EAGER_IPFS_TYPES = new Set([
     //'VP-Document' TODO: Check the relationship attribute whether we can use it
 ]);
 
-@Processor(QUEUE_NAMES.MESSAGE_PARSE)
+@Processor(QUEUE_NAMES.MESSAGE_PARSE, getWorkerOptions(QUEUE_NAMES.MESSAGE_PARSE))
 export class MessageProcessProcessor extends WorkerHost {
     private readonly logger = new Logger(MessageProcessProcessor.name);
     private readonly seedTopicId: string;
@@ -193,7 +193,10 @@ export class MessageProcessProcessor extends WorkerHost {
                     policyTopicId,
                     instanceTopicId,
                 }, {
-                    jobId: `policy-decode-${policyTopicId}-${cid}`,
+                    // Keyed on the CID alone so this dedupes against the scheduler's
+                    // seeding, which enqueues the same unit of work — and against
+                    // the decode lease, which conflicts on "sourceCid".
+                    jobId: `policy-decode-${cid}`,
                 });
             }
         }
@@ -243,7 +246,18 @@ export class MessageProcessProcessor extends WorkerHost {
             );
         }
 
-        // Enqueue token sync for discovered tokens
+        // Enqueue token sync for discovered tokens, coalesced per token per
+        // minute rather than per (token, message). A token referenced by a
+        // thousand messages used to produce a thousand identical full syncs, each
+        // one a getToken plus a serial walk.
+        //
+        // The time bucket matters. Keying on the token alone looked tidier but
+        // tied the dedup window to job retention: once a sync completed, every
+        // later message about that token enqueued nothing at all until the
+        // finished job aged out, and nothing else re-syncs a token in the
+        // meantime — scheduleTokenSyncs only runs during boot seeding — so those
+        // updates were silently dropped.
+        const tokenBucket = Math.floor(Date.now() / 60_000);
         const tokenIds = extractTokenIds(parsed);
         for (const tokenId of tokenIds) {
             await this.tokenQueue.add(
@@ -254,7 +268,7 @@ export class MessageProcessProcessor extends WorkerHost {
                     fromSerial: 0,
                 },
                 {
-                    jobId: `token-${tokenId}-${consensusTimestamp}`,
+                    jobId: `token-${tokenId}-${tokenBucket}`,
                 },
             );
         }

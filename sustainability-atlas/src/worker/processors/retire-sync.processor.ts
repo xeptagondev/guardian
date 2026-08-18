@@ -1,8 +1,8 @@
-import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
+import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
-import { QUEUE_NAMES } from '@shared/config/bullmq.config';
+import { QUEUE_NAMES, getWorkerOptions } from '@shared/config/bullmq.config';
 import { HederaService } from '../services/hedera.service';
 import { RETIRE_EXECUTED_TOPIC, decodeRetireEvent } from '../services/retire-event.decoder';
 
@@ -21,7 +21,7 @@ export interface RetireSyncJobData {
  * Only RETIRE_EXECUTED_TOPIC is ingested; see the decoder for why the visually
  * identical request event must not be counted.
  */
-@Processor(QUEUE_NAMES.RETIRE_SYNC)
+@Processor(QUEUE_NAMES.RETIRE_SYNC, getWorkerOptions(QUEUE_NAMES.RETIRE_SYNC))
 export class RetireSyncProcessor extends WorkerHost {
     private readonly logger = new Logger(RetireSyncProcessor.name);
 
@@ -35,6 +35,7 @@ export class RetireSyncProcessor extends WorkerHost {
     constructor(
         private readonly hederaService: HederaService,
         private readonly dataSource: DataSource,
+        @InjectQueue(QUEUE_NAMES.RETIRE_SYNC) private readonly retireQueue: Queue,
     ) {
         super();
     }
@@ -48,6 +49,7 @@ export class RetireSyncProcessor extends WorkerHost {
         );
         let watermark = row?.log_watermark ?? null;
         let ingested = 0;
+        let morePages = false;
 
         for (let page = 0; page < RetireSyncProcessor.MAX_PAGES; page++) {
             const { logs, nextLink } = await this.hederaService.getContractLogs(contractId, watermark);
@@ -116,10 +118,33 @@ export class RetireSyncProcessor extends WorkerHost {
             if (!nextLink) {
                 break;
             }
+            // Still more history than this job's page budget allows.
+            morePages = page === RetireSyncProcessor.MAX_PAGES - 1;
         }
 
         if (ingested > 0) {
             this.logger.log(`Contract ${contractId}: ingested ${ingested} retirement record(s)`);
+        }
+
+        // Carry on where this job stopped. Without this a contract with more
+        // than MAX_PAGES of history only advanced one job's worth per process
+        // restart, because nothing else re-enqueues RETIRE_SYNC between boots.
+        // The watermark is part of the jobId so consecutive continuations get
+        // distinct ids — re-adding the id of a job that is still active is a
+        // silent no-op in BullMQ and would end the chain here.
+        if (morePages && watermark) {
+            await this.retireQueue.add(
+                'sync',
+                { contractId },
+                {
+                    jobId: `retire-${contractId}-${watermark}`,
+                    delay: 5000,
+                    removeOnComplete: true,
+                },
+            );
+            this.logger.debug(
+                `Contract ${contractId}: page budget reached at ${watermark} — continuing`,
+            );
         }
     }
 

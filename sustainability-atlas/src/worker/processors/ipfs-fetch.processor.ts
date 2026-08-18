@@ -3,7 +3,7 @@ import { Inject, Logger, OnModuleInit } from '@nestjs/common';
 import { Job, UnrecoverableError } from 'bullmq';
 import { DataSource } from 'typeorm';
 import Redis from 'ioredis';
-import { QUEUE_NAMES } from '@shared/config/bullmq.config';
+import { QUEUE_NAMES, getWorkerOptions } from '@shared/config/bullmq.config';
 import { IpfsService } from '../services/ipfs.service';
 import { ProjectMapperService } from '../services/project-mapper.service';
 import { IpfsFetchFailureRepository } from '../repositories/ipfs-fetch-failure.repository';
@@ -14,7 +14,7 @@ export interface IpfsFetchJobData {
 }
 
 
-@Processor(QUEUE_NAMES.IPFS_FETCH)
+@Processor(QUEUE_NAMES.IPFS_FETCH, getWorkerOptions(QUEUE_NAMES.IPFS_FETCH))
 export class IpfsFetchProcessor extends WorkerHost implements OnModuleInit {
     private readonly logger = new Logger(IpfsFetchProcessor.name);
     private readonly failureRepo: IpfsFetchFailureRepository;
