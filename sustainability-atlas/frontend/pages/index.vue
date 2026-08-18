@@ -621,7 +621,7 @@ const filteredStats = computed(() => {
                                 </thead>
                                 <tbody class="divide-y">
                                     <AppLink
-                                        v-for="org in registries"
+                                        v-for="org in registries.slice(0, 10)"
                                         :key="org.name"
                                         :to="{ path: '/registries', query: { displayName: org.name } }"
                                         custom
