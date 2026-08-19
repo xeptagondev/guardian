@@ -206,7 +206,8 @@ const { data, pending } = useProjectsApi({
   filters: apiFilters,
 });
 
-const { filterOptions } = useProjectFilterOptions(network);
+// Renamed — `pending` above is the project list's own fetch state.
+const { filterOptions, pending: filterOptionsPending } = useProjectFilterOptions(network);
 
 const meta = computed(() =>
   data.value?.meta ?? { page: 1, limit: pageSize.value, total: 0, totalPages: 1 },
@@ -332,6 +333,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.registry"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.registries.map((r) => ({
       value: r,
       label: r,
@@ -342,6 +344,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.methodology"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.methodologies
       .map((m) => ({
         value: m.topicId,
@@ -354,6 +357,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.country"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: countryFilterOptions.value.map((c) => ({ value: c, label: c })),
   },
   {
@@ -389,12 +393,14 @@ const filters = computed<FilterOption[]>(() => [
     key: "sector",
     label: t("projects.filters.sector"),
     multiSelect: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.sectors.map((s) => ({ value: s, label: translateSector(s) })),
   },
   {
     key: "sectoralScope",
     label: t("projects.filters.sectoralScope"),
     multiSelect: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.sectoralScopes.map((s) => ({
       value: s,
       label: s,
@@ -405,6 +411,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.developer"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.developers.map((d) => ({
       value: d,
       label: d,

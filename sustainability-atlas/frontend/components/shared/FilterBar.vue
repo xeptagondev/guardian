@@ -14,6 +14,9 @@ export interface FilterOption {
     searchable?: boolean;
     type?: 'select' | 'daterange' | 'yearrange' | 'numrange';
     emptyLabel?: string;
+    // Set only by callers whose options come from an async source — an
+    // options-less dropdown is otherwise indistinguishable from "no matches".
+    loading?: boolean;
 }
 
 const props = defineProps<{
@@ -134,6 +137,8 @@ function filteredOptions(filter: FilterOption): FilterOption['options'] {
 }
 
 async function toggleDropdown(key: string) {
+    // A loading filter has no options yet — opening it would show an empty panel.
+    if (props.filters?.find(f => f.key === key)?.loading) return;
     if (openDropdown.value === key) {
         openDropdown.value = null;
         return;
@@ -372,14 +377,18 @@ if (import.meta.client) {
         >
             <button
                 class="inline-flex items-center justify-start text-left gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
-                :class="isFilterActive(filter)
-                    ? 'border-primary/30 bg-primary/5 text-primary'
-                    : 'border-input text-muted-foreground'"
+                :class="[
+                    isFilterActive(filter)
+                        ? 'border-primary/30 bg-primary/5 text-primary'
+                        : 'border-input text-muted-foreground',
+                    filter.loading ? 'opacity-60 cursor-not-allowed' : '',
+                ]"
+                :aria-busy="filter.loading || undefined"
                 @click.stop="toggleDropdown(filter.key)"
             >
                 <CalendarRange v-if="filter.type === 'daterange' || filter.type === 'yearrange'" class="h-3 w-3 opacity-60 shrink-0" />
                 <svg v-else-if="filter.type === 'numrange'" class="h-3 w-3 opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6h18M3 12h12M3 18h6" /></svg>
-                {{ getActiveLabel(filter) }}
+                {{ filter.loading ? $t('common.loading') : getActiveLabel(filter) }}
                 <svg class="h-3 w-3 opacity-50 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
