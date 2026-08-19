@@ -2227,6 +2227,9 @@
         "helpAria": "Ayuda y recorrido guiado",
         "launch": "Hacer el recorrido guiado",
         "glossaryLink": "Glosario de términos",
+        "ipfsFetch": "Buscar en IPFS",
+        "hashscanVerify": "Verificar en Hashscan",
+        "faq": "Preguntas frecuentes",
         "restartTitle": "Recorrido guiado",
         "restartDescription": "Un recorrido de un minuto por el Atlas. Puedes repetirlo cuando quieras; también está disponible en el botón de ayuda de la barra superior.",
         "restartButton": "Repetir el recorrido",
@@ -2618,5 +2621,142 @@
             "subtitle": "Identificadores en cadena de esta emisión."
         },
         "unlinked": "Esta emisión no está vinculada a ningún proyecto. La credencial de acuñación es real y su monto es válido, pero nada la conectó con un proyecto, metodología o registro, por lo que no cuenta en el total de ningún proyecto. La atribución puede aparecer más adelante a medida que se indexe más de la política."
+    },
+    "ipfsFetch": {
+        "dialogTitle": "Buscar en IPFS",
+        "dialogSubtitle": "Descarga un archivo directamente desde IPFS usando su CID.",
+        "cidLabel": "CID de IPFS",
+        "cidPlaceholder": "Qm... o bafy...",
+        "downloadButton": "Descargar",
+        "downloading": "Descargando…",
+        "cancel": "Cancelar",
+        "invalidCid": "Eso no parece un CID de IPFS válido.",
+        "notFound": "Este CID no se pudo encontrar en ninguna de las puertas de enlace de IPFS configuradas.",
+        "unreachable": "Las puertas de enlace de IPFS no están disponibles temporalmente. Inténtalo de nuevo.",
+        "genericError": "Ocurrió un error al buscar este archivo.",
+        "authRequired": "Inicia sesión para buscar archivos en IPFS."
+    },
+    "hashscanVerify": {
+        "dialogTitle": "Verificar en Hashscan",
+        "dialogSubtitle": "Consulta un topic, token, contrato, cuenta o transacción directamente desde el Hedera Mirror Node para la red actual.",
+        "tabs": {
+            "topic": "Topic",
+            "token": "Token",
+            "contract": "Contrato",
+            "account": "Cuenta",
+            "transaction": "Transacción"
+        },
+        "idLabel": "ID",
+        "invalidFormat": "Verifica el formato según el marcador de posición antes de continuar.",
+        "lookupButton": "Consultar",
+        "seeMoreButton": "Ver más en Hashscan",
+        "notFoundError": "No se encontró nada para este ID en la red actual.",
+        "unreachableError": "El Hedera Mirror Node no está disponible temporalmente. Inténtalo de nuevo.",
+        "cancel": "Cancelar",
+        "fields": {
+            "memo": "Memo",
+            "created": "Creado",
+            "adminKey": "Clave de administrador",
+            "submitKey": "Clave de envío",
+            "autoRenewAccount": "Cuenta de auto-renovación",
+            "name": "Nombre",
+            "symbol": "Símbolo",
+            "tokenType": "Tipo",
+            "totalSupply": "Suministro total",
+            "decimals": "Decimales",
+            "treasury": "Cuenta de tesorería",
+            "evmAddress": "Dirección EVM",
+            "autoRenewPeriod": "Período de auto-renovación (s)",
+            "balance": "Saldo",
+            "keyType": "Tipo de clave",
+            "txType": "Tipo de transacción",
+            "result": "Resultado",
+            "consensusTimestamp": "Marca de tiempo de consenso",
+            "chargedFee": "Comisión cobrada"
+        }
+    },
+    "faq": {
+        "dialogTitle": "Preguntas frecuentes",
+        "dialogSubtitle": "Respuestas a las preguntas que más se hacen sobre el Atlas.",
+        "close": "Cerrar",
+        "sections": {
+            "dataAndSync": "Los datos se ven mal o han cambiado",
+            "accountsAndAccess": "Cuentas y acceso",
+            "guidedTour": "El recorrido guiado"
+        },
+        "entries": {
+            "numbers-changed": {
+                "question": "Los números cambiaron, o todo desapareció",
+                "answer": "Revisa el selector de red en la barra superior. El Atlas cubre más de una red Hedera: mainnet contiene datos reales de créditos de carbono en producción, mientras que testnet contiene registros de prueba publicados por registros y desarrolladores que están probando cosas. Los dos son conjuntos de datos completamente separados. Cambiar entre ellos modifica cada cifra en cada página, y un proyecto que existe en uno puede no existir en absoluto en el otro.\n\nSi la página se ve vacía, confirma que estás en la red que querías antes de asumir que falta algo."
+            },
+            "link-different-data": {
+                "question": "Copié un enlace y mi colega vio datos diferentes",
+                "answer": "La red que estás viendo viaja en la barra de direcciones como una parte ?network= al final del enlace. Si copias la dirección directamente desde tu navegador, esa parte viaja con ella y tu colega ve exactamente lo que tú ves.\n\nSi el enlace se volvió a escribir, se acortó o se pegó sin el final de la dirección, la persona llegará a la red en la que estuvo su propia sesión por última vez. Cuando compartas un enlace y los datos importen, envía la dirección completa e indica a qué red apunta."
+            },
+            "missing-project": {
+                "question": "¿Por qué falta un proyecto (o una emisión, o una metodología)?",
+                "answer": "Casi siempre es retraso de sincronización. El Atlas copia registros de la cadena de forma continua, pero un registro publicado hace unos minutos puede no haberse recogido todavía.\n\nRevisa \"Datos sincronizados hasta\" al pie de la barra lateral: esa marca de tiempo indica qué tan actuales están los datos. Si el registro que buscas se publicó después de esa marca, aún no ha llegado. La página de Estado de sincronización muestra en qué está trabajando el proceso y si va con retraso.\n\nSi la marca de tiempo está actualizada y el registro sigue sin aparecer, puede que no se haya publicado en la red que lee el Atlas, o que esté en la otra red."
+            },
+            "no-issuances": {
+                "question": "¿Por qué un proyecto no muestra emisiones?",
+                "answer": "Porque aún no ha emitido créditos. Una gran parte de los proyectos del Atlas están en fase de canalización: registrados, documentados y en proceso de validación, pero sin haber llegado todavía al punto de acuñar créditos. Su registro de proyecto está completo y sus documentos son legibles; simplemente no hay nada en el historial de emisiones que mostrar.\n\nEsto es normal y no es un error de datos."
+            },
+            "no-projected-volume": {
+                "question": "¿Por qué el volumen proyectado dice \"Sin estimaciones disponibles\"?",
+                "answer": "Porque los documentos de origen no contienen ninguna proyección. El Atlas informa lo que los registros y desarrolladores han publicado realmente; cuando la documentación de un proyecto no incluye una estimación de volumen futuro, el Atlas lo indica en lugar de calcular una suposición propia.\n\n\"Sin estimaciones disponibles\" significa que el número no existe en el origen, no que falló al cargar."
+            },
+            "minted-vs-supply": {
+                "question": "El total acuñado no coincide con el suministro actual",
+                "answer": "Estas miden dos cosas distintas, y se espera que difieran. El total acuñado es el conteo acumulado de cada crédito emitido para ese proyecto: un número que solo aumenta. El suministro actual es cuántos de esos créditos siguen existiendo y en manos de alguien. Los créditos salen del suministro cuando se retiran (se cancelan de forma permanente, normalmente porque alguien reclamó la compensación) y cambian de manos cuando se transfieren.\n\nUn proyecto con un total acuñado grande y un suministro actual pequeño ha tenido la mayoría de sus créditos retirados, que es el estado final previsto para un crédito de carbono."
+            },
+            "declared-vs-minted": {
+                "question": "Una emisión indica que los montos declarado y acuñado difieren",
+                "answer": "Son datos independientes y el Atlas informa ambos en lugar de elegir uno. Declarado es el monto escrito en el documento de acuñación de Guardian del registro: una declaración de lo que se pretendía emitir. Acuñado en cadena es lo que la cadena Hedera realmente registró.\n\n• Menos acuñado que declarado: la acuñación falló parcialmente o nunca se completó. El retiro no es la causa; los créditos retirados siguen contando como acuñados.\n• Más acuñado que declarado: se crearon más créditos en la cadena de los que indicaba el documento. Nada obliga a que ambos coincidan; son acciones separadas del registro.\n• \"No coincide\": la acuñación en cadena aún no se ha vinculado al documento y la cifra declarada aparece como sustituto. Esto se resuelve a medida que avanza la sincronización.\n\nLos totales del panel y de las tarjetas de estadísticas usan la cifra en cadena, por lo que pueden ser menores que las cifras publicadas por el propio registro. Esa diferencia es precisamente el punto: es la diferencia entre lo documentado y lo que hizo la cadena."
+            },
+            "transferred-dash": {
+                "question": "Transferido muestra un guion en lugar de un número",
+                "answer": "Un guion significa que el valor no se puede determinar, no que no se haya transferido nada. Guardian no emite ningún documento de transferencia, así que las transferencias se leen a partir de la propiedad actual en la cadena. Eso no está disponible para créditos fungibles, cuyos saldos no se pueden rastrear hasta la emisión que los creó, y mientras la propiedad de los seriales sigue sincronizándose, donde un conteo parcial subestimaría el total."
+            },
+            "transferred-vs-transactions-empty": {
+                "question": "Transferido muestra un número pero la tabla de transacciones está vacía",
+                "answer": "Ambos son correctos; responden preguntas distintas a partir de fuentes distintas. Transferido indica dónde están los créditos ahora: cuántos están en manos de una cuenta distinta a la tesorería del token. Eso proviene de la propiedad actual, que la cadena reporta por completo en cuanto se sincronizan los seriales. Transacciones indican cuándo se movieron los créditos y entre quiénes. Guardian no escribe ningún documento de transferencia, así que cada movimiento debe leerse del historial de transacciones de la propia cuenta de tesorería, y esas cuentas se revisan en segundo plano. Hasta que se haya revisado la tesorería de un proyecto, el Atlas puede decirte dónde están los créditos sin poder decirte todavía cuándo llegaron ahí.\n\n\"Historial de transacciones aún no disponible\" significa que el historial de la cuenta emisora aún no se ha leído; puede haber transferencias. \"Sin transacciones todavía\" significa que el historial ya se leyó y estos créditos realmente no se han movido.\n\nEl conteo deliberadamente no se calcula a partir del registro de transacciones: hacerlo reportaría cero para cualquier tesorería aún no revisada, y también contaría créditos que fueron transferidos y luego retirados como si siguieran en circulación."
+            },
+            "unlisted-serials": {
+                "question": "Un token tiene seriales que el Atlas no muestra",
+                "answer": "El Atlas solo rastrea créditos emitidos mediante un documento de acuñación de Guardian que haya sincronizado. Los seriales acuñados fuera de ese flujo no tienen proyecto, metodología ni añada detrás, por lo que se excluyen en lugar de atribuirse a un proyecto por suposición."
+            },
+            "no-verification-email": {
+                "question": "No recibí el correo de verificación",
+                "answer": "Primero revisa tu carpeta de spam o correo no deseado; el correo de verificación automático es un falso positivo frecuente.\n\nSi de verdad no está ahí, usa Reenviar verificación en el aviso que aparece en la parte superior de la página. El reenvío está limitado: si lo presionas repetidamente, se te pedirá esperar antes de poder enviar otro mensaje. Esa demora es intencional y esperarla es la única solución.\n\nSi varios intentos a lo largo de un período más largo no producen nada, es posible que la dirección se haya escrito mal al registrarse; contacta a un administrador, que puede verificar con qué dirección se creó la cuenta."
+            },
+            "forced-password-change": {
+                "question": "Se me pide cambiar mi contraseña inmediatamente después de iniciar sesión",
+                "answer": "Tu cuenta fue creada por un administrador en lugar de mediante autorregistro. Las cuentas creadas así comienzan con una contraseña temporal y requieren que establezcas la tuya antes de poder hacer cualquier otra cosa.\n\nEstablece una nueva contraseña cuando se te indique y no se te volverá a pedir."
+            },
+            "greyed-out-button": {
+                "question": "Un botón está deshabilitado, o falta una pestaña",
+                "answer": "Tres posibles razones, en orden de probabilidad:\n\n1. Requiere una cuenta. Portafolio, Informes, filtros rápidos guardados, notificaciones y claves de API requieren que hayas iniciado sesión. Inicia sesión y estarán disponibles. Ten en cuenta que Descargar datos no es uno de estos: la exportación a CSV funciona sin cuenta.\n2. Requiere permisos de administrador. La gestión de usuarios y las acciones de mantenimiento sobre proyectos, metodologías y el proceso de sincronización están restringidas a administradores. Si no ves Gestión de usuarios en tu menú de cuenta, no tienes esos permisos.\n3. La función está desactivada para toda la plataforma. Algunas capacidades pueden desactivarse para todos mediante configuración. En ese caso, nadie las ve, sin importar el nivel de la cuenta.\n\nSi crees que deberías tener acceso a algo que no puedes alcanzar, un administrador puede confirmar a qué tiene derecho tu cuenta."
+            },
+            "empty-portfolio-new-device": {
+                "question": "Mi panel guardado o lista de seguimiento está vacío en un dispositivo nuevo",
+                "answer": "Tu Portafolio se guarda vinculado a tu cuenta, así que iniciar sesión en otro lugar debería traerlo contigo. Dos cosas lo limitan más de lo que la gente espera: es por red (una lista de seguimiento creada en mainnet no aparece mientras ves testnet) y es por cuenta (si tienes más de un inicio de sesión, cada uno mantiene su propio Portafolio).\n\nSi estás en la red y la cuenta correctas y sigue vacío, es que aún no se ha añadido nada a esa combinación."
+            },
+            "tour-wont-restart": {
+                "question": "El recorrido no vuelve a iniciarse",
+                "answer": "Una vez que lo has visto, el recorrido no se inicia solo una segunda vez; eso es intencional, para que no te interrumpa en cada inicio de sesión.\n\nPara volver a hacerlo, usa el botón de ayuda (?) en la barra superior y elige Hacer el recorrido guiado, o ve a Configuración de la cuenta y usa la tarjeta del recorrido del producto ahí. Puedes reiniciarlo tantas veces como quieras."
+            },
+            "tour-restarted-new-computer": {
+                "question": "El recorrido volvió a iniciarse en otro equipo",
+                "answer": "La marca de \"ya viste esto\" se recuerda por navegador, no por cuenta. Un dispositivo nuevo, un navegador distinto, una ventana privada o borrar tus cookies se presentan todos como una primera visita, así que el recorrido se ofrece de nuevo.\n\nOmitirlo toma un momento y quedará omitido en ese navegador a partir de entonces."
+            },
+            "cannot-click-during-tour": {
+                "question": "No puedo hacer clic en nada mientras el recorrido está en curso",
+                "answer": "Eso es lo esperado. El recorrido es de solo lectura y pausa la interacción con la página subyacente para que un clic accidental no te saque de ella a mitad de un paso.\n\nTermínalo con Omitir recorrido, la ×, o la tecla Escape, y la página vuelve a ser interactiva de inmediato."
+            }
+        },
+        "stillStuck": {
+            "title": "¿Sigues sin encontrar la respuesta?",
+            "body": "Busca el término en el glosario: sorprendentemente muchos problemas aparentes son diferencias de vocabulario entre registros. Revisa Estado de sincronización si es una pregunta de \"faltan datos o están desactualizados\". Usa el botón de comentarios para reportarlo, indicando en qué red estabas, en qué página, y qué esperabas ver en su lugar: esos tres detalles resuelven la mayoría de los reportes sin necesidad de seguimiento."
+        }
     }
 }

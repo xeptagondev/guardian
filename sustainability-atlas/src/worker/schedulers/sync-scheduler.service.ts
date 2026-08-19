@@ -10,6 +10,7 @@ import { canEnqueueBulk } from '@shared/redis/redis-headroom';
 import { ROOT_TOPICS } from '@shared/config/configuration';
 import { PolicyDecodeJobData } from '../processors/policy-decode.processor';
 import { TREASURY_TRANSFERS_JOB } from '../processors/token-sync.processor';
+import { BUSINESS_VIEW_PARTITIONS } from '../processors/business-view-builder.processor';
 import { ProjectMapperService } from '../services/project-mapper.service';
 
 /** Shape accepted by Queue.addBulk. */
@@ -1115,22 +1116,38 @@ export class SyncSchedulerService implements OnModuleInit, OnModuleDestroy {
         // minutes"), so nobody reading this could tell how often it actually ran.
         const interval = envInt('BUSINESS_VIEW_BUILD_INTERVAL_MS', 2 * 60 * 1000);
 
-        // Immediate one-shot so registries/methodologies/credits populate within
-        // seconds of boot rather than waiting for the first repeat to fire.
-        await this.businessViewQueue.add('build-business-views', {}, {
-            jobId: `business-view-build-initial-${Date.now()}`,
-        });
+        // Fanned out one job per view type instead of a single whole-table run.
+        // The partitions are disjoint in business_view's conflict key, so they
+        // proceed in parallel without contending; a single job could not use the
+        // queue's concurrency at all, because extra concurrent runs of the SAME
+        // statement are duplicate work that serialises on each other's row locks.
+        //
+        // Retires the older unpartitioned scheduler so a redeploy does not leave
+        // it firing full-table rebuilds alongside the partitioned ones.
+        await this.businessViewQueue.removeJobScheduler('business-view-build').catch(() => undefined);
 
-        // Atomic + idempotent — see scheduleMvRefresh for why the previous
-        // purge-then-re-add was unsafe with more than one instance.
-        await this.businessViewQueue.upsertJobScheduler(
-            'business-view-build',
-            { every: interval },
-            { name: 'build-business-views' },
-        );
+        for (const viewType of BUSINESS_VIEW_PARTITIONS) {
+            // Immediate one-shot so registries/methodologies/credits populate
+            // within seconds of boot rather than waiting for the first repeat.
+            await this.businessViewQueue.add(
+                'build-business-views',
+                { viewType },
+                { jobId: `business-view-build-initial-${viewType}-${Date.now()}` },
+            );
+
+            // Atomic + idempotent — see scheduleMvRefresh for why the previous
+            // purge-then-re-add was unsafe with more than one instance.
+            await this.businessViewQueue.upsertJobScheduler(
+                `business-view-build-${viewType.toLowerCase()}`,
+                { every: interval },
+                { name: 'build-business-views', data: { viewType } },
+            );
+        }
 
         this.logger.log(
-            `Scheduled business view builder: initial run + every ${interval / 1000}s`,
+            `Scheduled business view builder: initial run + every ${interval / 1000}s ` +
+            `across ${BUSINESS_VIEW_PARTITIONS.length} partitions ` +
+            `(${BUSINESS_VIEW_PARTITIONS.join(', ')})`,
         );
     }
 }

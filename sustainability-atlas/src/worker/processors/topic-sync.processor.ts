@@ -176,13 +176,21 @@ export class TopicSyncProcessor extends WorkerHost {
      * Records when this topic should next be polled, and the backoff that
      * produced that time.
      *
-     * This is the schedule the dispatcher reads. It is written in `chain` mode
-     * too — the cost is one indexed UPDATE per poll, and it means the dispatcher
-     * can be switched on against a fully populated schedule rather than having to
-     * backfill 100k rows first. `pollIntervalSec` is stored alongside so the
-     * dispatcher can re-arm a topic it hands out without recomputing the backoff.
+     * This is the schedule the dispatcher reads, so it is only written in
+     * `dispatcher` mode. In `chain` mode nothing reads it — each job enqueues its
+     * own successor — and writing it anyway cost one UPDATE per poll against a
+     * six-figure backlog, which held topic_cache at roughly two dead tuples per
+     * live row and parked workers in LWLock/WALWrite.
+     *
+     * Skipping it in chain mode needs no backfill: the dispatcher arms every row
+     * whose `nextPollAt` IS NULL when it starts (see SyncSchedulerService), so
+     * switching modes still comes up against a fully populated schedule.
+     *
+     * `pollIntervalSec` is stored alongside so the dispatcher can re-arm a topic
+     * it hands out without recomputing the backoff.
      */
     private async recordNextPoll(topicId: string, delayMs: number): Promise<void> {
+        if (this.pollMode !== 'dispatcher') return;
         const seconds = Math.max(1, Math.round(delayMs / 1000));
         await this.dataSource.query(
             `UPDATE topic_cache
@@ -200,8 +208,12 @@ export class TopicSyncProcessor extends WorkerHost {
      * dispatcher picks the topic back up once this expires, so a lost job costs
      * a delay rather than a topic that stops syncing. The chain's own next page
      * overwrites this within ~100 ms while it is healthy.
+     *
+     * Only meaningful in `dispatcher` mode — see recordNextPoll for why the
+     * chain-mode write is skipped.
      */
     private async parkFromDispatcher(topicId: string): Promise<void> {
+        if (this.pollMode !== 'dispatcher') return;
         const seconds = Math.max(60, Math.round(this.pollDelay / 1000));
         await this.dataSource.query(
             `UPDATE topic_cache

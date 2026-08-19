@@ -178,6 +178,7 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
      * TopicSyncProcessor.recordNextPoll for the full rationale.
      */
     private async recordNextPoll(topicId: string, delayMs: number): Promise<void> {
+        if (this.pollMode !== 'dispatcher') return;
         const seconds = Math.max(1, Math.round(delayMs / 1000));
         await this.dataSource.query(
             `UPDATE topic_cache
@@ -188,8 +189,13 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
         );
     }
 
-    /** Holds a topic out of the dispatcher while its catch-up chain runs. */
+    /**
+     * Holds a topic out of the dispatcher while its catch-up chain runs.
+     * Only meaningful in `dispatcher` mode — see TopicSyncProcessor.recordNextPoll
+     * for why the chain-mode write is skipped.
+     */
     private async parkFromDispatcher(topicId: string): Promise<void> {
+        if (this.pollMode !== 'dispatcher') return;
         const seconds = Math.max(60, Math.round(this.pollDelay / 1000));
         await this.dataSource.query(
             `UPDATE topic_cache
