@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import { NetworkDataSourceRegistry } from '../database/network-datasource.registry';
 import { QueueRegistry } from '../queues/queue.registry';
 import { BASE_QUEUE_NAMES } from '@shared/config/bullmq.config';
+import { canEnqueueBulk } from '@shared/redis/redis-headroom';
 import { PolicyDecodeJobData } from '@worker/processors/policy-decode.processor';
 import { ProjectReparseJobData } from '@worker/processors/project-reparse.processor';
 import { PROJECT_EXTRACT_FIELDS } from '@worker/project-mapper/project-fields';
@@ -251,6 +252,19 @@ export class MappingReprocessService {
         );
 
         const queue = this.queueRegistry.getQueue(network, BASE_QUEUE_NAMES.PROJECT_REPARSE);
+
+        // An admin click here can inject one job per VC across a whole
+        // methodology, with no cap. Redict runs `noeviction`, so pushing it past
+        // maxmemory makes add() throw and the injected work is simply lost —
+        // refuse up front instead, and let the operator retry once the queue has
+        // drained.
+        if (!await canEnqueueBulk(this.queueRegistry.getConnection(), queue, 'reparseProjects')) {
+            throw new HttpException(
+                'Redis is under memory pressure or the project-reparse queue is already deep. ' +
+                'Wait for it to drain and retry.',
+                HttpStatus.SERVICE_UNAVAILABLE,
+            );
+        }
 
         const BULK_CHUNK = 500;
         const stamp = Date.now();

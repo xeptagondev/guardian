@@ -28,6 +28,7 @@ import { DashboardController } from './controllers/dashboard.controller';
 import { PortfolioController } from './controllers/portfolio.controller';
 import { ExportsController } from './controllers/exports.controller';
 import { ImpactSummaryController } from './controllers/impact-summary.controller';
+import { IpfsController } from './controllers/ipfs.controller';
 
 // Services
 import { RegistriesService } from './services/registries.service';
@@ -86,6 +87,7 @@ import { LocalPolicyZipStorage } from '@worker/services/storage/local-policy-zip
         PortfolioController,
         ExportsController,
         ImpactSummaryController,
+        IpfsController,
     ],
     providers: [
         RegistriesService,
