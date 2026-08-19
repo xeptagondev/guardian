@@ -26,6 +26,12 @@ export const SUPPLY_EXPR = `COALESCE(pml.amount::numeric, (m.documents->'credent
 /** Mint timestamp for a row: the attributed link date, else the message consensus time. */
 export const MINT_DATE_EXPR = `COALESCE(pml.mint_date, to_timestamp(m."consensusTimestamp"::numeric))`;
 
+/** Retired amount for a row: fungible retirements from token_retire_event, else NFT serials. */
+export const RETIRED_EXPR = `(CASE
+    WHEN tc.type = 'FUNGIBLE_COMMON' THEN COALESCE(ft_ret.retired_amount, 0)
+    ELSE COALESCE(pml.serial_retired_count, 0)
+END)`;
+
 export const CREDIT_FIELD_SCHEMA: FieldSchema = {
     // ── Token identity ──────────────────────────────────────────────────
     tokenId: {
@@ -52,6 +58,10 @@ export const CREDIT_FIELD_SCHEMA: FieldSchema = {
     //    repeated for filtering, since an alias can't appear in a WHERE) ─────
     supply: {
         sql: 'total_supply',
+        sortable: true,
+    },
+    retiredTokens: {
+        sql: 'retired_tokens',
         sortable: true,
     },
     /**

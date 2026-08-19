@@ -845,6 +845,7 @@
         },
         "issuancesFound": "{count} issuances found",
         "totalSupply": "Total supply:",
+        "totalRetired": "Total retired:",
         "registries": "Registries:",
         "projects": "Projects:",
         "noMatch": "No issuances match your filters",
@@ -859,12 +860,15 @@
         "clearRegistryFilter": "Clear filter",
         "filteredBySdg": "Showing issuances for SDG {sdg}",
         "clearSdgFilter": "Clear filter",
-        "supplyTooltip": "Total number of Credits Minted for the particular project. For NFTs, this is the number of unique serials.",
+        "filteredByRetired": "Showing issuances with retired tokens",
+        "clearRetiredFilter": "Clear filter",
+        "supplyTooltip": "Total number of Credits Declared for the particular project. For NFTs, this is the number of unique serials.",
         "columns": {
             "token": "Token",
             "symbol": "Symbol",
             "type": "Type",
             "supply": "Mint Amount",
+            "retiredTokens": "Retirement Amount",
             "declaredAmount": "Declared",
             "mintedOnChain": "Minted On-Chain",
             "mintDate": "Mint Date",
@@ -878,7 +882,8 @@
             "registry": "Registry",
             "supply": "Mint Amount",
             "mintDate": "Mint Date",
-            "hideUnlinked": "Hide issuances with no project link"
+            "hideUnlinked": "Hide issuances with no project link",
+            "showRetiredOnly": "Show issuances with retirement"
         },
         "tokenTypes": {
             "Fungible": "Fungible",
@@ -887,7 +892,7 @@
         "tooltips": {
             "hideUnlinked": "Hides tokens that have not yet been matched to a project. Uncheck to see all indexed tokens including those still awaiting project attribution.",
             "mintDate": "Mint Date",
-            "mintAmount": "Total number of Credits Minted for the particular project. For NFTs, this is the number of unique serials.",
+            "mintAmount": "Total number of Credits Declared for the particular project. For NFTs, this is the number of unique serials.",
             "declaredAmount": "The credit amount stated in the Guardian mint document. This is what the registry intended to issue, which is not always what the ledger recorded.",
             "mintedOnChain": "The amount actually minted on Hedera: the number of NFT serials carrying this mint's identifier, or the amount recorded by the fungible mint transaction."
         },

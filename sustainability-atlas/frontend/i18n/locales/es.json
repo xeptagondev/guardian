@@ -845,6 +845,7 @@
         },
         "issuancesFound": "{count} emisiones encontradas",
         "totalSupply": "Suministro total:",
+        "totalRetired": "Total retirado:",
         "registries": "Registros:",
         "projects": "Proyectos:",
         "noMatch": "Ninguna emisión coincide con tus filtros",
@@ -859,7 +860,9 @@
         "clearRegistryFilter": "Quitar filtro",
         "filteredBySdg": "Mostrando emisiones del ODS {sdg}",
         "clearSdgFilter": "Quitar filtro",
-        "supplyTooltip": "Suministro total de tokens acuñado en Hedera. Para tokens fungibles es el suministro total. Para NFTs es el número de serials únicos.",
+        "filteredByRetired": "Mostrando emisiones con tokens retirados",
+        "clearRetiredFilter": "Quitar filtro",
+        "supplyTooltip": "Número total de créditos declarados para el proyecto en cuestión. En el caso de los NFT, se trata del número de números de serie únicos.",
         "tokenTypes": {
             "Fungible": "Fungible",
             "Non-Fungible": "No fungible"
@@ -869,6 +872,7 @@
             "symbol": "Símbolo",
             "type": "Tipo",
             "supply": "Monto acuñado",
+            "retiredTokens": "Monto de Retiro",
             "declaredAmount": "Declarado",
             "mintedOnChain": "Acuñado en cadena",
             "mintDate": "Fecha de emisión",
@@ -882,12 +886,13 @@
             "registry": "Registro",
             "supply": "Monto acuñado",
             "mintDate": "Fecha de emisión",
-            "hideUnlinked": "Ocultar emisiones sin proyecto vinculado"
+            "hideUnlinked": "Ocultar emisiones sin enlace a proyecto",
+            "showRetiredOnly": "Mostrar emisiones con retiros"
         },
         "tooltips": {
             "hideUnlinked": "Oculta los tokens que aún no han sido asociados a ningún proyecto. Desmarque para ver todos los tokens indexados.",
             "mintDate": "Fecha de emisión",
-            "mintAmount": "Número total de créditos acuñados para el proyecto. Para NFTs, es el número de seriales únicos.",
+            "mintAmount": "Número total de créditos declarados para el proyecto en cuestión. En el caso de los NFT, se trata del número de números de serie únicos.",
             "declaredAmount": "El monto de créditos indicado en el documento de acuñación de Guardian. Es lo que el registro pretendía emitir, que no siempre coincide con lo que registró la cadena.",
             "mintedOnChain": "El monto realmente acuñado en Hedera: el número de seriales NFT que llevan el identificador de esta acuñación, o el monto registrado por la transacción de acuñación fungible."
         },

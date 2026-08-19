@@ -6,6 +6,7 @@ export type CreditSortKey =
     | 'symbol'
     | 'type'
     | 'supply'
+    | 'retiredTokens'
     | 'registry'
     | 'mintDate'
     | 'projectDisplay'
@@ -19,6 +20,7 @@ export interface CreditDto {
     symbol: string | null;
     type: 'Fungible' | 'Non-Fungible' | null;
     supply: number;
+    retiredTokens?: number;
     projectId: string | null;
     project: string | null;
     methodologyId: string | null;
@@ -64,6 +66,7 @@ const CREDIT_FILTER_KEYS = [
     'projectKey',
     'methodologyId',
     'linkedOnly',
+    'retiredOnly',
     'supplyMin',
     'supplyMax',
     'mintDateFrom',

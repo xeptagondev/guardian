@@ -11,6 +11,7 @@ export interface CreditListQuery {
     projectKey?: string;
     methodologyId?: string;
     linkedOnly?: boolean;
+    retiredOnly?: boolean;
     supplyMin?: string;
     supplyMax?: string;
     mintDateFrom?: string;
@@ -22,6 +23,7 @@ export interface CreditListQuery {
 /** Totals over the whole filtered issuance set, independent of the page being viewed. */
 export interface CreditStats {
     totalSupply: number;
+    totalRetired: number;
     uniqueRegistries: number;
     uniqueProjects: number;
 }
@@ -33,6 +35,7 @@ export interface CreditRow {
     /** Normalised type: 'Fungible' | 'Non-Fungible' | null */
     type: 'Fungible' | 'Non-Fungible' | null;
     supply: number;
+    retiredTokens: number;
     /** credentialSubject.id of the linked project (resolved via project_mint_link). */
     projectId: string | null;
     /** Display name of the linked project, joined from business_view PROJECT. */

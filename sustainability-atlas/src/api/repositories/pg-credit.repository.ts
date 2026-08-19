@@ -13,7 +13,7 @@ import {
     CreditStats,
 } from './credit.repository';
 import { QueryBuilder } from './query-builder';
-import { CREDIT_FIELD_SCHEMA, SUPPLY_EXPR, MINT_DATE_EXPR } from './schemas/credit.schema';
+import { CREDIT_FIELD_SCHEMA, SUPPLY_EXPR, MINT_DATE_EXPR, RETIRED_EXPR } from './schemas/credit.schema';
 
 /** Batch size for the internally-batched `findAllForExport` LIMIT/OFFSET loop. */
 const EXPORT_BATCH_SIZE = 2000;
@@ -30,6 +30,7 @@ interface RawRow {
     /** Fallback token type from businessData->options->tokenType (findRaw only) */
     options_token_type: string | null;
     total_supply: string | null;
+    retired_tokens: string | null;
     registryDid: string | null;
     registry_name: string | null;
     mint_date: Date | null;
@@ -66,7 +67,8 @@ const TOKEN_ID_EXPR = `(m.documents->'credentialSubject'->0->>'tokenId')`;
 
 /**
  * Base FROM clause: every MintToken VC in the message table, LEFT JOINed with
- * project_mint_link (pre-computed per-project attribution) and token_cache.
+ * project_mint_link (pre-computed per-project attribution), token_cache, and
+ * token_retire_event for fungible token retirements.
  * Rows where pml.* is NULL are unattributed mints — still included so the
  * table is complete regardless of worker attribution state.
  *
@@ -79,6 +81,12 @@ const MINT_FROM_LEAN = `
            ON pml.mint_consensus_timestamp = m."consensusTimestamp"
     LEFT JOIN token_cache tc
            ON tc."tokenId" = ${TOKEN_ID_EXPR}
+    LEFT JOIN LATERAL (
+        SELECT (SUM(tre.amount) / (10::numeric ^ COALESCE(tc.decimals, 0)))::numeric AS retired_amount
+        FROM token_retire_event tre
+        WHERE tre.token_id = ${TOKEN_ID_EXPR}
+          AND tre.amount IS NOT NULL
+    ) ft_ret ON tc.type = 'FUNGIBLE_COMMON'
 `;
 
 /** LATERAL: the token's own registryDid, the fallback for mints not attributed to a project. */
@@ -222,13 +230,13 @@ export class PgCreditRepository extends CreditRepository {
         builder.addClause(`${TOKEN_ID_EXPR} IS NOT NULL`);
 
         builder.addFilters({
-            registryDid:  query.registryDid,
-            registry:     query.registry,
-            tokenId:      query.tokenId,
-            supplyMin:    query.supplyMin,
-            supplyMax:    query.supplyMax,
+            registryDid: query.registryDid,
+            registry: query.registry,
+            tokenId: query.tokenId,
+            supplyMin: query.supplyMin,
+            supplyMax: query.supplyMax,
             mintDateFrom: query.mintDateFrom,
-            mintDateTo:   query.mintDateTo,
+            mintDateTo: query.mintDateTo,
         });
 
         // Accepts a `|`-delimited list so Portfolio can scope one query to its
@@ -244,6 +252,10 @@ export class PgCreditRepository extends CreditRepository {
             builder.addClause(`proj.project_id IS NOT NULL`);
         }
 
+        if (query.retiredOnly) {
+            builder.addClause(`${RETIRED_EXPR} > 0`);
+        }
+
         if (query.type) {
             const normalised = query.type.toLowerCase();
             if (normalised === 'fungible') {
@@ -257,7 +269,7 @@ export class PgCreditRepository extends CreditRepository {
         if (query.search) {
             const term = query.search.trim();
             const likeParam = builder.nextParam(`%${term}%`);
-            const simParam  = builder.nextParam(term);
+            const simParam = builder.nextParam(term);
 
             builder.addClause(`(
                 tc.name ILIKE ${likeParam}
@@ -280,24 +292,26 @@ export class PgCreditRepository extends CreditRepository {
         const sql = `
             SELECT
                 COALESCE(SUM(${SUPPLY_EXPR}), 0)::numeric        AS total_supply,
+                COALESCE(SUM(${RETIRED_EXPR}), 0)::numeric       AS total_retired,
                 COUNT(DISTINCT reg.registry_name)::int           AS unique_registries,
                 COUNT(DISTINCT proj.project_id)::int             AS unique_projects
             FROM ${buildJoins({
-                registry: query.registry,
-                registryDid: query.registryDid,
-                methodologyId: query.methodologyId,
-                search: query.search,
-                // The stat columns themselves read proj/reg, so both are always required here.
-                forceAttribution: true,
-            })}
+            registry: query.registry,
+            registryDid: query.registryDid,
+            methodologyId: query.methodologyId,
+            search: query.search,
+            // The stat columns themselves read proj/reg, so both are always required here.
+            forceAttribution: true,
+        })}
             WHERE ${builder.getWhereClause()}
         `;
 
-        const rows: Array<{ total_supply: string; unique_registries: number; unique_projects: number }> =
+        const rows: Array<{ total_supply: string; total_retired: string; unique_registries: number; unique_projects: number }> =
             await this.dataSource.query(sql, builder.getParams());
 
         return {
             totalSupply: parseFloat(rows[0]?.total_supply ?? '0') || 0,
+            totalRetired: parseFloat(rows[0]?.total_retired ?? '0') || 0,
             uniqueRegistries: rows[0]?.unique_registries ?? 0,
             uniqueProjects: rows[0]?.unique_projects ?? 0,
         };
@@ -318,9 +332,9 @@ export class PgCreditRepository extends CreditRepository {
             });
 
         const whereSql = builder.getWhereClause();
-        const params   = builder.getParams();
+        const params = builder.getParams();
 
-        const limitParam  = builder.nextParam(limit);
+        const limitParam = builder.nextParam(limit);
         const offsetParam = builder.nextParam(offset);
 
         // Scoped to exactly one project or one methodology (the two Projects-table /
@@ -336,6 +350,7 @@ export class PgCreditRepository extends CreditRepository {
                 tc.type                                                                         AS raw_type,
                 NULL::text                                                                      AS options_token_type,
                 ${SUPPLY_EXPR}                                                                  AS total_supply,
+                ${RETIRED_EXPR}::text                                                           AS retired_tokens,
                 COALESCE(proj.registry_did, cred.registry_did)                                  AS "registryDid",
                 reg.registry_name,
                 ${MINT_DATE_EXPR}                                                               AS mint_date,
@@ -361,12 +376,12 @@ export class PgCreditRepository extends CreditRepository {
         const countSql = `
             SELECT COUNT(*)::int AS total
             FROM ${buildJoins({
-                registry: query.registry,
-                registryDid: query.registryDid,
-                methodologyId: query.methodologyId,
-                linkedOnly: query.linkedOnly,
-                search,
-            })}
+            registry: query.registry,
+            registryDid: query.registryDid,
+            methodologyId: query.methodologyId,
+            linkedOnly: query.linkedOnly,
+            search,
+        })}
             WHERE ${whereSql}
         `;
 
@@ -382,12 +397,16 @@ export class PgCreditRepository extends CreditRepository {
     }
 
     private static mapRow(row: RawRow): CreditRow {
+        const supply = row.total_supply != null ? parseFloat(row.total_supply) : 0;
+        const retiredTokens = row.retired_tokens != null ? parseFloat(row.retired_tokens) : 0;
+
         return {
             tokenId: row.tokenId ?? null,
             name: row.name ?? null,
             symbol: row.symbol ?? null,
             type: PgCreditRepository.normaliseType(row.raw_type, row.options_token_type),
-            supply: row.total_supply != null ? parseFloat(row.total_supply) : 0,
+            supply,
+            retiredTokens,
             projectId: row.project_id ?? null,
             project: row.project_name ?? null,
             methodologyId: row.methodology_id ?? null,
@@ -571,21 +590,26 @@ export class PgCreditRepository extends CreditRepository {
             this.findRawProjectRows(tokenId),
         ]);
 
-        const credit: CreditRow | null = creditRows[0] ? {
-            tokenId: creditRows[0].tokenId,
-            name: creditRows[0].name,
-            symbol: creditRows[0].symbol,
-            type: PgCreditRepository.normaliseType(creditRows[0].raw_type, creditRows[0].options_token_type),
-            supply: parseFloat(creditRows[0].total_supply ?? '0') || 0,
-            projectId: creditRows[0].project_id ?? null,
-            project: creditRows[0].project_name ?? null,
-            methodologyId: creditRows[0].methodology_id ?? null,
-            methodology: creditRows[0].methodology_name ?? null,
-            registry: creditRows[0].registry_name ?? null,
-            registryDid: creditRows[0].registryDid,
-            mintDate: creditRows[0].mint_date instanceof Date
-                ? creditRows[0].mint_date.toISOString()
-                : (creditRows[0].mint_date ?? null),
+        const rawCredit = creditRows[0];
+        const rawSupply = rawCredit ? (parseFloat(rawCredit.total_supply ?? '0') || 0) : 0;
+        const rawRetired = rawCredit ? (parseFloat(rawCredit.retired_tokens ?? '0') || 0) : 0;
+
+        const credit: CreditRow | null = rawCredit ? {
+            tokenId: rawCredit.tokenId,
+            name: rawCredit.name,
+            symbol: rawCredit.symbol,
+            type: PgCreditRepository.normaliseType(rawCredit.raw_type, rawCredit.options_token_type),
+            supply: rawSupply,
+            retiredTokens: rawRetired,
+            projectId: rawCredit.project_id ?? null,
+            project: rawCredit.project_name ?? null,
+            methodologyId: rawCredit.methodology_id ?? null,
+            methodology: rawCredit.methodology_name ?? null,
+            registry: rawCredit.registry_name ?? null,
+            registryDid: rawCredit.registryDid,
+            mintDate: rawCredit.mint_date instanceof Date
+                ? rawCredit.mint_date.toISOString()
+                : (rawCredit.mint_date ?? null),
             mintConsensusTimestamp: null,
         } : null;
 
@@ -621,6 +645,10 @@ export class PgCreditRepository extends CreditRepository {
                 tc.type AS raw_type,
                 bv."businessData"->'options'->>'tokenType' AS options_token_type,
                 tc."totalSupply"::text AS total_supply,
+                (CASE
+                    WHEN tc.type = 'FUNGIBLE_COMMON' THEN COALESCE(ft_ret.retired_amount, 0)
+                    ELSE COALESCE(pml_agg.serial_retired_count, 0)
+                END)::text AS retired_tokens,
                 bv."registryDid" AS "registryDid",
                 reg.registry_name AS registry_name,
                 to_char(to_timestamp(bv."sourceTimestamp"::numeric) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS mint_date,
@@ -631,6 +659,17 @@ export class PgCreditRepository extends CreditRepository {
                 COALESCE(meth.methodology_name, proj.proj_methodology_name) AS methodology_name
              FROM business_view bv
              LEFT JOIN token_cache tc ON tc."tokenId" = bv."businessData"->>'tokenId'
+             LEFT JOIN LATERAL (
+                 SELECT SUM(pml2.serial_retired_count)::numeric AS serial_retired_count
+                 FROM project_mint_link pml2
+                 WHERE pml2.token_id = bv."businessData"->>'tokenId'
+             ) pml_agg ON true
+             LEFT JOIN LATERAL (
+                 SELECT (SUM(tre.amount) / (10::numeric ^ COALESCE(tc.decimals, 0)))::numeric AS retired_amount
+                 FROM token_retire_event tre
+                 WHERE tre.token_id = bv."businessData"->>'tokenId'
+                   AND tre.amount IS NOT NULL
+             ) ft_ret ON tc.type = 'FUNGIBLE_COMMON'
              LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg
                  ON reg."registryDid" = bv."registryDid"
              LEFT JOIN LATERAL (

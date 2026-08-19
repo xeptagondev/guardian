@@ -334,7 +334,7 @@ const filteredStats = computed(() => {
             icon: Flame,
             accent: 'text-orange-500',
             accentBg: 'bg-orange-500/10',
-            to: '/credits',
+            to: { path: '/credits', query: { retiredOnly: 'true', sort: 'retiredTokens', dir: 'desc' } },
         },
     ];
 });

@@ -44,6 +44,12 @@ export class CreditQueryDto extends PaginationQueryDto {
     @IsBoolean()
     linkedOnly?: boolean;
 
+    @ApiPropertyOptional({ description: 'Return only issuances with retired tokens (retired > 0)' })
+    @IsOptional()
+    @Transform(({ value }) => value === true || value === 'true')
+    @IsBoolean()
+    retiredOnly?: boolean;
+
     @ApiPropertyOptional({ description: 'Minimum minted amount (inclusive)' })
     @IsOptional()
     @IsNumberString()
@@ -68,6 +74,9 @@ export class CreditQueryDto extends PaginationQueryDto {
 export class CreditStatsDto {
     @ApiProperty({ description: 'Sum of minted amounts across the filtered set' })
     totalSupply: number;
+
+    @ApiProperty({ description: 'Sum of retired amounts across the filtered set' })
+    totalRetired: number;
 
     @ApiProperty({ description: 'Distinct registries in the filtered set' })
     uniqueRegistries: number;
@@ -95,6 +104,9 @@ export class CreditResponseDto {
 
     @ApiProperty({ description: 'Total supply (token_cache.totalSupply ?? 0)' })
     supply: number;
+
+    @ApiProperty({ description: 'Retired tokens (Retirement amount)' })
+    retiredTokens: number;
 
     @ApiProperty({ nullable: true, description: 'credentialSubject.id of the linked project, resolved via project_mint_link.' })
     projectId: string | null;
@@ -127,6 +139,7 @@ export class CreditResponseDto {
             symbol: row.symbol,
             type: row.type,
             supply: row.supply,
+            retiredTokens: row.retiredTokens,
             projectId: row.projectId,
             project: row.project,
             methodologyId: row.methodologyId,

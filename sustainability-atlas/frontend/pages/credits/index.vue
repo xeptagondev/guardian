@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FileJson, Sparkles, Download, Loader2, Save } from 'lucide-vue-next';
+import { FileJson, Sparkles, Download, Loader2, Save, Flame } from 'lucide-vue-next';
 import { useDebounceFn } from '@vueuse/core';
 import type { FilterOption } from '~/components/shared/FilterBar.vue';
 import { formatCredits } from '~/lib/format';
@@ -24,9 +24,14 @@ const router = useRouter();
 const projectKeyFilter = computed(() => route.query.projectKey as string | undefined);
 const methodologyIdFilter = computed(() => route.query.methodologyId as string | undefined);
 const registryDidFilter = computed(() => route.query.registryDid as string | undefined);
+const showRetiredOnly = ref(route.query.retiredOnly === 'true');
 const sdgFilter = computed(() => {
     const raw = route.query.sdg || route.query.sdgs;
     return typeof raw === 'string' ? raw : undefined;
+});
+
+watch(() => route.query.retiredOnly, (val) => {
+    showRetiredOnly.value = val === 'true';
 });
 
 // Project keys matching the active SDG, used to scope the issuance query.
@@ -80,7 +85,7 @@ const sortDir = ref<CreditSortDir | null>(
 const hideUnlinked = ref(route.query.linkedOnly === 'true');
 
 function initialFiltersFromQuery(): Record<string, string> {
-    const reserved = new Set(['q', 'page', 'sort', 'dir', 'network', 'projectKey', 'methodologyId', 'registryDid', 'sdg', 'sdgs', 'linkedOnly']);
+    const reserved = new Set(['q', 'page', 'sort', 'dir', 'network', 'projectKey', 'methodologyId', 'registryDid', 'sdg', 'sdgs', 'linkedOnly', 'retiredOnly']);
     const initial: Record<string, string> = {};
     for (const [key, val] of Object.entries(route.query)) {
         if (!reserved.has(key) && typeof val === 'string' && val) initial[key] = val;
@@ -101,6 +106,7 @@ function syncToUrl() {
         q.dir = sortDir.value;
     }
     if (hideUnlinked.value) q.linkedOnly = 'true';
+    if (showRetiredOnly.value) q.retiredOnly = 'true';
     for (const [key, val] of Object.entries(activeFilters.value)) {
         if (val && val !== 'all') q[key] = val;
     }
@@ -135,6 +141,7 @@ const apiFilters = computed<Record<string, string | string[]>>(() => {
         if (to) f.mintDateTo = to;
     }
     if (hideUnlinked.value) f.linkedOnly = 'true';
+    if (showRetiredOnly.value) f.retiredOnly = 'true';
 
     return f;
 });
@@ -232,6 +239,7 @@ const rows = computed(() =>
     credits.value.map(c => ({
         ...c,
         supplyFormatted: formatCredits(c.supply),
+        retiredFormatted: formatCredits(c.retiredTokens ?? 0),
     })),
 );
 
@@ -467,16 +475,28 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                     </InfoTooltip>
                 </template>
             </FilterBar>
-            <label class="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
-                <input
-                    type="checkbox"
-                    class="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
-                    :checked="hideUnlinked"
-                    @change="(e) => { hideUnlinked = (e.target as HTMLInputElement).checked; currentPage = 1; }"
-                />
-                {{ $t('credits.filters.hideUnlinked') }}
-                <InfoTooltip :text="$t('credits.tooltips.hideUnlinked')" />
-            </label>
+            <div class="mt-2 flex items-center gap-4 flex-wrap">
+                <label class="inline-flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
+                    <input
+                        type="checkbox"
+                        class="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                        :checked="hideUnlinked"
+                        @change="(e) => { hideUnlinked = (e.target as HTMLInputElement).checked; currentPage = 1; syncToUrl(); }"
+                    />
+                    {{ $t('credits.filters.hideUnlinked') }}
+                    <InfoTooltip :text="$t('credits.tooltips.hideUnlinked')" />
+                </label>
+
+                <label class="inline-flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
+                    <input
+                        type="checkbox"
+                        class="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                        :checked="showRetiredOnly"
+                        @change="(e) => { showRetiredOnly = (e.target as HTMLInputElement).checked; currentPage = 1; syncToUrl(); }"
+                    />
+                    {{ $t('credits.filters.showRetiredOnly') }}
+                </label>
+            </div>
 
             <!-- Preset Templates -->
             <div class="flex items-center gap-2 mt-2.5 flex-wrap">
@@ -514,6 +534,8 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                 <span class="text-muted-foreground">&middot;</span>
                 <span class="text-muted-foreground">{{ $t('credits.totalSupply') }} <strong class="text-foreground">{{ formatCredits(summaryStats.totalSupply) }}</strong></span>
                 <span class="text-muted-foreground">&middot;</span>
+                <span class="text-muted-foreground">{{ $t('credits.totalRetired') }} <strong class="text-foreground">{{ formatCredits(summaryStats.totalRetired) }}</strong></span>
+                <span class="text-muted-foreground">&middot;</span>
                 <span class="text-muted-foreground">{{ $t('credits.registries') }} <strong class="text-foreground">{{ summaryStats.uniqueRegistries }}</strong></span>
                 <span class="text-muted-foreground">&middot;</span>
                 <span class="text-muted-foreground">{{ $t('credits.projects') }} <strong class="text-foreground">{{ summaryStats.uniqueProjects }}</strong></span>
@@ -530,6 +552,7 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                             <SortableHeader :label="$t('credits.columns.symbol')" sort-key="symbol" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" class="w-px" />
                             <SortableHeader :label="$t('credits.columns.type')" sort-key="type" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" class="w-px" />
                             <SortableHeader :label="$t('credits.columns.supply')" sort-key="supply" :tooltip="$t('credits.supplyTooltip')" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" class="w-px" />
+                            <SortableHeader :label="$t('credits.columns.retiredTokens')" sort-key="retiredTokens" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" class="w-px" />
                             <SortableHeader :label="$t('credits.columns.mintDate')" sort-key="mintDate" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" class="w-px" />
                             <SortableHeader :label="$t('credits.columns.project')" sort-key="projectDisplay" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
                             <SortableHeader :label="$t('credits.columns.methodology')" sort-key="methodologyDisplay" :active-sort-key="sortKey as string" :sort-dir="sortDir" @sort="toggleSort($event as any)" />
@@ -541,7 +564,7 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                         <!-- Loading skeleton -->
                         <template v-if="pending && credits.length === 0">
                             <tr v-for="i in skeletonRows" :key="`sk-${i}`">
-                                <td v-for="col in 9" :key="col" class="py-3 px-4">
+                                <td v-for="col in 10" :key="col" class="py-3 px-4">
                                     <Skeleton class="h-4 w-full max-w-[120px]" />
                                 </td>
                             </tr>
@@ -557,6 +580,7 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                                 <td class="py-3 px-4 font-mono text-xs whitespace-nowrap">{{ c.symbol ?? '-' }}</td>
                                 <td class="py-3 px-4 whitespace-nowrap"><span :class="[c.type ? typeColor[c.type] : '', 'text-xs font-medium rounded-full px-2 py-0.5']">{{ c.type ? $t('credits.tokenTypes.' + c.type) : '-' }}</span></td>
                                 <td class="py-3 px-4 text-right tabular-nums font-medium whitespace-nowrap">{{ c.supplyFormatted }}</td>
+                                <td class="py-3 px-4 text-right tabular-nums font-medium whitespace-nowrap text-muted-foreground">{{ c.retiredFormatted }}</td>
                                 <td class="py-3 px-4 text-muted-foreground text-xs tabular-nums whitespace-nowrap">{{ formatDate(c.mintDate) }}</td>
                                 <td class="py-3 px-4 max-w-[200px]">
                                     <AppLink
@@ -602,7 +626,7 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                                     </button>
                                 </td>
                             </tr>
-                            <tr v-if="rows.length === 0"><td colspan="9" class="py-12 text-center text-sm text-muted-foreground">{{ $t('credits.noMatch') }}</td></tr>
+                            <tr v-if="rows.length === 0"><td colspan="10" class="py-12 text-center text-sm text-muted-foreground">{{ $t('credits.noMatch') }}</td></tr>
                         </template>
                     </tbody>
                 </table>
