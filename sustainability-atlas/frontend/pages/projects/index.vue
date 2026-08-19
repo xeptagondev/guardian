@@ -11,7 +11,6 @@ import {
   Loader2,
   Save,
 } from "lucide-vue-next";
-import { useDebounceFn } from "@vueuse/core";
 import type { FilterOption } from "~/components/shared/FilterBar.vue";
 import type { SortDirection } from "~/composables/useFilteredPagination";
 import type { ProjectSortKey } from "~/composables/api/useProjectsApi";
@@ -83,10 +82,10 @@ const currentPage = ref(
 const pageSize = ref(10);
 
 const searchQuery = ref(typeof route.query.q === "string" ? route.query.q : "");
+// FilterBar already debounces its own update:modelValue, so searchQuery only
+// ever changes at that cadence — debouncing again here would stack a second
+// delay on top of it before apiSearch (and therefore the query) changes.
 const apiSearch = ref(searchQuery.value);
-const debouncedSetSearch = useDebounceFn((val: string) => {
-  apiSearch.value = val;
-}, 300);
 
 function initialFiltersFromQuery(): Record<string, string> {
   const reserved = new Set(["q", "page", "sort", "dir", "network", "registryDid", "methodologyId"]);
@@ -125,7 +124,7 @@ function syncToUrl() {
 }
 
 watch(searchQuery, (val) => {
-  debouncedSetSearch(val);
+  apiSearch.value = val;
   currentPage.value = 1;
   syncToUrl();
 });

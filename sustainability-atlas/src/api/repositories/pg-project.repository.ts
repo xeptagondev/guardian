@@ -1422,13 +1422,17 @@ export class PgProjectRepository extends ProjectRepository {
     async getFilterOptions(): Promise<ProjectFilterOptionsRow> {
         const sql = `
             SELECT
-                ARRAY_AGG(DISTINCT registry_name)   FILTER (WHERE registry_name <> '')   AS registries,
-                ARRAY_AGG(DISTINCT developer)        FILTER (WHERE developer <> '')       AS developers,
-                ARRAY_AGG(DISTINCT status)           FILTER (WHERE status <> '')          AS statuses,
-                ARRAY_AGG(DISTINCT sector)           FILTER (WHERE sector <> '')          AS sectors,
-                ARRAY_AGG(DISTINCT "sectoralScope")  FILTER (WHERE "sectoralScope" <> '') AS "sectoralScopes",
-                ARRAY_AGG(DISTINCT vintage)          FILTER (WHERE vintage <> '')         AS vintages,
-                ARRAY_AGG(DISTINCT country)          FILTER (WHERE country <> '')         AS countries
+                -- ARRAY_AGG ... FILTER returns SQL NULL, not {}, when every row is
+                -- filtered out (e.g. a network where no project has that field set)
+                -- — COALESCE normalizes to the empty array every caller already
+                -- expects instead of null, which crashes a plain .map() downstream.
+                COALESCE(ARRAY_AGG(DISTINCT registry_name)   FILTER (WHERE registry_name <> ''),   ARRAY[]::text[]) AS registries,
+                COALESCE(ARRAY_AGG(DISTINCT developer)        FILTER (WHERE developer <> ''),       ARRAY[]::text[]) AS developers,
+                COALESCE(ARRAY_AGG(DISTINCT status)           FILTER (WHERE status <> ''),          ARRAY[]::text[]) AS statuses,
+                COALESCE(ARRAY_AGG(DISTINCT sector)           FILTER (WHERE sector <> ''),          ARRAY[]::text[]) AS sectors,
+                COALESCE(ARRAY_AGG(DISTINCT "sectoralScope")  FILTER (WHERE "sectoralScope" <> ''), ARRAY[]::text[]) AS "sectoralScopes",
+                COALESCE(ARRAY_AGG(DISTINCT vintage)          FILTER (WHERE vintage <> ''),         ARRAY[]::text[]) AS vintages,
+                COALESCE(ARRAY_AGG(DISTINCT country)          FILTER (WHERE country <> ''),         ARRAY[]::text[]) AS countries
             FROM (
                 SELECT
                     COALESCE(reg.registry_name, '')                    AS registry_name,
