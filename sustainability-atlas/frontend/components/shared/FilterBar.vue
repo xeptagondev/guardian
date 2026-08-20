@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ComponentPublicInstance } from 'vue';
 import { Search, X, CalendarRange } from 'lucide-vue-next';
 import { onClickOutside, useDebounceFn } from '@vueuse/core';
 import { useI18n } from 'vue-i18n';
@@ -53,9 +54,9 @@ const dropdownSearch = ref<Record<string, string>>({});
 const panelRef = ref<HTMLElement | null>(null);
 const dropdownStyle = ref<Record<string, string>>({});
 
-function bindPanelRef(el: Element | null) {
+function bindPanelRef(el: Element | ComponentPublicInstance | null) {
     if (el) {
-        panelRef.value = el as HTMLElement;
+        panelRef.value = ('$el' in el ? el.$el : el) as HTMLElement;
         return;
     }
     if (!openDropdown.value) panelRef.value = null;

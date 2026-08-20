@@ -1422,13 +1422,13 @@ export class PgProjectRepository extends ProjectRepository {
     async getFilterOptions(): Promise<ProjectFilterOptionsRow> {
         const sql = `
             SELECT
-                ARRAY_AGG(DISTINCT registry_name)   FILTER (WHERE registry_name <> '')   AS registries,
-                ARRAY_AGG(DISTINCT developer)        FILTER (WHERE developer <> '')       AS developers,
-                ARRAY_AGG(DISTINCT status)           FILTER (WHERE status <> '')          AS statuses,
-                ARRAY_AGG(DISTINCT sector)           FILTER (WHERE sector <> '')          AS sectors,
-                ARRAY_AGG(DISTINCT "sectoralScope")  FILTER (WHERE "sectoralScope" <> '') AS "sectoralScopes",
-                ARRAY_AGG(DISTINCT vintage)          FILTER (WHERE vintage <> '')         AS vintages,
-                ARRAY_AGG(DISTINCT country)          FILTER (WHERE country <> '')         AS countries
+                COALESCE(ARRAY_AGG(DISTINCT registry_name)  FILTER (WHERE registry_name <> ''), '{}')   AS registries,
+                COALESCE(ARRAY_AGG(DISTINCT developer)       FILTER (WHERE developer <> ''), '{}')       AS developers,
+                COALESCE(ARRAY_AGG(DISTINCT status)          FILTER (WHERE status <> ''), '{}')          AS statuses,
+                COALESCE(ARRAY_AGG(DISTINCT sector)          FILTER (WHERE sector <> ''), '{}')          AS sectors,
+                COALESCE(ARRAY_AGG(DISTINCT "sectoralScope") FILTER (WHERE "sectoralScope" <> ''), '{}') AS "sectoralScopes",
+                COALESCE(ARRAY_AGG(DISTINCT vintage)         FILTER (WHERE vintage <> ''), '{}')         AS vintages,
+                COALESCE(ARRAY_AGG(DISTINCT country)         FILTER (WHERE country <> ''), '{}')         AS countries
             FROM (
                 SELECT
                     COALESCE(reg.registry_name, '')                    AS registry_name,

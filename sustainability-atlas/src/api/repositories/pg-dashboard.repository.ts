@@ -278,8 +278,8 @@ export class PgDashboardRepository {
     async getGlobalDashboardStats(): Promise<GlobalDashboardStatsRow> {
         const sql = `
             SELECT
-                ARRAY_AGG(DISTINCT developer) FILTER (WHERE developer <> '')       AS developers,
-                ARRAY_AGG(DISTINCT registry_name) FILTER (WHERE registry_name <> '') AS registries,
+                COALESCE(ARRAY_AGG(DISTINCT developer) FILTER (WHERE developer <> ''), '{}')       AS developers,
+                COALESCE(ARRAY_AGG(DISTINCT registry_name) FILTER (WHERE registry_name <> ''), '{}') AS registries,
                 (
                     -- mv_registry_stats is already one row per registryDid (canonical),
                     -- so this reads the count directly instead of deduplicating the raw
