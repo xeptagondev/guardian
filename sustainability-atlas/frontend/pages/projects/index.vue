@@ -15,7 +15,7 @@ import type { FilterOption } from "~/components/shared/FilterBar.vue";
 import type { SortDirection } from "~/composables/useFilteredPagination";
 import type { ProjectSortKey } from "~/composables/api/useProjectsApi";
 import { formatCredits } from "~/lib/format";
-import { naturalCompare } from "~/lib/utils";
+import { naturalCompare, encodeMultiValue, decodeMultiValue } from "~/lib/utils";
 import { SDG_LIST, getLocalizedSDGName } from "~/lib/sdgs";
 import { SECTOR_I18N_KEYS } from "~/types/enums";
 import { generateProjectVc } from "~/lib/mock-vc";
@@ -28,7 +28,7 @@ import {
   buildProjectCsvRows,
   hederaTimestamp,
 } from "~/lib/csv-export";
-import { mapApiProject } from "~/composables/useProjects";
+import { mapApiProject, normalizeCountryName } from "~/composables/useProjects";
 import type { SavedSearchCriteria } from "~/composables/useSavedSearches";
 import SavedSearchesRow from "~/components/saved-search/SavedSearchesRow.vue";
 
@@ -181,7 +181,16 @@ const apiFilters = computed<Record<string, any>>(() => {
   const f: Record<string, any> = {};
   if (a.registry) f.registry = a.registry;
   if (a.instanceTopicId) f.instanceTopicId = a.instanceTopicId;
-  if (a.country) f.country = a.country;
+  if (a.country) {
+    // Filter options are grouped by normalized name (e.g. "MEX" and "Mexico"
+    // both show as one "Mexico" option), but the server still matches raw
+    // stored values, so expand each selected name back into every raw variant
+    // it was grouped from before sending the filter.
+    const rawValues = decodeMultiValue(a.country).flatMap(
+      (name) => countryGroups.value.get(name) ?? [name],
+    );
+    f.country = encodeMultiValue(rawValues);
+  }
   if (a.vintage) f.vintageRange = a.vintage;
   if (a.sector) f.sector = a.sector;
   if (a.sectoralScope) f.sectoralScope = a.sectoralScope;
@@ -322,8 +331,21 @@ function applySavedSearch(criteria: SavedSearchCriteria) {
 const { isAuthenticated } = useAuth();
 const savedSearchesRef = ref<InstanceType<typeof SavedSearchesRow> | null>(null);
 
+// Raw stored country values grouped by normalized display name, so "MEX" and
+// "Mexico" collapse into a single "Mexico" filter option instead of two.
+const countryGroups = computed(() => {
+  const groups = new Map<string, string[]>();
+  for (const raw of filterOptions.value.countries) {
+    const name = normalizeCountryName(raw) || raw;
+    const variants = groups.get(name);
+    if (variants) variants.push(raw);
+    else groups.set(name, [raw]);
+  }
+  return groups;
+});
+
 const countryFilterOptions = computed(() =>
-  [...filterOptions.value.countries].sort(naturalCompare),
+  [...countryGroups.value.keys()].sort(naturalCompare),
 );
 
 const filters = computed<FilterOption[]>(() => [

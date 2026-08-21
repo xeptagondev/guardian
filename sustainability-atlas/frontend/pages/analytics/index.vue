@@ -6,13 +6,14 @@ import {
     CheckCircle2, AlertCircle,
 } from 'lucide-vue-next';
 import { formatCredits } from '~/lib/format';
-import { naturalCompare } from '~/lib/utils';
+import { naturalCompare, isValidCountryName } from '~/lib/utils';
 import { niceAxis } from '~/lib/chart-scale';
 import { allocateDonutColors } from '~/lib/chart-colors';
 import { SDG_LIST, getLocalizedSDGName } from '~/lib/sdgs';
 import { LIFECYCLE_STAGES as CANONICAL_LIFECYCLE_STAGES } from '~/lib/lifecycle';
 import { SECTOR_I18N_KEYS } from '~/types/enums';
 import type { LabelCount } from '~/types/dashboard';
+import { COUNTRY_ALPHA3, ALPHA3_TO_NAME as CODE_TO_COUNTRY } from '~/composables/useProjects';
 
 const { t } = useI18n();
 // Aggregates come from the server-side dashboard summary rather than
@@ -177,15 +178,30 @@ const methodologyRows = computed<BinRow[]>(() => toBins(summary.value.methodolog
 const methodologyTop = computed(() => topBins(methodologyRows.value, 'credits', 10));
 
 // ─── Country breakdown ─────────────────────────────────────────────────────
-
-const countryRows = computed<BinRow[]>(() =>
-    toBins(summary.value.countries.map(c => ({
-        label: c.country,
-        projectCount: c.projects,
-        credits: c.credits,
-        methodologies: c.methodologies,
-    }))),
-);
+// Grouped by ISO alpha-3 code rather than raw label — aliases for one country
+// (e.g. "MEX" and "Mexico" stored as different raw strings) must merge into a
+// single bin, mirroring the grouping useDashboard.ts already applies to this
+// same summary.countries data for the Dashboard page's own country table.
+// Raw values that don't resolve to a known code but still look like a place
+// (e.g. a typo'd or unmapped name) are shown as-is, matching the Projects
+// list's country column; only genuinely invalid values (blank, "n/a", URLs,
+// coordinates, GeoJSON type names) fall back to "Unknown".
+const countryRows = computed<BinRow[]>(() => {
+    const map: Record<string, BinRow> = {};
+    for (const row of summary.value.countries) {
+        const raw = row.country ?? '';
+        const code = COUNTRY_ALPHA3[raw] || 'UNK';
+        const label = code !== 'UNK'
+            ? (CODE_TO_COUNTRY[code] || raw || code)
+            : isValidCountryName(raw)
+                ? raw
+                : (t('common.unknown') || 'Unknown');
+        if (!map[label]) map[label] = { label, projects: 0, credits: 0 };
+        map[label].projects += row.projects;
+        map[label].credits += row.credits;
+    }
+    return Object.values(map);
+});
 
 const countryTop = computed(() => topBins(countryRows.value, 'credits', 10));
 
