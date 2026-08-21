@@ -6,6 +6,11 @@ import { encodeMultiValue, decodeMultiValue } from '~/lib/utils';
 
 const { t, locale } = useI18n();
 
+// Mirrors the backend's MAX_MULTI_VALUE_PARTS (src/api/repositories/query-builder.ts).
+// Selecting past this silently 400s server-side and the list renders empty, so
+// it must be enforced here too — as a visible cap, not a silent failure.
+const MAX_MULTISELECT_VALUES = 32;
+
 export interface FilterOption {
     key: string;
     label: string;
@@ -14,6 +19,9 @@ export interface FilterOption {
     searchable?: boolean;
     type?: 'select' | 'daterange' | 'yearrange' | 'numrange';
     emptyLabel?: string;
+    // Set only by callers whose options come from an async source — an
+    // options-less dropdown is otherwise indistinguishable from "no matches".
+    loading?: boolean;
 }
 
 const props = defineProps<{
@@ -134,6 +142,8 @@ function filteredOptions(filter: FilterOption): FilterOption['options'] {
 }
 
 async function toggleDropdown(key: string) {
+    // A loading filter has no options yet — opening it would show an empty panel.
+    if (props.filters?.find(f => f.key === key)?.loading) return;
     if (openDropdown.value === key) {
         openDropdown.value = null;
         return;
@@ -155,6 +165,11 @@ function toggleMultiSelect(key: string, value: string) {
     if (idx >= 0) {
         values.splice(idx, 1);
     } else {
+        // Unchecked options are rendered :disabled once the cap is hit (see
+        // template), so this only guards against a stale click racing a
+        // just-crossed limit — the persistent banner above the list is the
+        // actual explanation shown to the user, not a toast per click.
+        if (values.length >= MAX_MULTISELECT_VALUES) return;
         values.push(value);
     }
     emit('filter', key, values.length > 0 ? encodeMultiValue(values) : 'all');
@@ -164,6 +179,12 @@ function isMultiSelected(key: string, value: string): boolean {
     const current = props.activeFilters[key] || '';
     if (!current || current === 'all') return false;
     return decodeMultiValue(current).includes(value);
+}
+
+function isMultiSelectLimitReached(key: string): boolean {
+    const current = props.activeFilters[key] || '';
+    if (!current || current === 'all') return false;
+    return decodeMultiValue(current).length >= MAX_MULTISELECT_VALUES;
 }
 
 // ── Numeric range helpers ─────────────────────────────────────────────────
@@ -372,14 +393,18 @@ if (import.meta.client) {
         >
             <button
                 class="inline-flex items-center justify-start text-left gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
-                :class="isFilterActive(filter)
-                    ? 'border-primary/30 bg-primary/5 text-primary'
-                    : 'border-input text-muted-foreground'"
+                :class="[
+                    isFilterActive(filter)
+                        ? 'border-primary/30 bg-primary/5 text-primary'
+                        : 'border-input text-muted-foreground',
+                    filter.loading ? 'opacity-60 cursor-not-allowed' : '',
+                ]"
+                :aria-busy="filter.loading || undefined"
                 @click.stop="toggleDropdown(filter.key)"
             >
                 <CalendarRange v-if="filter.type === 'daterange' || filter.type === 'yearrange'" class="h-3 w-3 opacity-60 shrink-0" />
                 <svg v-else-if="filter.type === 'numrange'" class="h-3 w-3 opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6h18M3 12h12M3 18h6" /></svg>
-                {{ getActiveLabel(filter) }}
+                {{ filter.loading ? $t('common.loading') : getActiveLabel(filter) }}
                 <svg class="h-3 w-3 opacity-50 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
@@ -419,6 +444,15 @@ if (import.meta.client) {
                             />
                         </div>
                     </div>
+                    <!-- Persistent notice once the selection cap is hit, so it's clear
+                         why further clicks in the list below do nothing — a toast alone
+                         disappears and leaves no trace once it fades. -->
+                    <div
+                        v-if="isMultiSelectLimitReached(filter.key)"
+                        class="px-2.5 py-1.5 text-[11px] text-amber-600 dark:text-amber-400 border-b border-border bg-amber-500/5"
+                    >
+                        {{ $t('common.multiSelectLimitReached', { max: MAX_MULTISELECT_VALUES }) }}
+                    </div>
                     <div class="p-1 max-h-64 overflow-y-auto overflow-x-hidden">
                         <button
                             class="flex w-full items-center justify-start text-left rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent text-muted-foreground"
@@ -430,8 +464,12 @@ if (import.meta.client) {
                         <button
                             v-for="opt in filteredOptions(filter)"
                             :key="opt.value"
-                            class="flex w-full items-center justify-start text-left gap-2 rounded-sm px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
-                            :class="isMultiSelected(filter.key, opt.value) ? 'font-medium text-foreground' : 'text-muted-foreground'"
+                            :disabled="!isMultiSelected(filter.key, opt.value) && isMultiSelectLimitReached(filter.key)"
+                            class="flex w-full items-center justify-start text-left gap-2 rounded-sm px-2.5 py-1.5 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            :class="[
+                                isMultiSelected(filter.key, opt.value) ? 'font-medium text-foreground' : 'text-muted-foreground',
+                                !isMultiSelectLimitReached(filter.key) || isMultiSelected(filter.key, opt.value) ? 'hover:bg-accent' : '',
+                            ]"
                             @click.stop="toggleMultiSelect(filter.key, opt.value)"
                         >
                             <span

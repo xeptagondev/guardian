@@ -1,3 +1,4 @@
+import { isAbortError } from '~/lib/utils';
 import type { NetworkId } from '~/composables/useNetwork';
 import type { MintSerials, MintTransactions } from '~/types/models';
 
@@ -109,14 +110,22 @@ export const useProjectsApi = (opts: UseProjectsApiOptions) => {
 
     const { data, pending, error, refresh } = useAsyncData<ProjectsResponse>(
         key.value,
-        async () => {
+        // `signal` is Nuxt's own dedupe:'cancel' AbortSignal. Forwarding it to
+        // $fetch tears the superseded request down at the network layer instead
+        // of letting it run to completion for a result Nuxt will discard.
+        async (_nuxtApp, { signal }) => {
             try {
                 const res = await $fetch<ProjectsResponse>(url.value, {
                     baseURL,
                     query: buildQuery(),
+                    signal,
                 });
                 return res ?? emptyResponse(opts.limit.value);
             } catch (err) {
+                // An abort means a newer search superseded this one, not a
+                // failure. Returning emptyResponse here would risk flashing an
+                // empty list; rethrowing lets Nuxt's dedupe drop it silently.
+                if (isAbortError(err)) throw err;
                 console.error('[useProjectsApi] fetch failed:', err);
                 return emptyResponse(opts.limit.value);
             }

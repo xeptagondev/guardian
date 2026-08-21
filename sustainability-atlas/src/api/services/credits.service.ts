@@ -10,6 +10,14 @@ import { CreditRepository, CreditRawDetail, CreditListQuery } from '../repositor
 
 const STATS_CACHE_TTL_SECONDS = 60;
 
+/**
+ * Deliberately shorter than the 60s the registry/methodology listings use: a
+ * credit row is a mint event, and new ones land as fast as the worker ingests
+ * them, so the newest page is the one users watch. 20s bounds how stale that
+ * page can look while still collapsing a burst of keystroke-driven searches.
+ */
+const SEARCH_CACHE_TTL_SECONDS = 20;
+
 // Longer than the other cache TTLs in this file — the underlying Token/MintToken
 // HCS messages are immutable once written. The only thing that can move is the
 // project/methodology attribution joined in via project_mint_link, which shifts
@@ -25,24 +33,57 @@ export class CreditsService {
         private readonly singleFlight: SingleFlightService,
     ) {}
 
+    /**
+     * Cache-aside + single-flight, same shape as findStats: a repeat of the same
+     * search inside the TTL window never reaches the database, and identical
+     * concurrent searches (two tabs, two users, or a debounce-timing race)
+     * collapse onto one round trip instead of one each.
+     */
     async findAll(
         network: string,
         query: CreditQueryDto,
     ): Promise<PaginatedResponse<CreditResponseDto>> {
-        const repo = this.getRepository(network);
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
 
-        const result = await repo.findAll({
-            ...this.toFilters(query),
-            page,
-            limit,
-            sortBy: query.sortBy,
-            sortDir: query.sortDir,
-        });
+        const cacheKey = this.searchCacheKey(network, query);
+        const cached = await this.redis.getJson<PaginatedResponse<CreditResponseDto>>(cacheKey);
+        if (cached) return cached;
 
-        const data = result.rows.map(row => CreditResponseDto.fromRow(row, network));
-        return new PaginatedResponse(data, result.total, page, limit);
+        return this.singleFlight.run(cacheKey, async () => {
+            // Re-check: another request may have populated the cache while this
+            // one was waiting to be scheduled onto the event loop.
+            const cachedAgain = await this.redis.getJson<PaginatedResponse<CreditResponseDto>>(cacheKey);
+            if (cachedAgain) return cachedAgain;
+
+            const repo = this.getRepository(network);
+            const result = await repo.findAll({
+                ...this.toFilters(query),
+                page,
+                limit,
+                sortBy: query.sortBy,
+                sortDir: query.sortDir,
+            });
+
+            const data = result.rows.map(row => CreditResponseDto.fromRow(row, network));
+            const response = new PaginatedResponse(data, result.total, page, limit);
+            await this.redis.setJson(cacheKey, response, SEARCH_CACHE_TTL_SECONDS);
+            return response;
+        });
+    }
+
+    /**
+     * Keys are sorted before serializing: the DTO is materialised from the
+     * request's query string, so two requests carrying the same filters in a
+     * different order would otherwise miss each other's cache entry.
+     */
+    private searchCacheKey(network: string, query: CreditQueryDto): string {
+        const normalized = Object.fromEntries(
+            Object.entries(query as Record<string, unknown>)
+                .filter(([, value]) => value !== undefined)
+                .sort(([a], [b]) => a.localeCompare(b)),
+        );
+        return `credits-search:${network}:${JSON.stringify(normalized)}`;
     }
 
     /**

@@ -58,6 +58,8 @@ interface RawRow {
     // pg returns bigint columns as strings
     total_issued: string | null;
     total_retired: string | null;
+    /** Only present on `findAll`'s rows query, which folds the total in via COUNT(*) OVER(). */
+    total_count?: number;
 }
 
 /**
@@ -163,6 +165,12 @@ const METHODOLOGY_CANDIDATE_CTE = `
             canon.total_retired
         FROM ${MV_METHODOLOGY_STATS_NAME} canon
         JOIN business_view bv ON bv.id = canon.canonical_id
+        -- Logically redundant (canonical_id only ever points at a METHODOLOGY row),
+        -- but the planner can't infer that: without it, it scans every
+        -- business_view row of all four view types and lets the join discard the
+        -- other three. Stating it gives it a pushdown-able qualifier against
+        -- idx_business_view_view_type_created. Planner hint only — no behaviour change.
+        WHERE bv."viewType" = 'METHODOLOGY'
 
         UNION ALL
 
@@ -394,31 +402,26 @@ export class PgMethodologyRepository extends MethodologyRepository {
         const limitParam = builder.nextParam(limit);
         const offsetParam = builder.nextParam(offset);
 
+        // COUNT(*) OVER() is evaluated over the filtered candidate set this query
+        // already builds for ranking/sorting, before LIMIT is applied — so the
+        // total rides back on the rows instead of costing a second,
+        // independently-planned pass over the same CTE.
         const rowsSql = `
             ${METHODOLOGY_CANDIDATE_CTE}
-            SELECT bv.*, ${rankExpr} AS search_rank
+            SELECT bv.*, ${rankExpr} AS search_rank, (COUNT(*) OVER())::int AS total_count
             FROM candidate bv
             WHERE ${whereSql}
             ORDER BY ${orderBy}
             LIMIT ${limitParam} OFFSET ${offsetParam}
         `;
 
-        const countParams = params.slice(0, params.length - 2);
-        const countSql = `
-            ${METHODOLOGY_CANDIDATE_CTE}
-            SELECT COUNT(*)::int AS total
-            FROM candidate bv
-            WHERE ${whereSql}
-        `;
-
-        const [rawRows, countResult]: [RawRow[], Array<{ total: number }>] = await Promise.all([
-            this.dataSource.query(rowsSql, params),
-            this.dataSource.query(countSql, countParams),
-        ]);
+        const rawRows: RawRow[] = await this.dataSource.query(rowsSql, params);
 
         return {
             rows: rawRows.map(row => PgMethodologyRepository.mapRow(row)),
-            total: countResult[0]?.total ?? 0,
+            // Empty page (no matches, or an offset past the end) carries no window
+            // row to read the total off.
+            total: rawRows[0]?.total_count ?? 0,
         };
     }
 

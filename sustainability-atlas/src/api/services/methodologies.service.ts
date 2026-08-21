@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '@shared/redis/redis.service';
+import { SingleFlightService } from '@shared/single-flight/single-flight.service';
 import { promises as fs } from 'fs';
 import { join, resolve } from 'path';
 import CID from 'cids';
@@ -37,6 +38,7 @@ export class MethodologiesService {
         private readonly dataSources: NetworkDataSourceRegistry,
         private readonly ipfsService: IpfsService,
         private readonly redis: RedisService,
+        private readonly singleFlight: SingleFlightService,
     ) {}
 
     /** Distinct methodology names for filter dropdowns. Cached — the set changes only on ingest. */
@@ -55,6 +57,11 @@ export class MethodologiesService {
         catch { return cid; }
     }
 
+    /**
+     * Cache-aside + single-flight. The cache alone still let every request that
+     * arrived during a TTL expiry fire its own copy of the search query; the
+     * single flight collapses those onto one DB round trip.
+     */
     async findAll(
         network: string,
         query: MethodologyQueryDto,
@@ -66,29 +73,36 @@ export class MethodologiesService {
         const cached = await this.redis.getJson<PaginatedResponse<MethodologyResponseDto>>(cacheKey);
         if (cached) return cached;
 
-        const repo = this.getRepository(network);
-        const result = await repo.findAll({
-            page,
-            limit,
-            search: query.search,
-            name: query.name,
-            id: query.id,
-            description: query.description,
-            decodeStatus: query.decodeStatus,
-            registryDid: query.registryDid,
-            registryName: query.registryName,
-            version: query.version,
-            policyTopicId: query.policyTopicId,
-            sortBy: query.sortBy,
-            sortDir: query.sortDir,
-        });
+        return this.singleFlight.run(cacheKey, async () => {
+            // Re-check: another request may have populated the cache while this
+            // one was waiting to be scheduled onto the event loop.
+            const cachedAgain = await this.redis.getJson<PaginatedResponse<MethodologyResponseDto>>(cacheKey);
+            if (cachedAgain) return cachedAgain;
 
-        const data = result.rows.map(row =>
-            MethodologyResponseDto.fromRow(row, network, row.stats),
-        );
-        const response = new PaginatedResponse(data, result.total, page, limit);
-        await this.redis.setJson(cacheKey, response, FIND_ALL_CACHE_TTL_SECONDS);
-        return response;
+            const repo = this.getRepository(network);
+            const result = await repo.findAll({
+                page,
+                limit,
+                search: query.search,
+                name: query.name,
+                id: query.id,
+                description: query.description,
+                decodeStatus: query.decodeStatus,
+                registryDid: query.registryDid,
+                registryName: query.registryName,
+                version: query.version,
+                policyTopicId: query.policyTopicId,
+                sortBy: query.sortBy,
+                sortDir: query.sortDir,
+            });
+
+            const data = result.rows.map(row =>
+                MethodologyResponseDto.fromRow(row, network, row.stats),
+            );
+            const response = new PaginatedResponse(data, result.total, page, limit);
+            await this.redis.setJson(cacheKey, response, FIND_ALL_CACHE_TTL_SECONDS);
+            return response;
+        });
     }
 
     /**

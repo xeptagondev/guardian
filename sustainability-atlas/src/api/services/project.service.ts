@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { RedisService } from '@shared/redis/redis.service';
+import { SingleFlightService } from '@shared/single-flight/single-flight.service';
 import {
     ProjectQueryDto,
     ProjectResponseDto,
@@ -29,12 +30,32 @@ const FIND_BY_ID_CACHE_TTL_SECONDS = 30;
 // reuse the prior total/summary instead of re-running the search predicate.
 const COUNT_SUMMARY_CACHE_TTL_SECONDS = 20;
 
+// Long TTL — filter facet values are distinct-value lists that only change when
+// ingest introduces a genuinely new country/registry/methodology, never per
+// request, and this endpoint is not MV-backed so there is no MV refresh cadence
+// to stay aligned with. A new value surfacing minutes late is harmless.
+const FILTER_OPTIONS_CACHE_TTL_SECONDS = 300;
+
+// Soft TTL: past this the cached value is still served, but a background
+// refresh is kicked off. Recomputing costs seconds (the methodology facet scans
+// the whole METHODOLOGY population), so no request should ever block on it once
+// any value exists.
+const FILTER_OPTIONS_STALE_AFTER_SECONDS = 60;
+
+interface CachedFilterOptions {
+    value: ProjectFilterOptionsDto;
+    computedAt: number;
+}
+
 @Injectable()
 export class ProjectsService {
+    private readonly logger = new Logger(ProjectsService.name);
+
     constructor(
         private readonly dataSources: NetworkDataSourceRegistry,
         private readonly mappingReprocessService: MappingReprocessService,
         private readonly redis: RedisService,
+        private readonly singleFlight: SingleFlightService,
     ) {}
 
     async findAll(
@@ -111,9 +132,52 @@ export class ProjectsService {
             `:${query.expectedIssuanceYearRange ?? ''}:${query.isPipeline ?? ''}`;
     }
 
+    /**
+     * Cache-aside + single-flight + stale-while-revalidate. The underlying
+     * facet queries scan the whole METHODOLOGY population and cost seconds cold,
+     * so a plain cache-aside would still make whichever request lands on the TTL
+     * expiry pay that in full; serving the stale value and refreshing behind it
+     * keeps the live query off the request path entirely after the first miss.
+     */
     async getFilterOptions(network: string): Promise<ProjectFilterOptionsDto> {
+        const cacheKey = `project-filter-options:${network}`;
+        const cached = await this.redis.getJson<CachedFilterOptions>(cacheKey);
+
+        if (cached) {
+            if (Date.now() - cached.computedAt > FILTER_OPTIONS_STALE_AFTER_SECONDS * 1000) {
+                void this.singleFlight
+                    .run(cacheKey, () => this.computeAndCacheFilterOptions(network, cacheKey))
+                    .catch(err => {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        this.logger.warn(`Background filter-options refresh failed for ${network}: ${msg}`);
+                    });
+            }
+            return cached.value;
+        }
+
+        // No value to serve — this caller has to wait for the computation.
+        return this.singleFlight.run(cacheKey, async () => {
+            // Re-check: another request may have populated the cache while
+            // this one was waiting to be scheduled onto the event loop.
+            const cachedAgain = await this.redis.getJson<CachedFilterOptions>(cacheKey);
+            if (cachedAgain) return cachedAgain.value;
+
+            return this.computeAndCacheFilterOptions(network, cacheKey);
+        });
+    }
+
+    private async computeAndCacheFilterOptions(
+        network: string,
+        cacheKey: string,
+    ): Promise<ProjectFilterOptionsDto> {
         const repo = this.getRepository(network);
-        return repo.getFilterOptions();
+        const result = await repo.getFilterOptions();
+        await this.redis.setJson(
+            cacheKey,
+            { value: result, computedAt: Date.now() },
+            FILTER_OPTIONS_CACHE_TTL_SECONDS,
+        );
+        return result;
     }
 
     /**

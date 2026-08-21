@@ -11,7 +11,6 @@ import {
   Loader2,
   Save,
 } from "lucide-vue-next";
-import { useDebounceFn } from "@vueuse/core";
 import type { FilterOption } from "~/components/shared/FilterBar.vue";
 import type { SortDirection } from "~/composables/useFilteredPagination";
 import type { ProjectSortKey } from "~/composables/api/useProjectsApi";
@@ -83,10 +82,10 @@ const currentPage = ref(
 const pageSize = ref(10);
 
 const searchQuery = ref(typeof route.query.q === "string" ? route.query.q : "");
+// FilterBar already debounces its own update:modelValue, so searchQuery only
+// ever changes at that cadence — debouncing again here would stack a second
+// delay on top of it before apiSearch (and therefore the query) changes.
 const apiSearch = ref(searchQuery.value);
-const debouncedSetSearch = useDebounceFn((val: string) => {
-  apiSearch.value = val;
-}, 300);
 
 function initialFiltersFromQuery(): Record<string, string> {
   const reserved = new Set(["q", "page", "sort", "dir", "network", "registryDid", "methodologyId"]);
@@ -125,7 +124,7 @@ function syncToUrl() {
 }
 
 watch(searchQuery, (val) => {
-  debouncedSetSearch(val);
+  apiSearch.value = val;
   currentPage.value = 1;
   syncToUrl();
 });
@@ -206,7 +205,8 @@ const { data, pending } = useProjectsApi({
   filters: apiFilters,
 });
 
-const { filterOptions } = useProjectFilterOptions(network);
+// Renamed — `pending` above is the project list's own fetch state.
+const { filterOptions, pending: filterOptionsPending } = useProjectFilterOptions(network);
 
 const meta = computed(() =>
   data.value?.meta ?? { page: 1, limit: pageSize.value, total: 0, totalPages: 1 },
@@ -332,6 +332,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.registry"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.registries.map((r) => ({
       value: r,
       label: r,
@@ -342,6 +343,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.methodology"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.methodologies
       .map((m) => ({
         value: m.topicId,
@@ -354,6 +356,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.country"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: countryFilterOptions.value.map((c) => ({ value: c, label: c })),
   },
   {
@@ -389,12 +392,14 @@ const filters = computed<FilterOption[]>(() => [
     key: "sector",
     label: t("projects.filters.sector"),
     multiSelect: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.sectors.map((s) => ({ value: s, label: translateSector(s) })),
   },
   {
     key: "sectoralScope",
     label: t("projects.filters.sectoralScope"),
     multiSelect: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.sectoralScopes.map((s) => ({
       value: s,
       label: s,
@@ -405,6 +410,7 @@ const filters = computed<FilterOption[]>(() => [
     label: t("projects.filters.developer"),
     multiSelect: true,
     searchable: true,
+    loading: filterOptionsPending.value,
     options: filterOptions.value.developers.map((d) => ({
       value: d,
       label: d,
