@@ -23,7 +23,6 @@ export interface CreditListQuery {
 /** Totals over the whole filtered issuance set, independent of the page being viewed. */
 export interface CreditStats {
     totalSupply: number;
-    totalRetired: number;
     uniqueRegistries: number;
     uniqueProjects: number;
 }

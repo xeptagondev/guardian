@@ -292,7 +292,6 @@ export class PgCreditRepository extends CreditRepository {
         const sql = `
             SELECT
                 COALESCE(SUM(${SUPPLY_EXPR}), 0)::numeric        AS total_supply,
-                COALESCE(SUM(${RETIRED_EXPR}), 0)::numeric       AS total_retired,
                 COUNT(DISTINCT reg.registry_name)::int           AS unique_registries,
                 COUNT(DISTINCT proj.project_id)::int             AS unique_projects
             FROM ${buildJoins({
@@ -306,12 +305,11 @@ export class PgCreditRepository extends CreditRepository {
             WHERE ${builder.getWhereClause()}
         `;
 
-        const rows: Array<{ total_supply: string; total_retired: string; unique_registries: number; unique_projects: number }> =
+        const rows: Array<{ total_supply: string; unique_registries: number; unique_projects: number }> =
             await this.dataSource.query(sql, builder.getParams());
 
         return {
             totalSupply: parseFloat(rows[0]?.total_supply ?? '0') || 0,
-            totalRetired: parseFloat(rows[0]?.total_retired ?? '0') || 0,
             uniqueRegistries: rows[0]?.unique_registries ?? 0,
             uniqueProjects: rows[0]?.unique_projects ?? 0,
         };
@@ -350,7 +348,7 @@ export class PgCreditRepository extends CreditRepository {
                 tc.type                                                                         AS raw_type,
                 NULL::text                                                                      AS options_token_type,
                 ${SUPPLY_EXPR}                                                                  AS total_supply,
-                ${RETIRED_EXPR}::text                                                           AS retired_tokens,
+                ${RETIRED_EXPR}::numeric                                                        AS retired_tokens,
                 COALESCE(proj.registry_did, cred.registry_did)                                  AS "registryDid",
                 reg.registry_name,
                 ${MINT_DATE_EXPR}                                                               AS mint_date,
@@ -662,12 +660,12 @@ export class PgCreditRepository extends CreditRepository {
              LEFT JOIN LATERAL (
                  SELECT SUM(pml2.serial_retired_count)::numeric AS serial_retired_count
                  FROM project_mint_link pml2
-                 WHERE pml2.token_id = bv."businessData"->>'tokenId'
+                 WHERE pml2.token_id = $1
              ) pml_agg ON true
              LEFT JOIN LATERAL (
                  SELECT (SUM(tre.amount) / (10::numeric ^ COALESCE(tc.decimals, 0)))::numeric AS retired_amount
                  FROM token_retire_event tre
-                 WHERE tre.token_id = bv."businessData"->>'tokenId'
+                 WHERE tre.token_id = $1
                    AND tre.amount IS NOT NULL
              ) ft_ret ON tc.type = 'FUNGIBLE_COMMON'
              LEFT JOIN ${MV_REGISTRY_STATS_NAME} reg

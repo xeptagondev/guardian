@@ -75,9 +75,6 @@ export class CreditStatsDto {
     @ApiProperty({ description: 'Sum of minted amounts across the filtered set' })
     totalSupply: number;
 
-    @ApiProperty({ description: 'Sum of retired amounts across the filtered set' })
-    totalRetired: number;
-
     @ApiProperty({ description: 'Distinct registries in the filtered set' })
     uniqueRegistries: number;
 

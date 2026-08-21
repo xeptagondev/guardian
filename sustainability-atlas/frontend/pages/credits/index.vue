@@ -534,8 +534,6 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                 <span class="text-muted-foreground">&middot;</span>
                 <span class="text-muted-foreground">{{ $t('credits.totalSupply') }} <strong class="text-foreground">{{ formatCredits(summaryStats.totalSupply) }}</strong></span>
                 <span class="text-muted-foreground">&middot;</span>
-                <span class="text-muted-foreground">{{ $t('credits.totalRetired') }} <strong class="text-foreground">{{ formatCredits(summaryStats.totalRetired) }}</strong></span>
-                <span class="text-muted-foreground">&middot;</span>
                 <span class="text-muted-foreground">{{ $t('credits.registries') }} <strong class="text-foreground">{{ summaryStats.uniqueRegistries }}</strong></span>
                 <span class="text-muted-foreground">&middot;</span>
                 <span class="text-muted-foreground">{{ $t('credits.projects') }} <strong class="text-foreground">{{ summaryStats.uniqueProjects }}</strong></span>

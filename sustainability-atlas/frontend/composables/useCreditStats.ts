@@ -1,11 +1,10 @@
 export interface CreditStats {
     totalSupply: number;
-    totalRetired: number;
     uniqueRegistries: number;
     uniqueProjects: number;
 }
 
-const EMPTY: CreditStats = { totalSupply: 0, totalRetired: 0, uniqueRegistries: 0, uniqueProjects: 0 };
+const EMPTY: CreditStats = { totalSupply: 0, uniqueRegistries: 0, uniqueProjects: 0 };
 
 /**
  * Totals across the whole filtered issuance set, computed by the API.
