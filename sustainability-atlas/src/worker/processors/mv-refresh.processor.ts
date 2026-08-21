@@ -138,21 +138,52 @@ export class MvRefreshProcessor extends WorkerHost implements OnModuleInit {
     async process(job: Job): Promise<void> {
         this.logger.log('Refreshing materialized views...');
 
-        const results: Record<string, boolean> = {};
+        const results: Record<string, 'success' | 'failed' | 'skipped'> = {};
 
         for (const mv of MATERIALIZED_VIEWS) {
+            // Per-view advisory lock: the queue's concurrency only serializes
+            // within one process, so a second worker (or an autoscaled
+            // concurrency bump) can start a refresh while the previous tick's
+            // is still running. Overlapping REFRESH CONCURRENTLY transactions
+            // hold back the vacuum horizon and bloat the view — one grew to
+            // 412MB for ~20k rows. Held on a dedicated connection because the
+            // lock belongs to the session that took it; releasing from a
+            // different pooled connection would leak it and wedge the view.
+            const runner = this.dataSource.createQueryRunner();
+            await runner.connect();
+            let locked = false;
             try {
+                const [lock]: Array<{ locked: boolean }> = await runner.query(
+                    `SELECT pg_try_advisory_lock(hashtext('se:mv-refresh:' || $1)) AS locked`,
+                    [mv.name],
+                );
+                locked = lock?.locked ?? false;
+                if (!locked) {
+                    results[mv.name] = 'skipped';
+                    this.logger.log(
+                        `Materialized view ${mv.name} is already being refreshed elsewhere — skipping`,
+                    );
+                    continue;
+                }
+
                 // Use CONCURRENTLY to avoid blocking readers.
                 // Requires a unique index (created in onModuleInit).
-                await this.dataSource.query(
+                await runner.query(
                     `REFRESH MATERIALIZED VIEW CONCURRENTLY ${mv.name}`,
                 );
-                results[mv.name] = true;
+                results[mv.name] = 'success';
                 this.logger.debug(`Refreshed materialized view: ${mv.name}`);
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
-                results[mv.name] = false;
+                results[mv.name] = 'failed';
                 this.logger.error(`Failed to refresh materialized view ${mv.name}: ${message}`);
+            } finally {
+                if (locked) {
+                    await runner
+                        .query(`SELECT pg_advisory_unlock(hashtext('se:mv-refresh:' || $1))`, [mv.name])
+                        .catch(() => {});
+                }
+                await runner.release();
             }
         }
 
@@ -162,9 +193,11 @@ export class MvRefreshProcessor extends WorkerHost implements OnModuleInit {
             timestamp: new Date().toISOString(),
         }));
 
-        const successCount = Object.values(results).filter(Boolean).length;
+        const outcomes = Object.values(results);
+        const successCount = outcomes.filter((r) => r === 'success').length;
+        const skippedCount = outcomes.filter((r) => r === 'skipped').length;
         this.logger.log(
-            `Materialized views refresh complete: ${successCount}/${MATERIALIZED_VIEWS.length} succeeded`,
+            `Materialized views refresh complete: ${successCount}/${MATERIALIZED_VIEWS.length} succeeded (${skippedCount} skipped)`,
         );
     }
 

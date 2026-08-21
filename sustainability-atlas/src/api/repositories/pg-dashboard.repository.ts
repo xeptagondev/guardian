@@ -278,8 +278,10 @@ export class PgDashboardRepository {
     async getGlobalDashboardStats(): Promise<GlobalDashboardStatsRow> {
         const sql = `
             SELECT
-                COALESCE(ARRAY_AGG(DISTINCT developer) FILTER (WHERE developer <> ''), '{}')       AS developers,
-                COALESCE(ARRAY_AGG(DISTINCT registry_name) FILTER (WHERE registry_name <> ''), '{}') AS registries,
+                -- FILTER-ing out every row leaves ARRAY_AGG NULL rather than {} —
+                -- COALESCE keeps this an empty array like every other caller expects.
+                COALESCE(ARRAY_AGG(DISTINCT developer) FILTER (WHERE developer <> ''), ARRAY[]::text[])       AS developers,
+                COALESCE(ARRAY_AGG(DISTINCT registry_name) FILTER (WHERE registry_name <> ''), ARRAY[]::text[]) AS registries,
                 (
                     -- mv_registry_stats is already one row per registryDid (canonical),
                     -- so this reads the count directly instead of deduplicating the raw

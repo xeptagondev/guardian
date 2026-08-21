@@ -282,6 +282,7 @@
         "clearAll": "Limpiar todo",
         "clear": "Limpiar",
         "clearSelection": "Limpiar selección",
+        "multiSelectLimitReached": "Límite alcanzado ({max} seleccionados)",
         "undo": "Deshacer",
         "loading": "Cargando...",
         "noResults": "Sin resultados",
