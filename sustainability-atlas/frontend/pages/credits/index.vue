@@ -492,7 +492,15 @@ function rowTarget(c: { tokenId: string; projectId?: string | null; mintConsensu
                         type="checkbox"
                         class="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
                         :checked="showRetiredOnly"
-                        @change="(e) => { showRetiredOnly = (e.target as HTMLInputElement).checked; currentPage = 1; syncToUrl(); }"
+                        @change="(e) => {
+                            showRetiredOnly = (e.target as HTMLInputElement).checked;
+                            if (!showRetiredOnly && sortKey === 'retiredTokens') {
+                                sortKey = 'mintDate';
+                                sortDir = 'desc';
+                            }
+                            currentPage = 1;
+                            syncToUrl();
+                        }"
                     />
                     {{ $t('credits.filters.showRetiredOnly') }}
                 </label>
