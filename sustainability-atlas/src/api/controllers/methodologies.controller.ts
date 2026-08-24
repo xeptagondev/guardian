@@ -4,6 +4,7 @@ import {
     ApiOperation,
     ApiResponse,
     ApiParam,
+    ApiQuery,
     ApiBody,
     ApiProduces,
     ApiCookieAuth,
@@ -97,7 +98,10 @@ export class MethodologiesController {
             'Returns the worker decode status for the given methodology and, if a project schema ' +
             'has been confirmed, which schema field key was resolved for each project property ' +
             '(title, country, sector, etc.). The frontend uses this to explain why certain ' +
-            'project properties are missing.',
+            'project properties are missing. ' +
+            'By default `availableSchemas[*].fields` is omitted — it can be tens of thousands of ' +
+            'entries for large policies and is only needed by the field-mapping editor and the ' +
+            'no-project-schema fallback view. Pass `includeAllFields=true` to get it.',
     })
     @ApiParam({
         name: 'network',
@@ -105,13 +109,20 @@ export class MethodologiesController {
         description: 'Hedera network',
     })
     @ApiParam({ name: 'id', description: 'Hedera policy topic ID of the methodology' })
+    @ApiQuery({
+        name: 'includeAllFields',
+        required: false,
+        type: Boolean,
+        description: 'Include every schema\'s full field list (large payload; not cached). Default false.',
+    })
     @ApiResponse({ status: 200, type: DecodedMethodologyResponseDto })
     @ApiResponse({ status: 404, description: 'Methodology not found' })
     async findDecoded(
         @Param('network') network: string,
         @Param('id') id: string,
+        @Query('includeAllFields') includeAllFields?: string,
     ): Promise<DecodedMethodologyResponseDto> {
-        const result = await this.methodologiesService.findDecoded(network, id);
+        const result = await this.methodologiesService.findDecoded(network, id, includeAllFields === 'true');
         if (!result) {
             throw new NotFoundException(`Methodology with ID "${id}" not found on ${network}`);
         }

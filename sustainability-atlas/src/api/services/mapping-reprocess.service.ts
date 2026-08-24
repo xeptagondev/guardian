@@ -11,6 +11,8 @@ import { UpdateMappingDto } from '../dto/update-mapping.dto';
 import { DecodedMethodologyResponseDto } from '../dto/decoded-methodology.dto';
 import { MappingAuditEntryDto, MappingAuditQueryDto, PaginatedMappingAuditDto } from '../dto/mapping-audit.dto';
 import { PgPolicySchemaRepository } from '../repositories/pg-policy-schema.repository';
+import { RedisService } from '@shared/redis/redis.service';
+import { decodedCacheKey, decodedFullCacheKey, DECODED_CACHE_TTL_SECONDS } from './methodologies.service';
 import { buildPolicyWorkflowGraph, PolicyWorkflowGraph } from './policy-graph.builder';
 import { bareUuid, buildVcTitleMaps, detectMrvLayout, structureVcData } from '@shared/vc-detail/vc-detail.decoder';
 import type { MrvSchemaLayout, SchemaFieldOrderEntry } from '@shared/vc-detail/vc-detail.decoder';
@@ -67,6 +69,7 @@ export class MappingReprocessService {
         private readonly dataSources: NetworkDataSourceRegistry,
         private readonly queueRegistry: QueueRegistry,
         private readonly systemDataSource: SystemDataSource,
+        private readonly redis: RedisService,
     ) {}
 
     private async audit(
@@ -139,6 +142,17 @@ export class MappingReprocessService {
              WHERE id = $1`,
             [policyId],
         );
+
+        // Decode status flips to 'pending' immediately above, but the actual
+        // re-decode completes later on the worker (which can't proactively
+        // invalidate this API-process cache without new cross-process
+        // plumbing). Clear now so the UI shows "pending" right away instead of
+        // a stale cached "success" for up to the cache's TTL. Both variants —
+        // the re-decode invalidates the schema catalogue too, not just status.
+        await Promise.all([
+            this.redis.del(decodedCacheKey(network, methodologyId)),
+            this.redis.del(decodedFullCacheKey(network, methodologyId)),
+        ]);
 
         // Recover the original message timestamp (and instanceTopicId, straight from
         // the source message rather than the policy row) for the publish-policy
@@ -657,7 +671,22 @@ export class MappingReprocessService {
                 `Methodology "${methodologyId}" disappeared after update on ${network}.`,
             );
         }
-        return DecodedMethodologyResponseDto.fromRow(row);
+        const response = DecodedMethodologyResponseDto.fromRow(row);
+
+        // Proactively refresh the GET .../decoded cache with this fresh (thin)
+        // result instead of just deleting it — this save already paid the same
+        // cost the next GET would, so the next viewer gets the ~ms cache-hit
+        // path immediately rather than waiting out the TTL. The full-fields
+        // cache is only invalidated, not refreshed — resolvedFields/fieldMap
+        // changed but the (expensive-to-rebuild) cross-schema field catalogue
+        // didn't, so recomputing it here would slow down every save to fix a
+        // cost that only matters if the editor is reopened.
+        await Promise.all([
+            this.redis.setJson(decodedCacheKey(network, methodologyId), response, DECODED_CACHE_TTL_SECONDS),
+            this.redis.del(decodedFullCacheKey(network, methodologyId)),
+        ]);
+
+        return response;
     }
 
     /**
