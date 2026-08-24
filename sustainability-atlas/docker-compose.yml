@@ -16,6 +16,12 @@
 #   cp .env.example .env       # configure secrets / overrides
 #   docker compose up -d
 #
+# Companion overlays (see Horizontal Scaling in the README):
+#   docker-compose.roles-testnet.yml   swap testnet to role-partitioned workers
+#   docker-compose.roles-mainnet.yml   same for mainnet
+# Each overlay disables that network's all-in-one worker, which a `--profile`
+# flag on its own cannot do: Compose always starts unprofiled services.
+#
 # All inter-service communication uses Docker DNS (service names). Only the
 # API and frontend ports are exposed to the host. Internal stores (postgres,
 # redict, ipfs) are not exposed by default — uncomment their `ports` blocks
@@ -161,14 +167,16 @@ services:
     #
     # Splits one network's all-in-one worker into four roles, so ingest stops
     # competing with IPFS sockets and JSZip decoding for a single event loop,
-    # and so the ingest tier can be scaled on its own:
+    # and so the ingest tier can be scaled on its own.
     #
-    #   docker compose stop worker-<net>
-    #   docker compose --profile roles-<net> up -d --scale worker-ingest-<net>=3
+    # This REPLACES that network's all-in-one worker, so the matching overlay
+    # file must be included — it is what takes the all-in-one out of the set
+    # Compose starts. A bare `--profile roles-<net> up` would otherwise run
+    # BOTH tiers against the same queues (safe, thanks to leader election and
+    # jobId dedup, but it wastes capacity and doubles the mirror-node rate):
     #
-    # REPLACES that network's all-in-one worker — stop it first, or both consume
-    # the same queues. Running both is safe (leader election and jobId dedup
-    # hold) but wastes capacity and doubles the network's mirror-node rate.
+    #   docker compose -f docker-compose.yml -f docker-compose.roles-testnet.yml \
+    #       --profile roles-testnet up -d --scale worker-ingest-testnet=3
     #
     # Only the ingest role runs the scheduler; it is leader-elected, so replicas
     # are fine. It also deliberately has no container_name, which allows --scale.
@@ -223,51 +231,54 @@ services:
             WORKER_QUEUES: maintenance-*
             SCHEDULER_ENABLED: 'false'
 
-    # --- mainnet: same split, commented out. Uncomment to adopt ---
-    # worker-ingest-mainnet:
-    #     <<: *worker-base
-    #     profiles: ['roles-mainnet']
-    #     environment:
-    #         <<: *worker-env
-    #         HEDERA_NET: mainnet
-    #         WORKER_QUEUES: mirror-node-topics,mirror-node-topics-priority,mirror-node-messages
-    #         SCHEDULER_ENABLED: 'true'
-    #         # Per-replica ceiling — the fleet total is this x replica count.
-    #         WORKER_MAX_CONCURRENCY_FACTOR: '2'
+    # --- mainnet: same split, behind --profile roles-mainnet ---
     #
-    # worker-media-mainnet:
-    #     <<: *worker-base
-    #     container_name: se-worker-media-mainnet
-    #     profiles: ['roles-mainnet']
-    #     environment:
-    #         <<: *worker-env
-    #         HEDERA_NET: mainnet
-    #         # policy-decode blocks the event loop in JSZip and IPFS holds
-    #         # multi-minute sockets; isolating them keeps ingestion responsive.
-    #         WORKER_QUEUES: ipfs-files,policy-decode,project-reparse
-    #         SCHEDULER_ENABLED: 'false'
-    #
-    # worker-tokens-mainnet:
-    #     <<: *worker-base
-    #     container_name: se-worker-tokens-mainnet
-    #     profiles: ['roles-mainnet']
-    #     environment:
-    #         <<: *worker-env
-    #         HEDERA_NET: mainnet
-    #         WORKER_QUEUES: mirror-node-tokens,mirror-node-retirements
-    #         SCHEDULER_ENABLED: 'false'
-    #
-    # worker-maintenance-mainnet:
-    #     <<: *worker-base
-    #     container_name: se-worker-maintenance-mainnet
-    #     profiles: ['roles-mainnet']
-    #     environment:
-    #         <<: *worker-env
-    #         HEDERA_NET: mainnet
-    #         # MV refresh and the business-view rebuild are full-table scans —
-    #         # keeping them off the ingest workers stops them stealing that CPU.
-    #         WORKER_QUEUES: maintenance-*
-    #         SCHEDULER_ENABLED: 'false'
+    # Defined but inert: a profiled service never starts unless its profile is
+    # named, so these cost nothing until you opt in with the overlay above.
+    worker-ingest-mainnet:
+        <<: *worker-base
+        profiles: ['roles-mainnet']
+        environment:
+            <<: *worker-env
+            HEDERA_NET: mainnet
+            WORKER_QUEUES: mirror-node-topics,mirror-node-topics-priority,mirror-node-messages
+            SCHEDULER_ENABLED: 'true'
+            # Per-replica ceiling — the fleet total is this x replica count.
+            WORKER_MAX_CONCURRENCY_FACTOR: '2'
+
+    worker-media-mainnet:
+        <<: *worker-base
+        container_name: se-worker-media-mainnet
+        profiles: ['roles-mainnet']
+        environment:
+            <<: *worker-env
+            HEDERA_NET: mainnet
+            # policy-decode blocks the event loop in JSZip and IPFS holds
+            # multi-minute sockets; isolating them keeps ingestion responsive.
+            WORKER_QUEUES: ipfs-files,policy-decode,project-reparse
+            SCHEDULER_ENABLED: 'false'
+
+    worker-tokens-mainnet:
+        <<: *worker-base
+        container_name: se-worker-tokens-mainnet
+        profiles: ['roles-mainnet']
+        environment:
+            <<: *worker-env
+            HEDERA_NET: mainnet
+            WORKER_QUEUES: mirror-node-tokens,mirror-node-retirements
+            SCHEDULER_ENABLED: 'false'
+
+    worker-maintenance-mainnet:
+        <<: *worker-base
+        container_name: se-worker-maintenance-mainnet
+        profiles: ['roles-mainnet']
+        environment:
+            <<: *worker-env
+            HEDERA_NET: mainnet
+            # MV refresh and the business-view rebuild are full-table scans —
+            # keeping them off the ingest workers stops them stealing that CPU.
+            WORKER_QUEUES: maintenance-*
+            SCHEDULER_ENABLED: 'false'
 
     # ─── Guardian event-sync ────────────────────────────────────────────────
     # Consumes Guardian Application Events Module stream(s) and enqueues targeted
