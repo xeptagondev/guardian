@@ -1704,8 +1704,10 @@
                 "cancel": "Cancel",
                 "addAll": "Add all projects to watchlist",
                 "addAllSuccess": "{count} projects added",
+                "addAllPartial": "{count} projects added ({skipped} skipped — watchlist limit is {limit})",
+                "limitReached": "Watchlist limit reached ({limit} projects max)",
                 "showSelectedOnly": "Show selected only",
-                "footer": "{count} items total · duplicates are prevented"
+                "footerWithLimit": "{count} / {limit} items · duplicates are prevented"
             },
             "widgets": {
                 "title": "Widget Library",

@@ -1702,8 +1702,10 @@
                 "cancel": "Cancelar",
                 "addAll": "Agregar todos los proyectos a la lista de seguimiento",
                 "addAllSuccess": "{count} proyectos agregados",
+                "addAllPartial": "{count} proyectos agregados ({skipped} omitidos — el límite de la lista de seguimiento es {limit})",
+                "limitReached": "Límite de la lista de seguimiento alcanzado (máximo {limit} proyectos)",
                 "showSelectedOnly": "Mostrar solo seleccionados",
-                "footer": "{count} elementos en total · no se permiten duplicados"
+                "footerWithLimit": "{count} / {limit} elementos · no se permiten duplicados"
             },
             "widgets": {
                 "title": "Biblioteca de widgets",
