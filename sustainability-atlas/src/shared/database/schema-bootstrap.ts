@@ -563,6 +563,12 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         WHERE "viewType" = 'PROJECT'
     `);
 
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_business_view_project_policy_topic
+        ON business_view ((("businessData"->>'policyTopicId')))
+        WHERE "viewType" = 'PROJECT'
+    `);
+
     // Backs the Projects list's sector/sectoralScope filters, now that they're
     // real server-side query params instead of client-side-only filtering.
     await dataSource.query(`

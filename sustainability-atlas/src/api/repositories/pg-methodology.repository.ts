@@ -472,6 +472,8 @@ export class PgMethodologyRepository extends MethodologyRepository {
                 s.issuance_count,
                 s.instance_issuance_count,
                 s.schema_count,
+                s.total_issued,
+                s.total_retired,
                 reg.registry_name,
                 (${EFFECTIVE_DECODE_STATUS_LIVE}) AS decode_status,
                 p."sourceCid" AS policy_source_cid,
@@ -604,45 +606,21 @@ export class PgMethodologyRepository extends MethodologyRepository {
             }
         }
 
-        // Aggregate lifecycle stats for NFT tokens: total minted (all serials) and total retired (serials marked
-        // deleted by Mirror Node). Fungible tokens don't have per-serial tracking so their supply is used as-is.
-        const nftTokenIds = issuances
-            .filter(i => i.type === 'NON_FUNGIBLE_UNIQUE')
-            .map(i => i.tokenId)
-            .filter((id): id is string => !!id);
-
-        let totalIssued = 0;
-        let totalRetired = 0;
-
-        if (nftTokenIds.length > 0) {
-            const nftStats: Array<{ tokenId: string; total_minted: string; total_retired: string }> =
-                await this.dataSource.query(
-                    `SELECT
-                        "tokenId",
-                        COUNT(*)::text                              AS total_minted,
-                        COUNT(*) FILTER (WHERE deleted = true)::text AS total_retired
-                     FROM nft_cache
-                     WHERE "tokenId" = ANY($1::varchar[])
-                     GROUP BY "tokenId"`,
-                    [nftTokenIds],
-                );
-
-            for (const s of nftStats) {
-                totalIssued += parseInt(s.total_minted, 10);
-                totalRetired += parseInt(s.total_retired, 10);
-            }
-        }
-
-        // Add fungible token supply to totalIssued (retirement not tracked for fungible)
-        for (const i of issuances) {
-            if (i.type !== 'NON_FUNGIBLE_UNIQUE') {
-                totalIssued += i.supply;
-            }
-        }
-
-        const totalActive = totalIssued - totalRetired;
-
-        return PgMethodologyRepository.mapRow(row, issuances, { totalIssued, totalRetired, totalActive }, issuanceEvents);
+        // Lifecycle totals come straight from mv_methodology_stats, which the
+        // row query above already joins. That view sums mv_project_stats over
+        // this methodology's projects, so the detail page and the list agree by
+        // construction instead of by two implementations happening to match —
+        // the divergence project-stats.mv.ts warns about. mapRow resolves them
+        // from the row, and reports nothing when the view has no row for this
+        // methodology (no mints), rather than inventing a zero.
+        //
+        // This used to be recomputed here from nft_cache: every serial a token
+        // ever had, and every serial Mirror Node marks deleted. At the token
+        // level a direct on-chain mint by whoever holds the supply key is
+        // indistinguishable from a Guardian issuance, so that charged the
+        // methodology with credits that never went through a policy — in both
+        // directions, issued and retired.
+        return PgMethodologyRepository.mapRow(row, issuances, undefined, issuanceEvents);
     }
 
     /** Full filtered, `relatedTopicId`-deduped methodologies dataset for the export engine; batches internally via a LIMIT/OFFSET loop ordered by `sourceTimestamp`. */
