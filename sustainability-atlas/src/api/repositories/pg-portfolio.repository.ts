@@ -75,10 +75,11 @@ export class PgPortfolioRepository {
      * the ledger but carry no date and cannot be placed on a time axis.
      *
      * Counts the same credits as the page's retired total, so the chart and the
-     * stat card agree: every credit the ledger shows destroyed, attributed to a
-     * project by the issuance that minted it, or failing that by a token
-     * belonging to a single project. Fungible credits have no serials and
-     * always take the token route.
+     * stat card agree: only credits provably minted through Guardian. A
+     * non-fungible credit qualifies through the issuance that minted its serial;
+     * a fungible one through its token's RETIRE contract events, and only where
+     * that token belongs to a single project. Serials matching no mint link are
+     * excluded — nothing ties them to a policy.
      *
      * Each credit is dated documented-first, the same precedence the credit
      * lifecycle uses: the retirement contract's timestamp where one exists, and
@@ -104,18 +105,17 @@ export class PgPortfolioRepository {
                 GROUP BY token_id, vp_consensus_timestamp
             ),
             retired_credits AS (
-                -- Backed by the partial index on deleted serials.
+                -- Only serials a Guardian mint event claims. A retired serial
+                -- matching no mint link is not provably an issuance, so it is
+                -- dropped rather than charged to the token's project. Backed by
+                -- the partial index on deleted serials.
                 SELECT n."tokenId" AS token_id, n."serialNumber" AS serial
                 FROM nft_cache n
-                LEFT JOIN mint_project mp
+                JOIN mint_project mp
                     ON mp.token_id = n."tokenId"
                    AND mp.vp_consensus_timestamp = n."metadataTimestamp"
-                LEFT JOIN sole_project_tokens spt ON spt.token_id = n."tokenId"
                 WHERE n.deleted
-                  AND (
-                      mp.project_key = ANY($1::text[])
-                      OR (mp.project_key IS NULL AND spt.token_id IS NOT NULL)
-                  )
+                  AND mp.project_key = ANY($1::text[])
             ),
             -- Both date sets are built once and hash-joined rather than asked
             -- per credit.

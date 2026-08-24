@@ -51,14 +51,16 @@ export const MV_PROJECT_STATS_CREATE_SQL = `
         FROM project_mint_link pml
         GROUP BY pml.project_key
     ),
-    -- Retirement is assembled from the most specific evidence available.
+    -- Retirement is counted only for credits that provably came from a Guardian
+    -- mint. Two kinds of evidence qualify.
     --
-    -- Best case: a retired NFT serial carries the mint VP's timestamp, so it is
-    -- attributed to the exact mint event (and therefore vintage) it came from.
-    -- serial_retired_count holds that per-mint figure, and because each mint
-    -- link belongs to exactly one project it cannot be double-counted the way
-    -- the previous token-level rollup was — that version charged *every* project
-    -- sharing a token with the whole of that token's retirements.
+    -- First: a retired NFT serial whose metadata carries the mint VP's
+    -- timestamp, so it is attributed to the exact mint event (and therefore
+    -- vintage) it came from. serial_retired_count holds that per-mint figure,
+    -- and because each mint link belongs to exactly one project it cannot be
+    -- double-counted the way the previous token-level rollup was — that version
+    -- charged *every* project sharing a token with the whole of that token's
+    -- retirements.
     mint_retired AS (
         SELECT pml.project_key,
                COALESCE(SUM(pml.serial_retired_count), 0)::numeric AS retired
@@ -66,23 +68,11 @@ export const MV_PROJECT_STATS_CREATE_SQL = `
         WHERE pml.serial_retired_count IS NOT NULL
         GROUP BY pml.project_key
     ),
-    -- Retired serials no mint event claims (metadata missing, or its mint VP
-    -- never resolved). Nothing finer than the token exists to key them to.
-    unattributed_nft_retired AS (
-        SELECT n."tokenId" AS token_id, COUNT(*)::numeric AS retired
-        FROM nft_cache n
-        WHERE n.deleted = true
-          AND NOT EXISTS (
-              SELECT 1 FROM project_mint_link p
-              WHERE p.token_id = n."tokenId"
-                AND p.vp_consensus_timestamp = n."metadataTimestamp"
-          )
-        GROUP BY n."tokenId"
-    ),
-    -- Fungible retirement, documented by Guardian's RETIRE contract events.
-    -- Token-level by nature: fungible units are interchangeable, so there is no
-    -- honest way to say which mint event a retired unit came from. Amounts are
-    -- recorded in the token's smallest units, hence the decimals scaling.
+    -- Second: fungible retirement, documented by Guardian's RETIRE contract
+    -- events. Token-level by nature — fungible units are interchangeable, so
+    -- there is no honest way to say which mint event a retired unit came from —
+    -- but the contract event is proof the retirement happened under Guardian.
+    -- Amounts are in the token's smallest units, hence the decimals scaling.
     fungible_retired AS (
         SELECT tre.token_id,
                (SUM(tre.amount) / (10::numeric ^ COALESCE(tc.decimals, 0))) AS retired
@@ -108,14 +98,13 @@ export const MV_PROJECT_STATS_CREATE_SQL = `
         GROUP BY pml.token_id
         HAVING COUNT(DISTINCT pml.project_key) = 1
     ),
-    -- The token-level remainder: retired serials no mint event claims, plus
-    -- documented fungible retirement. Not per-vintage, but real.
+    -- The token-level remainder: documented fungible retirement. Not
+    -- per-vintage, but proven.
     token_level_retired AS (
         SELECT pt.project_key,
-               (COALESCE(SUM(u.retired), 0) + COALESCE(SUM(f.retired), 0))::numeric AS retired
+               COALESCE(SUM(f.retired), 0)::numeric AS retired
         FROM project_tokens pt
         JOIN sole_project_tokens spt ON spt.token_id = pt.token_id
-        LEFT JOIN unattributed_nft_retired u ON u.token_id = pt.token_id
         LEFT JOIN fungible_retired f ON f.token_id = pt.token_id
         GROUP BY pt.project_key
     ),

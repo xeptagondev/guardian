@@ -355,15 +355,16 @@ export class PgDashboardRepository {
      * Dated retirement volume, grouped the same way as {@link getMintAggregations}
      * so the two series can be filtered and bucketed identically.
      *
-     * Credits reach a project two ways, in the same precedence the retired
-     * totals elsewhere use, so the chart and the stat cards agree:
+     * Counts only credits provably minted through Guardian — the same rule
+     * mv_project_stats.total_retired uses, so the chart and the stat cards agree:
      *
-     * 1. By serial, through the issuance that minted it — exact attribution.
-     * 2. Failing that, by token, and only where that token belongs to a single
-     *    project. Serials minted before Guardian recorded the issuance have no
-     *    mint to match; dropping them understated the chart by more than half.
-     *
-     * Fungible credits have no serials at all and always take route (2).
+     * 1. Non-fungible: by serial, through the issuance that minted it. A retired
+     *    serial matching no mint link is dropped; nothing ties it to a policy, so
+     *    it is not provably an issuance rather than a direct on-chain mint.
+     * 2. Fungible: by token, from Guardian's RETIRE contract events, and only
+     *    where that token belongs to a single project. Fungible units are
+     *    interchangeable, so no finer grain exists — but the contract event is
+     *    itself proof the retirement happened under Guardian.
      *
      * Each credit is then dated documented-first, the same precedence the credit
      * lifecycle uses: the retirement contract's timestamp where one exists, and
@@ -405,18 +406,20 @@ export class PgDashboardRepository {
                 GROUP BY token_id, vp_consensus_timestamp
             ),
             retired_credits AS (
-                -- Every credit the ledger shows destroyed, attributed by mint
-                -- first and by sole-project token otherwise. Backed by the
+                -- Credits the ledger shows destroyed AND that a Guardian mint
+                -- event claims. Serials matching no mint link are dropped — they
+                -- are not provably Guardian issuances, and every retirement
+                -- figure in the product is now defined as provably-Guardian only;
+                -- the join is inner for exactly that reason. Backed by the
                 -- partial index on deleted serials — the alternative is a scan
                 -- of every serial ever minted.
                 SELECT n."tokenId" AS token_id,
                        n."serialNumber" AS serial,
-                       COALESCE(mp.project_key, spt.project_key) AS project_key
+                       mp.project_key AS project_key
                 FROM nft_cache n
-                LEFT JOIN mint_project mp
+                JOIN mint_project mp
                     ON mp.token_id = n."tokenId"
                    AND mp.vp_consensus_timestamp = n."metadataTimestamp"
-                LEFT JOIN sole_project_tokens spt ON spt.token_id = n."tokenId"
                 WHERE n.deleted
             ),
             -- Both date sets are built once and hash-joined. Asking per credit

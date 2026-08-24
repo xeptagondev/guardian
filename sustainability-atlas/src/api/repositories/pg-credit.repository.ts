@@ -72,6 +72,14 @@ const TOKEN_ID_EXPR = `(m.documents->'credentialSubject'->0->>'tokenId')`;
  * Rows where pml.* is NULL are unattributed mints — still included so the
  * table is complete regardless of worker attribution state.
  *
+ * `ft_ret` and `ft_tot` are the two halves of the fungible retirement share (see
+ * RETIRED_EXPR): the token's total documented retirement, and the token's total
+ * supply across every one of its MintToken VCs, which is the denominator the
+ * per-issuance share is apportioned against. Both are gated on the token being
+ * fungible, so neither runs for an NFT row. They live here rather than in an
+ * optional join because RETIRED_EXPR is also used by the `retiredOnly` WHERE
+ * clause, which runs against the lean count query built by buildJoins().
+ *
  * Split from the `cred` LATERAL below so the count query can omit that lookup
  * when nothing references it — see buildJoins().
  */
@@ -82,11 +90,24 @@ const MINT_FROM_LEAN = `
     LEFT JOIN token_cache tc
            ON tc."tokenId" = ${TOKEN_ID_EXPR}
     LEFT JOIN LATERAL (
-        SELECT (SUM(tre.amount) / (10::numeric ^ COALESCE(tc.decimals, 0)))::numeric AS retired_amount
+        SELECT (SUM(tre.amount) / (10::numeric ^ COALESCE(tc.decimals, 0)))::numeric AS token_retired
         FROM token_retire_event tre
         WHERE tre.token_id = ${TOKEN_ID_EXPR}
           AND tre.amount IS NOT NULL
     ) ft_ret ON tc.type = 'FUNGIBLE_COMMON'
+    LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(COALESCE(
+            pml2.amount::numeric,
+            (m2.documents->'credentialSubject'->0->>'amount')::numeric
+        )), 0)::numeric AS token_supply
+        FROM message m2
+        LEFT JOIN project_mint_link pml2
+               ON pml2.mint_consensus_timestamp = m2."consensusTimestamp"
+        WHERE m2.type = 'VC-Document'
+          AND m2.documents IS NOT NULL
+          AND (m2.documents->'credentialSubject'->0->>'type') LIKE 'MintToken%'
+          AND (m2.documents->'credentialSubject'->0->>'tokenId') = ${TOKEN_ID_EXPR}
+    ) ft_tot ON tc.type = 'FUNGIBLE_COMMON'
 `;
 
 /** LATERAL: the token's own registryDid, the fallback for mints not attributed to a project. */
