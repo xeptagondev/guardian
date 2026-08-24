@@ -1429,30 +1429,39 @@
         "kpis": {
             "activeSupply": "Active Supply",
             "activeSupplyHint": "Credits in circulation (minted − retired)",
+            "activeSupplyTooltip": "Total Credits still in circulation",
             "retirementRate": "Retirement Rate",
             "retirementRateHint": "Minted credits that have been retired",
+            "retirementRateTooltip": "Share of minted credits that have been permanently retired (Retired ÷ Minted). Higher values indicate credits are being used for offsetting rather than held.",
             "pipelineProjects": "Pipeline Projects",
             "pipelineProjectsHint": "Projects pre-issuance: registered → verified",
+            "pipelineProjectsTooltip": "Projects that have entered the workflow but not yet minted credits (Registered → Verified). Represents future supply.",
             "avgVintageYear": "Avg Vintage Year",
             "avgVintageYearHint": "Lower = older supply, higher = fresher",
+            "avgVintageYearTooltip": "Credit weighted average vintage year of minted supply. Lower = older supply, higher = fresher.",
             "avgCreditingPeriod": "Avg Crediting Period",
             "avgCreditingPeriodHint": "Mean project crediting period length",
+            "avgCreditingPeriodTooltip": "Mean crediting period length, in years, across projects with both a start and end crediting date recorded.",
             "yearsSuffix": "yr"
         },
         "lifecycle": {
             "title": "Project Lifecycle Funnel",
             "subtitle": "Distribution across the Guardian policy workflow stages",
+            "tooltip": "Where projects sit across the Guardian policy workflow.",
             "stageTooltip": "{stage}: {count} projects ({pct}% of total)"
         },
         "vintage": {
             "title": "Vintage Distribution",
             "subtitle": "Minted credits grouped by project vintage year",
+            "tooltip": "Minted credits grouped by vintage year, the year the reduction or removal occurred.",
             "noData": "No vintage data available",
             "vintageTooltip": "{vintage}: {credits} credits across {projects} projects"
         },
         "supplyAge": {
             "title": "Supply Age Profile",
             "subtitle": "Distribution of minted credits by vintage age — fresher vintages are preferred by most corporate buyers",
+            "tooltip": "Minted credits bucketed by vintage age",
+            "itemTooltip": "{age}: {credits} credits ({pct}% of total)",
             "fresh": "≤ 2 years (Fresh)",
             "recent": "3 – 5 years (Recent)",
             "older": "6 – 10 years (Older)",
@@ -1460,38 +1469,58 @@
         },
         "sectors": {
             "topCreditsTitle": "Top Sectors by Minted Credits",
+            "topCreditsTooltip": "Cumulative minted volume by sector.",
+            "topCreditsItemTooltip": "{sector}: {credits} credits across {projects} projects ({pct}% of total)",
             "availableSupplyTitle": "Available Supply by Sector",
             "availableSupplySub": "Active credits (minted − retired)",
+            "availableSupplyTooltip": "Unretired credits remaining in circulation, by sector (minted − retired)",
+            "availableItemTooltip": "{sector}: {credits} available credits across {projects} projects",
             "avgSizeTitle": "Avg Project Size by Sector",
             "avgSizeSub": "Mean minted credits per project — benchmark for scoping new projects",
-            "contributionTitle": "Sector Contribution to Total Supply"
+            "avgSizeTooltip": "Mean minted credits per project in each sector",
+            "avgSizeItemTooltip": "{sector}: {avg} avg credits/project ({credits} total across {projects} projects)",
+            "contributionTitle": "Sector Contribution to Total Supply",
+            "contributionTooltip": "Each sector's percentage share of total minted credits.",
+            "contributionItemTooltip": "{sector}: {credits} credits ({pct}% of total supply across {projects} projects)"
         },
         "countries": {
             "topCreditsTitle": "Top Host Countries by Credits",
+            "topCreditsTooltip": "Countries ranked by cumulative minted credits, with the number of projects hosted in each.",
+            "topCreditsItemTooltip": "{country}: {credits} credits across {projects} projects ({pct}% of total)",
             "projectsCount": "{count} proj",
-            "contributionTitle": "Country Contribution to Supply"
+            "contributionTitle": "Country Contribution to Supply",
+            "contributionTooltip": "Each host country's percentage share of total minted credits.",
+            "contributionItemTooltip": "{country}: {credits} credits ({pct}% of total supply across {projects} projects)"
         },
         "methodologies": {
             "adoptionTitle": "Methodology Adoption",
             "adoptionSub": "Most-used methodologies by credit volume",
+            "adoptionTooltip": "Methodologies ranked by minted credit volume, with the number of projects applying each.",
+            "itemTooltip": "{methodology}: {credits} credits across {projects} projects",
             "projectsCount": "{count}p"
         },
         "sdgs": {
             "cobenefitTitle": "SDG Co-benefit Coverage",
             "cobenefitSub": "Number of projects claiming each UN Sustainable Development Goal",
+            "cobenefitTooltip": "Projects claiming each UN Sustainable Development Goal, with the credit volume attached",
             "alignmentTitle": "SDG Alignment Matrix",
             "alignmentSub": "All 17 Sustainable Development Goals — coverage and credit volume",
+            "alignmentTooltip": "All 17 UN Sustainable Development Goals with contributing projects and mapped credit volume.",
+            "itemTooltip": "SDG {sdg} — {name}: {projects} projects ({credits} credits)",
             "projectsLabel": "Projects",
             "creditsLabel": "Credits",
             "projectsCount": "{count} proj"
         },
         "statusDist": {
             "title": "Status Distribution",
-            "subtitle": "Where projects sit in the policy workflow today"
+            "subtitle": "Where projects sit in the policy workflow today",
+            "tooltip": "Where all projects sit in the policy workflow today."
         },
         "developers": {
             "title": "Top Developer Leaderboard",
             "subtitle": "Ranked by minted credits — multi-country and multi-sector reach",
+            "tooltip": "Developer organizations ranked by cumulative minted credits, with breadth across countries and sectors",
+            "itemTooltip": "{developer}: {credits} credits across {projects} projects in {countries} countries and {sectors} sectors",
             "noData": "No developer data available",
             "columns": {
                 "rank": "Rank",
@@ -1505,17 +1534,25 @@
         "registries": {
             "throughputTitle": "Registry Throughput",
             "throughputSub": "Average minted credits per project, by registry — proxy for project-quality scale",
+            "throughputTooltip": "Average minted credits per project for each registry (credits ÷ projects).",
+            "throughputItemTooltip": "{registry}: {avg} avg credits/project ({credits} total across {projects} projects)",
             "perProj": "/proj",
             "heatmapTitle": "Pipeline Heatmap by Registry",
             "heatmapSub": "Project count per lifecycle stage, top registries",
+            "heatmapTooltip": "Project count at each lifecycle stage, per registry",
+            "heatCellTooltip": "{registry} — {stage}: {count} projects",
             "colRegistry": "Registry",
             "noHeatData": "No registry data",
             "marketShareTitle": "Registry Market Share",
-            "marketShareSub": "Share of total minted credits"
+            "marketShareSub": "Share of total minted credits",
+            "marketShareTooltip": "Each registry's share of total minted credits on the network.",
+            "marketShareItemTooltip": "{registry}: {credits} credits ({pct}% of total, {projects} projects)"
         },
         "vintageConcentration": {
             "title": "Vintage Concentration",
-            "subtitle": "Risk signal: heavy concentration in older vintages may indicate weaker baseline integrity under CCP / ICVCM principles"
+            "subtitle": "Risk signal: heavy concentration in older vintages may indicate weaker baseline integrity under CCP / ICVCM principles",
+            "tooltip": "Risk signal: heavy weighting toward older vintages can indicate weaker baseline integrity under CCP / ICVCM principles.",
+            "itemTooltip": "{age}: {credits} credits ({pct}% of total supply)"
         }
     },
     "vcViewer": {
