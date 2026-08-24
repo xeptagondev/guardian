@@ -102,14 +102,42 @@ for (const [name, code] of Object.entries(COUNTRY_ALPHA3)) {
     if (!(code in ALPHA3_TO_NAME)) ALPHA3_TO_NAME[code] = name;
 }
 
+const COUNTRY_ALPHA3_LOWER: Record<string, string> = {};
+for (const [name, code] of Object.entries(COUNTRY_ALPHA3)) {
+    COUNTRY_ALPHA3_LOWER[name.toLowerCase()] = code;
+}
+
+// Display bucket for a raw project country value that isn't a recognized ISO
+// 3166-1 name/alpha-3 code (a registry-side typo, placeholder text, or leaked
+// geo/file data) — shown instead of the garbage value itself.
+export const OTHER_COUNTRY = 'Other';
+
+// Sentinel the country filter sends to the API to mean "every project whose
+// stored country is non-empty but not a recognized ISO name/alpha-3 code"
+// (the OTHER_COUNTRY bucket) — see PgProjectRepository.applyCountryFilter,
+// which special-cases this exact value since a plain ILIKE can't express it.
+export const OTHER_COUNTRY_FILTER_VALUE = '__other__';
+
+/**
+ * Resolves a raw project country value — a free-text name (any case), a
+ * known alias, or an ISO 3166-1 alpha-3 code (any case) — to its canonical
+ * alpha-3 code. Returns 'UNK' for empty input and for anything unrecognized;
+ * callers that need to tell those two apart check the raw value themselves
+ * (normalizeCountryName below does, returning '' vs. OTHER_COUNTRY).
+ */
+export function resolveCountryCode(raw: string): string {
+    const value = (raw ?? '').trim();
+    if (!value) return 'UNK';
+    if (ALPHA3_TO_NAME[value.toUpperCase()]) return value.toUpperCase();
+    return COUNTRY_ALPHA3_LOWER[value.toLowerCase()] || 'UNK';
+}
+
 export function normalizeCountryName(raw: string): string {
     const value = (raw ?? '').trim();
     if (!value) return '';
-    const asCode = ALPHA3_TO_NAME[value.toUpperCase()];
-    if (asCode) return asCode;
-    const code = COUNTRY_ALPHA3[value];
-    if (code && ALPHA3_TO_NAME[code]) return ALPHA3_TO_NAME[code];
-    return value;
+    const code = resolveCountryCode(value);
+    if (code === 'UNK') return OTHER_COUNTRY;
+    return ALPHA3_TO_NAME[code] || value;
 }
 
 function mapLinkedSchema(s: Record<string, any>): LinkedSchema {
@@ -148,7 +176,7 @@ function parseSdgs(sdgs: unknown): number[] {
 }
 
 export function mapApiProject(raw: Record<string, any>): Project {
-    const countryCode = COUNTRY_ALPHA3[raw.country] || 'UNK';
+    const countryCode = resolveCountryCode(raw.country ?? '');
     return {
         id: raw.sourceTimestamp || raw.id,
         name: raw.name ?? '',

@@ -11,7 +11,7 @@ import type { Credit, VcDocData } from '~/types/models';
 import { exportProject, type ExportFormat } from '~/lib/project-export';
 import { getSDG, getLocalizedSDGName } from '~/lib/sdgs';
 import { useDecodedMethodologyApi } from '~/composables/api/useDecodedMethodologyApi';
-import { COUNTRY_ALPHA3 } from '~/composables/useProjects';
+import { resolveCountryCode } from '~/composables/useProjects';
 import { nominatimReverse, nominatimCountryCenter } from '~/composables/useNominatim';
 
 const { t } = useI18n();
@@ -26,7 +26,7 @@ const geocodedCountry = ref<{ code: string; name: string } | null>(null);
 watch(project, async (p) => {
     geocodedCountry.value = null;
     if (!p || p.countryCode !== 'UNK' || !p.lat || !p.lng) return;
-    geocodedCountry.value = await nominatimReverse(p.lat, p.lng, n => COUNTRY_ALPHA3[n] ?? 'UNK');
+    geocodedCountry.value = await nominatimReverse(p.lat, p.lng, n => resolveCountryCode(n));
 }, { immediate: true });
 
 const INVALID_COUNTRY = new Set([

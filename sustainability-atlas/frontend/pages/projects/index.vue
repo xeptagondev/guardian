@@ -15,7 +15,7 @@ import type { FilterOption } from "~/components/shared/FilterBar.vue";
 import type { SortDirection } from "~/composables/useFilteredPagination";
 import type { ProjectSortKey } from "~/composables/api/useProjectsApi";
 import { formatCredits } from "~/lib/format";
-import { naturalCompare } from "~/lib/utils";
+import { naturalCompare, decodeMultiValue } from "~/lib/utils";
 import { SDG_LIST, getLocalizedSDGName } from "~/lib/sdgs";
 import { SECTOR_I18N_KEYS } from "~/types/enums";
 import { generateProjectVc } from "~/lib/mock-vc";
@@ -28,7 +28,7 @@ import {
   buildProjectCsvRows,
   hederaTimestamp,
 } from "~/lib/csv-export";
-import { mapApiProject } from "~/composables/useProjects";
+import { mapApiProject, resolveCountryCode, normalizeCountryName, ALPHA3_TO_NAME, OTHER_COUNTRY, OTHER_COUNTRY_FILTER_VALUE } from "~/composables/useProjects";
 import type { SavedSearchCriteria } from "~/composables/useSavedSearches";
 import SavedSearchesRow from "~/components/saved-search/SavedSearchesRow.vue";
 
@@ -322,9 +322,31 @@ function applySavedSearch(criteria: SavedSearchCriteria) {
 const { isAuthenticated } = useAuth();
 const savedSearchesRef = ref<InstanceType<typeof SavedSearchesRow> | null>(null);
 
-const countryFilterOptions = computed(() =>
-  [...filterOptions.value.countries].sort(naturalCompare),
-);
+// Raw distinct country values from the API can be several variants of the
+// same place ("MEX", "Mexico", "mexico") — the table already collapses
+// those to one display name (useProjects.ts's resolveCountryCode), so the
+// filter groups them the same way: one option per resolved country, valued
+// by its alpha-3 code rather than any one raw string. PgProjectRepository
+// resolves a selected code back to every raw variant on record server-side,
+// so filtering stays correct regardless of which spelling a project used.
+// Values that aren't a recognized ISO name/alpha-3 code (typos, placeholder
+// text, leaked geo/file data) collapse into one "Other" option instead of
+// listing each raw string; selecting it is resolved server-side against
+// every unrecognized value, not just the ones current at page-load.
+const countryFilterOptions = computed(() => {
+  const byCode = new Map<string, string>();
+  let hasOther = false;
+  for (const c of filterOptions.value.countries) {
+    const code = resolveCountryCode(c);
+    if (code === "UNK") hasOther = true;
+    else if (!byCode.has(code)) byCode.set(code, normalizeCountryName(c));
+  }
+  const options = [...byCode.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => naturalCompare(a.label, b.label));
+  if (hasOther) options.push({ value: OTHER_COUNTRY_FILTER_VALUE, label: OTHER_COUNTRY });
+  return options;
+});
 
 const filters = computed<FilterOption[]>(() => [
   {
@@ -357,7 +379,7 @@ const filters = computed<FilterOption[]>(() => [
     multiSelect: true,
     searchable: true,
     loading: filterOptionsPending.value,
-    options: countryFilterOptions.value.map((c) => ({ value: c, label: c })),
+    options: countryFilterOptions.value,
   },
   {
     key: "vintage",
@@ -438,6 +460,16 @@ function formatFilterValue(value: string): string {
   return from || to || value;
 }
 
+// The country filter's multiSelect values are alpha-3 codes (or
+// OTHER_COUNTRY_FILTER_VALUE for "Other") — resolve each to its display
+// name before joining, so the summary reads "Mexico, Other" instead of
+// leaking "MEX, __other__".
+function formatCountryFilterValue(value: string): string {
+  return decodeMultiValue(value)
+    .map((v) => (v === OTHER_COUNTRY_FILTER_VALUE ? OTHER_COUNTRY : (ALPHA3_TO_NAME[v] ?? v)))
+    .join(", ");
+}
+
 const filterSummary = computed(() => {
   const items: { label: string; value: string }[] = [];
   if (searchQuery.value.trim()) {
@@ -450,7 +482,9 @@ const filterSummary = computed(() => {
       )
       .map((f) => ({
         label: f.label,
-        value: formatFilterValue(activeFilters.value[f.key]),
+        value: f.key === "country"
+          ? formatCountryFilterValue(activeFilters.value[f.key])
+          : formatFilterValue(activeFilters.value[f.key]),
       })),
   );
   return items;

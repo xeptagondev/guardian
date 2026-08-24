@@ -99,7 +99,7 @@ export class ExportQueryDto extends PaginationQueryDto {
     @IsString()
     name?: string;
 
-    @ApiPropertyOptional({ description: 'Projects: filter by country name (partial match)' })
+    @ApiPropertyOptional({ description: 'Projects: filter by country name (partial match). The sentinel "__other__" instead matches every project whose stored country is non-empty but not a recognized ISO 3166-1 name/alpha-3 code.' })
     @IsOptional()
     @IsString()
     country?: string;
