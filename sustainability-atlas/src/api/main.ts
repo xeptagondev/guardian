@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe, INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule, OpenAPIObject } from '@nestjs/swagger';
 import helmet from 'helmet';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import { ApiModule } from './api.module';
 import {
@@ -172,6 +173,22 @@ async function bootstrap() {
         contentSecurityPolicy: false,
         crossOriginEmbedderPolicy: false,
         crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }));
+
+    // gzip response bodies. Some responses (e.g. the methodology decoded-mapping
+    // endpoint) run into multiple MB of JSON; without this they were shipped
+    // uncompressed and dominated by transfer time rather than server processing.
+    // SSE streams (@Sse routes, e.g. /queues/events, /me/notifications/events) are
+    // excluded: compression buffers writes inside a zlib stream until enough data
+    // accumulates to flush, which would delay live events indefinitely since
+    // Nest's SSE implementation never calls the res.flush() this module exposes —
+    // silently defeating the real-time delivery the nginx proxy_buffering:off
+    // config (see README) exists to guarantee at the proxy layer.
+    app.use(compression({
+        filter: (req, res) => {
+            if (res.getHeader('Content-Type') === 'text/event-stream') return false;
+            return compression.filter(req, res);
+        },
     }));
 
     // cookie-parser populates req.cookies so JwtAuthGuard and CsrfGuard can read

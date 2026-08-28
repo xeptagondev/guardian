@@ -196,7 +196,16 @@ export class DecodedMethodologyResponseDto {
     // Static factory
     // ---------------------------------------------------------------------------
 
-    static fromRow(row: DecodedMethodologyRow): DecodedMethodologyResponseDto {
+    /**
+     * @param includeAllFields When false (the default), `availableSchemas[*].fields` is
+     * stripped from the returned DTO before it's handed back — those arrays are the
+     * >99%-of-payload cost of this response (tens of thousands of entries across every
+     * schema in the policy) but are only ever rendered by the admin mapping editor and
+     * the no-project-schema fallback view, not the default read-only "Decoded" tab. The
+     * fields are still computed internally either way — `resolvedFields`/`fieldMap` title
+     * resolution below depends on them — this only controls whether they're serialized.
+     */
+    static fromRow(row: DecodedMethodologyRow, includeAllFields = false): DecodedMethodologyResponseDto {
         const dto = new DecodedMethodologyResponseDto();
         dto.policyTopicId = row.policyTopicId;
         dto.decodeStatus = row.decodeStatus;
@@ -221,11 +230,21 @@ export class DecodedMethodologyResponseDto {
         // authoritative source for user-pickable paths.
         if (Array.isArray(row.schemaFields) && row.schemaFields.length > 0) {
             const schemaByIri = new Map(dto.availableSchemas.map(s => [s.schemaId, s]));
+            // Per-schema Set of existing fieldKeys, seeded up front so the dedup
+            // check below is O(1) instead of re-scanning each schema's (growing)
+            // fields array with .some() on every one of potentially tens of
+            // thousands of schemaFields entries.
+            const existingKeysBySchema = new Map<string, Set<string>>();
+            for (const s of dto.availableSchemas) {
+                existingKeysBySchema.set(s.schemaId, new Set(s.fields.map(f => f.fieldKey)));
+            }
             for (const sf of row.schemaFields) {
                 if (!sf || !sf.path || !sf.schemaIri) continue;
                 const target = schemaByIri.get(sf.schemaIri);
                 if (!target) continue;
-                if (target.fields.some(f => f.fieldKey === sf.path)) continue;
+                const existingKeys = existingKeysBySchema.get(sf.schemaIri)!;
+                if (existingKeys.has(sf.path)) continue;
+                existingKeys.add(sf.path);
                 target.fields.push({
                     fieldKey: sf.path,
                     title: sf.title || sf.path,
@@ -236,9 +255,18 @@ export class DecodedMethodologyResponseDto {
             }
         }
 
+        // Discards the (already-used-for-lookups) heavy per-schema fields arrays
+        // from the response unless the caller explicitly asked for them.
+        const finalize = (): DecodedMethodologyResponseDto => {
+            if (!includeAllFields) {
+                for (const s of dto.availableSchemas) s.fields = [];
+            }
+            return dto;
+        };
+
         if (!row.projectSchemaConfig) {
             dto.projectSchema = null;
-            return dto;
+            return finalize();
         }
 
         const config = row.projectSchemaConfig;
@@ -328,7 +356,7 @@ export class DecodedMethodologyResponseDto {
                 })),
         };
 
-        return dto;
+        return finalize();
     }
 
     /**
