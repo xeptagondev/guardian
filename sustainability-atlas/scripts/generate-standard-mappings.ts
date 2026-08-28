@@ -145,6 +145,9 @@ function parseCdop(csv: string): StandardMap {
     if (!map['ActivityImpactModule.projectScale']) {
         map['ActivityImpactModule.projectScale'] = 'project.project_scale';
     }
+    if (map['ActivityImpactModule.firstYearIssuance'] === 'project.crediting_period_length') {
+        map['ActivityImpactModule.firstYearIssuance'] = 'project.current_crediting_period_duration';
+    }
 
     return map;
 }
