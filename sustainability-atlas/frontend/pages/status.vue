@@ -186,7 +186,7 @@ async function requeueTopic(topicId: string, fromStart: boolean) {
     }
     requeuePending.value[topicId] = true;
     try {
-        await $fetch(
+        await apiFetch(
             `/api/v1/${network.value}/sync-status/requeue-topic`,
             {
                 method: 'POST',
@@ -203,7 +203,7 @@ async function requeueTopic(topicId: string, fromStart: boolean) {
             requeueFromStart.value = false;
         }
     } catch (err: any) {
-        await showToast(t('status.toasts.failedRequeue', { topicId, error: err?.message ?? t('common.unknownError') }), 'error');
+        await showToast(t('status.toasts.failedRequeue', { topicId, error: errMsg(err) }), 'error');
     } finally {
         requeuePending.value[topicId] = false;
     }
@@ -235,13 +235,21 @@ onMounted(() => {
     pollTimer = setInterval(() => {
         refreshQueues();
     }, 30_000);
-    // Guardian-sync data is admin-only — only admins poll it (others would 401).
-    if (isAdmin.value) {
-        guardianSyncTimer = setInterval(() => {
+
+    // Guardian-sync data is admin-only — only admins poll it (others would 401).    
+    watch(isAdmin, (admin) => {
+        if (admin && !guardianSyncTimer) {
             refreshGuardianSync();
             refreshGuardianSyncEvents();
-        }, 10_000);
-    }
+            guardianSyncTimer = setInterval(() => {
+                refreshGuardianSync();
+                refreshGuardianSyncEvents();
+            }, 10_000);
+        } else if (!admin && guardianSyncTimer) {
+            clearInterval(guardianSyncTimer);
+            guardianSyncTimer = null;
+        }
+    }, { immediate: true });
 });
 
 onUnmounted(() => {
@@ -377,6 +385,10 @@ async function showToast(message: string, type: 'success' | 'error' = 'success')
     }
 }
 
+function errMsg(err: any): string {
+    return err?.data?.message ?? err?.message ?? t('common.unknownError');
+}
+
 // ─── Pause / Resume ───────────────────────────────────────────────────────────
 
 const actionPending = ref<Record<string, boolean>>({});
@@ -384,13 +396,15 @@ const actionPending = ref<Record<string, boolean>>({});
 async function pauseQueue(baseName: string) {
     actionPending.value[baseName] = true;
     try {
-        await $fetch(`/api/v1/${network.value}/queues/${baseName}/pause`, {
+        await apiFetch(`/api/v1/${network.value}/queues/${baseName}/pause`, {
             method: 'POST',
             baseURL: import.meta.client ? (config.public.apiBaseUrl as string) || '' : '',
+            credentials: 'include',
+            headers: csrfHeader(),
         });
         await refreshQueues();
     } catch (err: any) {
-        showToast(t('status.toasts.failedPause', { baseName, error: err?.message ?? t('common.unknownError') }), 'error');
+        showToast(t('status.toasts.failedPause', { baseName, error: errMsg(err) }), 'error');
     } finally {
         actionPending.value[baseName] = false;
     }
@@ -399,13 +413,15 @@ async function pauseQueue(baseName: string) {
 async function resumeQueue(baseName: string) {
     actionPending.value[baseName] = true;
     try {
-        await $fetch(`/api/v1/${network.value}/queues/${baseName}/resume`, {
+        await apiFetch(`/api/v1/${network.value}/queues/${baseName}/resume`, {
             method: 'POST',
             baseURL: import.meta.client ? (config.public.apiBaseUrl as string) || '' : '',
+            credentials: 'include',
+            headers: csrfHeader(),
         });
         await refreshQueues();
     } catch (err: any) {
-        showToast(t('status.toasts.failedResume', { baseName, error: err?.message ?? t('common.unknownError') }), 'error');
+        showToast(t('status.toasts.failedResume', { baseName, error: errMsg(err) }), 'error');
     } finally {
         actionPending.value[baseName] = false;
     }
@@ -461,7 +477,7 @@ async function confirmRetryAll() {
     } catch (err: any) {
         retryAllState.value = null;
         showToast(
-            t('status.toasts.retryAllFailed', { baseName, error: err?.message ?? t('common.unknownError') }),
+            t('status.toasts.retryAllFailed', { baseName, error: errMsg(err) }),
             'error',
         );
     }
@@ -731,7 +747,7 @@ async function retryIpfsFailure(cid: string) {
         showToast(t('status.toasts.cidQueuedRetry', { cid: cid.slice(0, 20) }));
         await refreshIpfsFailures();
     } catch (err: any) {
-        showToast(t('status.toasts.retryFailedWithError', { error: err?.message ?? t('common.unknownError') }), 'error');
+        showToast(t('status.toasts.retryFailedWithError', { error: errMsg(err) }), 'error');
     } finally {
         ipfsRetryPending.value[cid] = false;
     }
@@ -756,7 +772,7 @@ async function retryAllIpfsForTopic() {
         showToast(t('status.toasts.topicRetryAllQueued', { topicId: ipfsTopicFilter.value }));
         await refreshIpfsFailures();
     } catch (err: any) {
-        showToast(t('status.toasts.retryAllFailedWithError', { error: err?.message ?? t('common.unknownError') }), 'error');
+        showToast(t('status.toasts.retryAllFailedWithError', { error: errMsg(err) }), 'error');
     } finally {
         ipfsRetryAllTopicPending.value = false;
     }
@@ -791,7 +807,7 @@ async function triggerRedecodeAll() {
         );
         showToast(t('status.toasts.redecodeEnqueued', { enqueued: result.enqueued, total: result.total, skipped: result.skipped }));
     } catch (err: any) {
-        showToast(t('status.toasts.redecodeFailed', { error: err?.message ?? t('common.unknownError') }), 'error');
+        showToast(t('status.toasts.redecodeFailed', { error: errMsg(err) }), 'error');
     } finally {
         redecodeAllPending.value = false;
     }
@@ -811,7 +827,7 @@ async function triggerReparseAll() {
         );
         showToast(t('status.toasts.reparseEnqueued', { enqueued: result.enqueued, succeeded: result.succeeded }));
     } catch (err: any) {
-        showToast(t('status.toasts.reparseFailed', { error: err?.message ?? t('common.unknownError') }), 'error');
+        showToast(t('status.toasts.reparseFailed', { error: errMsg(err) }), 'error');
     } finally {
         reparseAllPending.value = false;
     }

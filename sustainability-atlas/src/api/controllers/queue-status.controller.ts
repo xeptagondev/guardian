@@ -1081,7 +1081,9 @@ export class QueueStatusController {
         summary: 'Manually enqueue a topic for sync',
         description:
             'Upserts the topic into topic_cache (creating the row if missing, ' +
-            'setting hasNext=true) and enqueues a TOPIC_SYNC job. Use this when ' +
+            'setting hasNext=true) and enqueues a job on the TOPIC_SYNC_PRIORITY ' +
+            'lane so it runs ahead of the routine re-poll backlog; re-polling is ' +
+            'handed back to the bulk lane once the topic is caught up. Use this when ' +
             'ONLY_REGISTRY_TOPIC was added after the seed topic was fully crawled, ' +
             'or when you need to manually re-trigger a sync for a stalled topic.',
     })
@@ -1126,20 +1128,21 @@ export class QueueStatusController {
         );
         const fromSeq = currentRows[0]?.messages ?? 0;
 
-        // Enqueue a TOPIC_SYNC job. Remove any stale job at the same watermark
-        // so BullMQ doesn't dedupe and skip.
-        const topicQueue = this.queueRegistry.getQueue(network, BASE_QUEUE_NAMES.TOPIC_SYNC);
+        const topicQueue = this.queueRegistry.getQueue(network, BASE_QUEUE_NAMES.TOPIC_SYNC_PRIORITY);
+        const bulkTopicQueue = this.queueRegistry.getQueue(network, BASE_QUEUE_NAMES.TOPIC_SYNC);
         const jobId = `topic-${topicId}-${fromSeq}`;
-        try {
-            const stale = await topicQueue.getJob(jobId);
-            if (stale) await stale.remove();
-        } catch {
-            // Not present — fine.
+        for (const queue of [topicQueue, bulkTopicQueue]) {
+            try {
+                const stale = await queue.getJob(jobId);
+                if (stale) await stale.remove();
+            } catch {
+                // Not present, or locked by a running worker — fine either way.
+            }
         }
 
         await topicQueue.add(
             'sync',
-            { topicId, fromSequenceNumber: fromSeq, isOrgTopic: false },
+            { topicId, fromSequenceNumber: fromSeq, isOrgTopic: false, oneTimePriority: true },
             { jobId, priority: 1 },
         );
 
