@@ -54,37 +54,31 @@ export class TopicSyncProcessor extends WorkerHost {
 
         this.logger.log(`Syncing topic ${topicId} from seq ${fromSeq}`);
 
-        const { messages } = await this.hederaService.getMessages(topicId, fromSeq);
+        let messages: TopicMessage[];
+        try {
+            ({ messages } = await this.hederaService.getMessages(topicId, fromSeq));
+        } catch (error) {
+            // A mirror-node request failure (rate limit exhausted, timeout, 5xx, ...)
+            // must not be allowed to propagate: this topic's poll chain only
+            // survives because THIS job enqueues its successor, so an unhandled
+            // throw here silently ends the chain — the topic then sits stuck until
+            // the reconciler's next pass (up to RECONCILE_INTERVAL_MS later, and
+            // only for a bounded sample of topics; see rescueDeadTopicChains in
+            // sync-scheduler.service.ts). Reschedule with the same backoff as an
+            // empty page instead, so a failed poll costs a delay, not a dead chain.
+            // HederaService already retries 429s internally — this only fires once
+            // that retry budget is exhausted, or for a non-429 failure.
+            const delay = await this.rescheduleNextPoll(topicId, fromSeq, isOrgTopic, emptyPollStreak);
+            this.logger.warn(
+                `Topic ${topicId} poll failed (${(error as Error).message}) — re-polling in ${delay}ms ` +
+                `(streak=${emptyPollStreak + 1})`,
+            );
+            return;
+        }
 
         if (messages.length === 0) {
-            // No new messages — re-enqueue with a delay, backing off exponentially
-            // the longer the topic stays quiet (capped at maxPollDelay).
-            // Uses timestamp in jobId so each poll creates a fresh job
-            // (BullMQ dedupes completed/stale jobIds).
-            const baseDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
-            const streak = emptyPollStreak + 1;
-            const delay = Math.min(baseDelay * 2 ** Math.min(streak, 10), this.maxPollDelay);
-
-            // Persist the schedule in BOTH modes, so switching to the dispatcher
-            // needs no backfill and switching back loses nothing.
-            await this.recordNextPoll(topicId, delay);
-
-            if (this.pollMode === 'chain') {
-                await this.topicQueue.add('sync', {
-                    topicId,
-                    fromSequenceNumber: fromSeq,
-                    isOrgTopic,
-                    emptyPollStreak: streak,
-                }, {
-                    jobId: `topic-${topicId}-poll-${Date.now()}`,
-                    delay,
-                    // Each poll is a uniquely-named keep-alive job; without these the
-                    // completed/failed sets grow unbounded and eventually OOM Redict.
-                    removeOnComplete: true,
-                    removeOnFail: 1000,
-                });
-            }
-            this.logger.debug(`No new messages for topic ${topicId}, re-polling in ${delay}ms (streak=${streak})`);
+            const delay = await this.rescheduleNextPoll(topicId, fromSeq, isOrgTopic, emptyPollStreak);
+            this.logger.debug(`No new messages for topic ${topicId}, re-polling in ${delay}ms (streak=${emptyPollStreak + 1})`);
             return;
         }
 
@@ -170,6 +164,46 @@ export class TopicSyncProcessor extends WorkerHost {
         this.logger.log(
             `Topic ${topicId}: ${messages.length} messages, maxSeq=${maxSequence}, hasNext=${hasNext}`,
         );
+    }
+
+    /**
+     * Re-enqueues this topic's next poll after either an empty page or a failed
+     * mirror-node request — both resume from the same watermark, since neither
+     * consumed anything, so they share one exponential backoff (capped at
+     * maxPollDelay). Uses a timestamp in jobId so each poll creates a fresh job
+     * (BullMQ dedupes completed/stale jobIds). Returns the delay used, for the
+     * caller's log line.
+     */
+    private async rescheduleNextPoll(
+        topicId: string,
+        fromSeq: number,
+        isOrgTopic: boolean,
+        emptyPollStreak: number,
+    ): Promise<number> {
+        const baseDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
+        const streak = emptyPollStreak + 1;
+        const delay = Math.min(baseDelay * 2 ** Math.min(streak, 10), this.maxPollDelay);
+
+        // Persist the schedule in BOTH modes, so switching to the dispatcher
+        // needs no backfill and switching back loses nothing.
+        await this.recordNextPoll(topicId, delay);
+
+        if (this.pollMode === 'chain') {
+            await this.topicQueue.add('sync', {
+                topicId,
+                fromSequenceNumber: fromSeq,
+                isOrgTopic,
+                emptyPollStreak: streak,
+            }, {
+                jobId: `topic-${topicId}-poll-${Date.now()}`,
+                delay,
+                // Each poll is a uniquely-named keep-alive job; without these the
+                // completed/failed sets grow unbounded and eventually OOM Redict.
+                removeOnComplete: true,
+                removeOnFail: 1000,
+            });
+        }
+        return delay;
     }
 
     /**
