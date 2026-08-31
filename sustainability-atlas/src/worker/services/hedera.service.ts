@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import { envInt } from '@shared/config/bullmq.config';
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // ── Interfaces ───────────────────────────────────────────────────────────
 
@@ -121,12 +126,75 @@ export class HederaService {
     private static readonly REST_API_MAX_LIMIT = 100;
     private static readonly TIMEOUT = 120000;
 
+    /**
+     * Mirror-node 429 retry budget. Configurable because the public testnet
+     * mirror node (the default when HEDERA_MIRROR_NODE_URL is unset) shares a
+     * much tighter, community-wide rate ceiling than a dedicated node — so an
+     * operator may need to raise the attempt count/delay for testnet without
+     * touching mainnet.
+     */
+    private readonly retryMaxAttempts = envInt('MIRROR_NODE_RETRY_MAX_ATTEMPTS', 5);
+    private readonly retryBaseDelayMs = envInt('MIRROR_NODE_RETRY_BASE_DELAY_MS', 1000);
+    private readonly retryMaxDelayMs = envInt('MIRROR_NODE_RETRY_MAX_DELAY_MS', 30000);
+
     constructor(private readonly configService: ConfigService) {
         this.baseUrl = this.configService.get<string>('app.hedera.mirrorNodeUrl')!;
         this.client = axios.create({
             baseURL: this.baseUrl,
             timeout: HederaService.TIMEOUT,
         });
+    }
+
+    /**
+     * GETs through the shared client, retrying only on 429 (mirror-node rate
+     * limit) with capped exponential backoff. Every other error — 4xx, 5xx,
+     * timeout — is rethrown immediately; 429 is the one status where "wait and
+     * try again" is actually the right response, and callers (topic-sync,
+     * token-sync, retire-sync) can otherwise treat this exactly like a plain
+     * `client.get`.
+     *
+     * Honors a `Retry-After` header when the mirror node sends one, since
+     * guessing our own backoff against an unknown shared rate budget (e.g.
+     * Hedera's public mirror nodes) just prolongs the 429s.
+     */
+    private async getWithRetry<T = any>(
+        url: string,
+        config?: { params?: Record<string, string | number> },
+    ): Promise<AxiosResponse<T>> {
+        let attempt = 0;
+        for (;;) {
+            try {
+                return await this.client.get<T>(url, config);
+            } catch (error) {
+                const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+                if (status !== 429 || attempt >= this.retryMaxAttempts) {
+                    throw error;
+                }
+                const retryAfterMs = axios.isAxiosError(error)
+                    ? this.parseRetryAfter(error.response?.headers?.['retry-after'])
+                    : null;
+                const backoffMs = Math.min(
+                    this.retryBaseDelayMs * 2 ** attempt,
+                    this.retryMaxDelayMs,
+                );
+                const delayMs = retryAfterMs ?? backoffMs;
+                attempt++;
+                this.logger.warn(
+                    `Mirror node rate-limited (429) on ${url} — retry ${attempt}/${this.retryMaxAttempts} in ${delayMs}ms`,
+                );
+                await sleep(delayMs);
+            }
+        }
+    }
+
+    /** Parses a `Retry-After` header, which is either delay-seconds or an HTTP-date. */
+    private parseRetryAfter(header: unknown): number | null {
+        if (typeof header !== 'string' || !header) return null;
+        const seconds = Number(header);
+        if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+        const dateMs = Date.parse(header);
+        if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+        return null;
     }
 
     /**
@@ -144,7 +212,7 @@ export class HederaService {
 
         this.logger.debug(`GET ${url} fromSeq=${fromSequenceNumber}`);
 
-        const response = await this.client.get(url, { params });
+        const response = await this.getWithRetry(url, { params });
 
         return {
             messages: response.data.messages || [],
@@ -158,7 +226,7 @@ export class HederaService {
     async getToken(tokenId: string): Promise<TokenInfo> {
         const url = `/api/v1/tokens/${tokenId}`;
         this.logger.debug(`GET ${url}`);
-        const response = await this.client.get(url);
+        const response = await this.getWithRetry(url);
         return response.data;
     }
 
@@ -177,7 +245,7 @@ export class HederaService {
 
         this.logger.debug(`GET ${url} fromSerial=${fromSerial}`);
 
-        const response = await this.client.get(url, { params });
+        const response = await this.getWithRetry(url, { params });
 
         return {
             nfts: response.data.nfts || [],
@@ -217,7 +285,7 @@ export class HederaService {
 
         this.logger.debug(`GET ${url} TOKENMINT treasury=${treasuryAccountId} timestamp=${timestampFilter}`);
 
-        const response = await this.client.get(url, { params });
+        const response = await this.getWithRetry(url, { params });
 
         return {
             transactions: response.data.transactions || [],
@@ -251,7 +319,7 @@ export class HederaService {
 
         this.logger.debug(`GET ${url} CRYPTOTRANSFER account=${accountId} timestamp=${timestampFilter}`);
 
-        const response = await this.client.get(url, { params });
+        const response = await this.getWithRetry(url, { params });
 
         return {
             transactions: response.data.transactions || [],
@@ -272,7 +340,7 @@ export class HederaService {
         const url = `/api/v1/accounts/${evmAddress}`;
         this.logger.debug(`GET ${url}`);
         try {
-            const response = await this.client.get(url);
+            const response = await this.getWithRetry(url);
             const account = response.data?.account;
             return typeof account === 'string' ? account : null;
         } catch (error) {
@@ -307,7 +375,7 @@ export class HederaService {
 
         this.logger.debug(`GET ${url} from=${fromTimestamp ?? 'start'}`);
 
-        const response = await this.client.get(url, { params });
+        const response = await this.getWithRetry(url, { params });
 
         return {
             logs: response.data.logs || [],

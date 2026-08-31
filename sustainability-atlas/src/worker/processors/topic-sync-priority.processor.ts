@@ -57,7 +57,23 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
 
         this.logger.log(`Syncing topic ${topicId} from seq ${fromSeq} (priority lane)`);
 
-        const { messages } = await this.hederaService.getMessages(topicId, fromSeq);
+        let messages: TopicMessage[];
+        try {
+            ({ messages } = await this.hederaService.getMessages(topicId, fromSeq));
+        } catch (error) {
+            // Same rationale as TopicSyncProcessor: this lane carries guardian-sync's
+            // real-time event triggers and the root/registry topic, so letting a
+            // mirror-node failure kill its chain is exactly what breaks "real-time"
+            // sync during a rate-limit event. We don't know here whether the topic
+            // is actually caught up, so — unlike the empty-page case — this never
+            // hands off to the bulk queue; it just retries on the priority lane.
+            const delay = await this.rescheduleNextPoll(topicId, fromSeq, isOrgTopic, emptyPollStreak);
+            this.logger.warn(
+                `Topic ${topicId} poll failed (priority lane) (${(error as Error).message}) — ` +
+                `re-polling in ${delay}ms (streak=${emptyPollStreak + 1})`,
+            );
+            return;
+        }
 
         if (messages.length === 0) {
             // A one-time-priority topic that comes up empty is already caught
@@ -83,24 +99,8 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
                 return;
             }
 
-            const baseDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
-            const streak = emptyPollStreak + 1;
-            const delay = Math.min(baseDelay * 2 ** Math.min(streak, 10), this.maxPollDelay);
-            await this.recordNextPoll(topicId, delay);
-            if (this.pollMode === 'chain') {
-                await this.priorityQueue.add('sync', {
-                    topicId,
-                    fromSequenceNumber: fromSeq,
-                    isOrgTopic,
-                    emptyPollStreak: streak,
-                }, {
-                    jobId: `topic-${topicId}-poll-${Date.now()}`,
-                    delay,
-                    removeOnComplete: true,
-                    removeOnFail: 1000,
-                });
-            }
-            this.logger.debug(`No new messages for topic ${topicId}, re-polling in ${delay}ms (streak=${streak})`);
+            const delay = await this.rescheduleNextPoll(topicId, fromSeq, isOrgTopic, emptyPollStreak);
+            this.logger.debug(`No new messages for topic ${topicId}, re-polling in ${delay}ms (streak=${emptyPollStreak + 1})`);
             return;
         }
 
@@ -171,6 +171,38 @@ export class TopicSyncPriorityProcessor extends WorkerHost {
         this.logger.log(
             `Topic ${topicId} (priority lane): ${messages.length} messages, maxSeq=${maxSequence}, hasNext=${hasNext}`,
         );
+    }
+
+    /**
+     * Re-enqueues this topic's next poll (on the priority lane) after either an
+     * empty page or a failed mirror-node request — see
+     * TopicSyncProcessor.rescheduleNextPoll for the full rationale. Returns the
+     * delay used, for the caller's log line.
+     */
+    private async rescheduleNextPoll(
+        topicId: string,
+        fromSeq: number,
+        isOrgTopic: boolean,
+        emptyPollStreak: number,
+    ): Promise<number> {
+        const baseDelay = isOrgTopic ? this.orgPollDelay : this.pollDelay;
+        const streak = emptyPollStreak + 1;
+        const delay = Math.min(baseDelay * 2 ** Math.min(streak, 10), this.maxPollDelay);
+        await this.recordNextPoll(topicId, delay);
+        if (this.pollMode === 'chain') {
+            await this.priorityQueue.add('sync', {
+                topicId,
+                fromSequenceNumber: fromSeq,
+                isOrgTopic,
+                emptyPollStreak: streak,
+            }, {
+                jobId: `topic-${topicId}-poll-${Date.now()}`,
+                delay,
+                removeOnComplete: true,
+                removeOnFail: 1000,
+            });
+        }
+        return delay;
     }
 
     /**
