@@ -1,4 +1,4 @@
-import { COUNTRY_ALPHA3 } from '~/composables/useProjects';
+import { resolveCountryCode } from '~/composables/useProjects';
 import { nominatimReverse } from '~/composables/useNominatim';
 import type { Project } from '~/types/models';
 
@@ -16,7 +16,7 @@ async function drainQueue() {
     while (queue.length > 0) {
         const item = queue.shift()!;
         if (cache.has(item.id)) continue;
-        const result = await nominatimReverse(item.lat, item.lng, n => COUNTRY_ALPHA3[n] ?? 'UNK');
+        const result = await nominatimReverse(item.lat, item.lng, n => resolveCountryCode(n));
         if (result) {
             cache.set(item.id, result.code);
             nameCache.set(item.id, result.name);

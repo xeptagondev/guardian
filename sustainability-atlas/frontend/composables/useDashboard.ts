@@ -1,7 +1,7 @@
 import type { MapPoint, MapCountry } from '~/types/models';
 import { SectorType } from '~/types/enums';
 import { formatCredits } from '~/lib/format';
-import { ALPHA3_TO_NAME as CODE_TO_COUNTRY, COUNTRY_ALPHA3 } from '~/composables/useProjects';
+import { ALPHA3_TO_NAME as CODE_TO_COUNTRY, OTHER_COUNTRY, resolveCountryCode } from '~/composables/useProjects';
 import { allocateDonutColors } from '~/lib/chart-colors';
 import { useNetworkActivity } from './useNetworkActivity';
 
@@ -45,13 +45,14 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
 
     // Country stats derived from filtered projects.
     //
-    // Projects whose `country` field is empty or unrecognized (anything not in
-    // COUNTRY_ALPHA3) get countryCode='UNK'. Bucketing those by countryCode
-    // collapsed them into a single row whose display name was the FIRST
-    // project's raw country string — e.g. "Israel — 20 projects" even though
-    // only one project genuinely had country=Israel. Show the UNK bucket as
-    // a labelled "Unknown" row instead so the table accounts for every
-    // project; the world map filters this row out separately so unknown
+    // Projects whose `country` field is empty or unrecognized (not a known
+    // ISO 3166-1 name/alpha-3 code — resolveCountryCode handles both, any
+    // case) get countryCode='UNK'. Bucketing those by countryCode collapsed
+    // them into a single row whose display name was the FIRST project's raw
+    // country string — e.g. "Israel — 20 projects" even though only one
+    // project genuinely had country=Israel. Show the UNK bucket as a
+    // labelled "Other" row instead so the table accounts for every project;
+    // the world map filters this row out separately so unknown/unrecognized
     // projects don't paint a country shape.
     const countries = computed(() => {
         const countryMap: Record<string, {
@@ -62,8 +63,8 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
 
         for (const row of summary.value.countries) {
             const rawCountry = row.country ?? '';
-            const code = COUNTRY_ALPHA3[rawCountry] || 'UNK';
-            const name = code === 'UNK' ? 'Unknown' : (CODE_TO_COUNTRY[code] || rawCountry || code);
+            const code = resolveCountryCode(rawCountry);
+            const name = code === 'UNK' ? OTHER_COUNTRY : (CODE_TO_COUNTRY[code] || rawCountry || code);
 
             if (!countryMap[code]) {
                 countryMap[code] = {
@@ -234,7 +235,7 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
 
         // The API groups by the raw stored country string, so fold in every raw
         // value that maps to this ISO code — the same merge `countries` does.
-        const matchesCode = (raw: string | null) => (COUNTRY_ALPHA3[raw ?? ''] || 'UNK') === code;
+        const matchesCode = (raw: string | null) => resolveCountryCode(raw ?? '') === code;
         const totalProjects = countryData.projects;
 
         // Per-bucket counts AND credits. Percentages prefer credit weighting when

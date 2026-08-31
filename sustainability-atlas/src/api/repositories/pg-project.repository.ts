@@ -18,8 +18,9 @@ import {
     MintSerialsResult,
     MintTransactionsResult,
 } from './project.repository';
-import { QueryBuilder } from './query-builder';
+import { QueryBuilder, MAX_MULTI_VALUE_PARTS } from './query-builder';
 import { PROJECT_FIELD_SCHEMA } from './schemas/project.schema';
+import { OTHER_COUNTRY_FILTER_VALUE, RECOGNIZED_COUNTRY_TOKENS, COUNTRY_TOKEN_TO_CODE, CODE_TO_ALIASES } from './schemas/recognized-countries';
 import { collectExternalDataBlockSchemas } from '../services/policy-graph.builder';
 
 type GeoJsonPolygonType = 'Polygon' | 'MultiPolygon';
@@ -146,6 +147,65 @@ export class PgProjectRepository extends ProjectRepository {
         super();
     }
 
+    /**
+     * Builds the `country` filter's WHERE clause. A raw stored country can be
+     * any free-text variant of the same place ("MEX", "Mexico", "mexico"),
+     * so this doesn't do a literal ILIKE per selected value — it resolves
+     * each selected value to a canonical alpha-3 code (via
+     * COUNTRY_TOKEN_TO_CODE, matching frontend/composables/useProjects.ts's
+     * resolveCountryCode) and matches every raw form on record for that code
+     * (CODE_TO_ALIASES), so selecting "Mexico" also catches projects stored
+     * as "MEX". The `__other__` sentinel (see recognized-countries.ts) means
+     * "every project whose country is non-empty but isn't a recognized ISO
+     * name/alpha-3 code" — a NOT-IN-list clause, since ILIKE can't express
+     * it. The filter is multi-select, so selections arrive `|`-joined (same
+     * convention as QueryBuilder's other multi-value filters, e.g.
+     * `__other__|MEX`) and need OR, not AND, semantics — this builds the
+     * full OR'd clause itself (mirroring QueryBuilder's private
+     * decodeMultiValue) and adds it directly, always consuming the value:
+     * returns undefined so the generic per-field ilike filter never also
+     * runs on it.
+     */
+    private applyCountryFilter(builder: QueryBuilder, country: string | undefined): string | undefined {
+        if (!country) return country;
+        const parts = country.split('|').map(p => {
+            try { return decodeURIComponent(p.trim()); } catch { return p.trim(); }
+        }).filter(Boolean);
+        if (parts.length === 0) return country;
+
+        if (parts.length > MAX_MULTI_VALUE_PARTS) {
+            throw new BadRequestException(
+                `Too many multi-value filter parts: received ${parts.length}, maximum allowed is ${MAX_MULTI_VALUE_PARTS}.`,
+            );
+        }
+
+        const clauses: string[] = [];
+        for (const p of parts) {
+            if (p === OTHER_COUNTRY_FILTER_VALUE) {
+                const tokens = builder.nextParam(RECOGNIZED_COUNTRY_TOKENS);
+                clauses.push(
+                    `(NULLIF(TRIM(bv."businessData"->>'country'), '') IS NOT NULL ` +
+                    `AND LOWER(TRIM(bv."businessData"->>'country')) <> ALL(${tokens}::text[]))`,
+                );
+                continue;
+            }
+
+            const code = COUNTRY_TOKEN_TO_CODE[p.toLowerCase()];
+            if (code) {
+                const aliases = builder.nextParam(CODE_TO_ALIASES[code] ?? [p.toLowerCase()]);
+                clauses.push(`LOWER(TRIM(bv."businessData"->>'country')) = ANY(${aliases}::text[])`);
+            } else {
+                // Not a recognized token — a legacy/arbitrary value (e.g. an
+                // old bookmarked link). Fall back to the previous substring
+                // behavior so it still matches something rather than nothing.
+                const param = builder.nextParam(`%${p}%`);
+                clauses.push(`bv."businessData"->>'country' ILIKE ${param}`);
+            }
+        }
+        builder.addClause(`(${clauses.join(' OR ')})`);
+        return undefined;
+    }
+
     async findAll(query: ProjectListQuery): Promise<ProjectListResult> {
         const { page, limit, search, sortBy, sortDir } = query;
         const offset = (page - 1) * limit;
@@ -156,7 +216,7 @@ export class PgProjectRepository extends ProjectRepository {
         // Generic filters: every filterable field defined in the schema is wired automatically.
         builder.addFilters({
             name: query.name,
-            country: query.country,
+            country: this.applyCountryFilter(builder, query.country),
             methodology: query.methodology,
             registry: query.registry,
             registryDid: query.registryDid,
@@ -1319,7 +1379,7 @@ export class PgProjectRepository extends ProjectRepository {
 
         builder.addFilters({
             name: filters.name,
-            country: filters.country,
+            country: this.applyCountryFilter(builder, filters.country),
             methodology: filters.methodology,
             registry: filters.registry,
             developer: filters.developer,

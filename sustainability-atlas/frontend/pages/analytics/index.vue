@@ -10,6 +10,7 @@ import { naturalCompare } from '~/lib/utils';
 import { niceAxis } from '~/lib/chart-scale';
 import { allocateDonutColors } from '~/lib/chart-colors';
 import { SDG_LIST, getLocalizedSDGName } from '~/lib/sdgs';
+import { normalizeCountryName } from '~/composables/useProjects';
 import { LIFECYCLE_STAGES as CANONICAL_LIFECYCLE_STAGES } from '~/lib/lifecycle';
 import { SECTOR_I18N_KEYS } from '~/types/enums';
 import type { LabelCount } from '~/types/dashboard';
@@ -178,9 +179,15 @@ const methodologyTop = computed(() => topBins(methodologyRows.value, 'credits', 
 
 // ─── Country breakdown ─────────────────────────────────────────────────────
 
+// Raw country strings from the API aren't ISO-normalized (a registry might
+// store "MEX", "Mexico", or "mexico" for the same country, or plain garbage
+// like a test string) — resolve to a display name before binning so those
+// merge into one row instead of splitting credits/projects across near-
+// duplicates, and unrecognized values collapse into "Other" rather than
+// each showing up as its own row (see useProjects.ts's normalizeCountryName).
 const countryRows = computed<BinRow[]>(() =>
     toBins(summary.value.countries.map(c => ({
-        label: c.country,
+        label: normalizeCountryName(c.country ?? ''),
         projectCount: c.projects,
         credits: c.credits,
         methodologies: c.methodologies,

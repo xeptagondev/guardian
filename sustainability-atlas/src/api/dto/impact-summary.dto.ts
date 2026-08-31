@@ -42,7 +42,7 @@ export class ImpactSummaryLifecycleDto {
 }
 
 export class ImpactSummaryGeoDto {
-    @ApiProperty({ description: "Country label, or 'Unknown' when the project's country is blank/missing" })
+    @ApiProperty({ description: "Country label, or 'Other' when the project's country is blank/missing" })
     country: string;
 
     @ApiProperty({ description: 'Number of PROJECT rows in this country' })
@@ -122,7 +122,7 @@ export class ImpactSummaryProjectDto {
     @ApiProperty({ nullable: true, description: 'Project display name' })
     name: string | null;
 
-    @ApiProperty({ description: "Country label, or 'Unknown' when blank/missing" })
+    @ApiProperty({ description: "Country label, or 'Other' when blank/missing" })
     country: string;
 
     @ApiProperty({ nullable: true, description: 'Methodology name (businessData.methodology)' })
@@ -171,7 +171,7 @@ export class ImpactSummaryResponseDto {
     @ApiProperty({ description: 'Number of PROJECT rows on this network' })
     activeProjects: number;
 
-    @ApiProperty({ description: "Number of distinct countries across PROJECT rows (excludes the 'Unknown' bucket)" })
+    @ApiProperty({ description: "Number of distinct countries across PROJECT rows (excludes the 'Other' bucket)" })
     activeCountries: number;
 
     @ApiProperty({

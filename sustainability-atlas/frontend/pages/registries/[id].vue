@@ -20,7 +20,7 @@ import {
 import { formatCredits } from '~/lib/format';
 import { allocateDonutColors, mergeTopBinsWithOther, DONUT_TOP_N, DONUT_OTHER_COLOR } from '~/lib/chart-colors';
 import type { MethodologyDto, MethodologiesResponse } from '~/composables/api/useMethodologiesApi';
-import { COUNTRY_ALPHA3 } from '~/composables/useProjects';
+import { resolveCountryCode } from '~/composables/useProjects';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -136,7 +136,7 @@ const mapCountries = computed(() => {
     const counts: Record<string, { projects: number; credits: number; name: string }> = {};
     for (const row of summary.value.countries) {
         const raw = row.country ?? '';
-        const code = COUNTRY_ALPHA3[raw] || 'UNK';
+        const code = resolveCountryCode(raw);
         if (code === 'UNK' || !raw) continue;
         if (!counts[code]) counts[code] = { projects: 0, credits: 0, name: raw };
         counts[code].projects += row.projects;
@@ -161,7 +161,7 @@ const activeMapDetail = computed(() => {
     const catCounts: Record<string, number> = {};
     let total = 0;
     for (const row of summary.value.countrySectors) {
-        if ((COUNTRY_ALPHA3[row.country ?? ''] || 'UNK') !== code) continue;
+        if (resolveCountryCode(row.country ?? '') !== code) continue;
         const label = row.label || 'Unknown';
         catCounts[label] = (catCounts[label] ?? 0) + row.projectCount;
         total += row.projectCount;
