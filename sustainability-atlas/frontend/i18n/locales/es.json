@@ -387,7 +387,7 @@
             "totalIssuancesTooltip": "Número total de créditos emitidos en todos los proyectos coincidentes.",
             "totalRetired": "Total retirado",
             "totalRetiredSub": "Retirado permanentemente",
-            "totalRetiredTooltip": "Suma de todas las emisiones retiradas permanentemente (quemadas) con fines de compensación en los proyectos coincidentes."
+            "totalRetiredTooltip": "Créditos retirados permanentemente (quemados) con fines de compensación en los proyectos coincidentes. Contabiliza únicamente los créditos que se puede demostrar que fueron acuñados a través de Guardian: números de serie de NFT vinculados a la emisión que los acuñó, más los retiros fungibles documentados por los contratos de retiro de Guardian. Se excluyen los números de serie destruidos en la cadena que ninguna emisión reclama."
         },
         "projectDistribution": "Distribución de proyectos",
         "projectDistributionTooltip": "Los países están coloreados por la cantidad de proyectos. Verde más oscuro = más proyectos. Haz clic en un país para ver el desglose detallado. Los puntos pequeños muestran ubicaciones individuales de proyectos.",
@@ -860,7 +860,10 @@
         "clearRegistryFilter": "Quitar filtro",
         "filteredBySdg": "Mostrando emisiones del ODS {sdg}",
         "clearSdgFilter": "Quitar filtro",
-        "supplyTooltip": "Suministro total de tokens acuñado en Hedera. Para tokens fungibles es el suministro total. Para NFTs es el número de serials únicos.",
+        "filteredByRetired": "Mostrando emisiones con tokens retirados",
+        "clearRetiredFilter": "Quitar filtro",
+        "supplyTooltip": "Número total de créditos declarados para el proyecto en cuestión. En el caso de los NFT, se trata del número de números de serie únicos.",
+        "retiredTokensTooltip": "Créditos retirados de esta emisión, contabilizados solo cuando se puede demostrar que el crédito fue acuñado a través de Guardian. En los NFT corresponde a los números de serie de esta acuñación que el libro mayor muestra como destruidos. En los tokens fungibles el retiro se registra a nivel de token y no de una emisión concreta, por lo que el importe retirado del token se reparte entre sus emisiones según su tamaño.",
         "tokenTypes": {
             "Fungible": "Fungible",
             "Non-Fungible": "No fungible"
@@ -870,6 +873,7 @@
             "symbol": "Símbolo",
             "type": "Tipo",
             "supply": "Monto acuñado",
+            "retiredTokens": "Importe retirado",
             "declaredAmount": "Declarado",
             "mintedOnChain": "Acuñado en cadena",
             "mintDate": "Fecha de emisión",
@@ -883,12 +887,13 @@
             "registry": "Registro",
             "supply": "Monto acuñado",
             "mintDate": "Fecha de emisión",
-            "hideUnlinked": "Ocultar emisiones sin proyecto vinculado"
+            "hideUnlinked": "Ocultar emisiones sin enlace a proyecto",
+            "showRetiredOnly": "Mostrar emisiones con retiros"
         },
         "tooltips": {
             "hideUnlinked": "Oculta los tokens que aún no han sido asociados a ningún proyecto. Desmarque para ver todos los tokens indexados.",
             "mintDate": "Fecha de emisión",
-            "mintAmount": "Número total de créditos acuñados para el proyecto. Para NFTs, es el número de seriales únicos.",
+            "mintAmount": "Número total de créditos declarados para el proyecto en cuestión. En el caso de los NFT, se trata del número de números de serie únicos.",
             "declaredAmount": "El monto de créditos indicado en el documento de acuñación de Guardian. Es lo que el registro pretendía emitir, que no siempre coincide con lo que registró la cadena.",
             "mintedOnChain": "El monto realmente acuñado en Hedera: el número de seriales NFT que llevan el identificador de esta acuñación, o el monto registrado por la transacción de acuñación fungible."
         },
@@ -1427,30 +1432,39 @@
         "kpis": {
             "activeSupply": "Oferta Activa",
             "activeSupplyHint": "Créditos en circulación (acuñados − retirados)",
+            "activeSupplyTooltip": "Total de créditos aún en circulación",
             "retirementRate": "Tasa de Retiro",
             "retirementRateHint": "Créditos acuñados que han sido retirados",
+            "retirementRateTooltip": "Porcentaje de créditos acuñados que han sido retirados permanentemente (Retirados ÷ Acuñados). Valores más altos indican que los créditos se están utilizando para compensación en lugar de mantenerse.",
             "pipelineProjects": "Proyectos en Desarrollo",
             "pipelineProjectsHint": "Proyectos pre-emisión: registrados → verificados",
+            "pipelineProjectsTooltip": "Proyectos que han entrado en el flujo de trabajo pero que aún no han acuñado créditos (Registrados → Verificados). Representa la oferta futura.",
             "avgVintageYear": "Año Promedio de Añada",
             "avgVintageYearHint": "Menor = oferta más antigua, mayor = más reciente",
+            "avgVintageYearTooltip": "Año promedio de añada ponderado por créditos de la oferta acuñada. Menor = oferta más antigua, mayor = más reciente.",
             "avgCreditingPeriod": "Período Promedio de Acreditación",
             "avgCreditingPeriodHint": "Duración media del período de acreditación del proyecto",
+            "avgCreditingPeriodTooltip": "Duración media del período de acreditación, en años, entre proyectos con fecha de inicio y finalización registradas.",
             "yearsSuffix": "años"
         },
         "lifecycle": {
             "title": "Embudos de Ciclo de Vida del Proyecto",
             "subtitle": "Distribución a través de las etapas del flujo de trabajo de la política Guardian",
+            "tooltip": "Dónde se sitúan los proyectos a través del flujo de trabajo de la política Guardian.",
             "stageTooltip": "{stage}: {count} proyectos ({pct}% del total)"
         },
         "vintage": {
             "title": "Distribución por Añada",
             "subtitle": "Créditos acuñados agrupados por año de añada del proyecto",
+            "tooltip": "Créditos acuñados agrupados por año de añada, el año en que ocurrió la reducción o eliminación.",
             "noData": "Sin datos de añada disponibles",
             "vintageTooltip": "{vintage}: {credits} créditos en {projects} proyectos"
         },
         "supplyAge": {
             "title": "Perfil de Antigüedad de la Oferta",
             "subtitle": "Distribución de créditos acuñados por antigüedad de añada — las añadas más recientes son preferidas por la mayoría de los compradores corporativos",
+            "tooltip": "Créditos acuñados agrupados por antigüedad de añada",
+            "itemTooltip": "{age}: {credits} créditos ({pct}% del total)",
             "fresh": "≤ 2 años (Reciente)",
             "recent": "3 – 5 años (Moderada)",
             "older": "6 – 10 años (Antigua)",
@@ -1458,38 +1472,57 @@
         },
         "sectors": {
             "topCreditsTitle": "Principales Sectores por Créditos Acuñados",
+            "topCreditsTooltip": "Volumen acumulado acuñado por sector.",
+            "topCreditsItemTooltip": "{sector}: {credits} créditos en {projects} proyectos ({pct}% del total)",
             "availableSupplyTitle": "Oferta Disponible por Sector",
             "availableSupplySub": "Créditos activos (acuñados − retirados)",
+            "availableSupplyTooltip": "Créditos no retirados que permanecen en circulación, por sector (acuñados − retirados)",
+            "availableItemTooltip": "{sector}: {credits} créditos disponibles en {projects} proyectos",
             "avgSizeTitle": "Tamaño Promedio del Proyecto por Sector",
             "avgSizeSub": "Promedio de créditos acuñados por proyecto — referencia para evaluar nuevos proyectos",
-            "contributionTitle": "Contribución del Sector a la Oferta Total"
+            "avgSizeTooltip": "Promedio de créditos acuñados por proyecto en cada sector",
+            "avgSizeItemTooltip": "{sector}: {avg} créditos promedio/proyecto ({credits} totales en {projects} proyectos)",
+            "contributionTitle": "Contribución del Sector a la Oferta Total",
+            "contributionTooltip": "Porcentaje de participación de cada sector en el total de créditos acuñados.",
+            "contributionItemTooltip": "{sector}: {credits} créditos ({pct}% de la oferta total en {projects} proyectos)"
         },
         "countries": {
             "topCreditsTitle": "Principales Países Anfitriones por Créditos",
+            "topCreditsTooltip": "Países clasificados por créditos acuñados acumulados, con el número de proyectos alojados en cada uno.",
+            "topCreditsItemTooltip": "{country}: {credits} créditos en {projects} proyectos ({pct}% del total)",
             "projectsCount": "{count} proy",
-            "contributionTitle": "Contribución del País a la Oferta"
+            "contributionTitle": "Contribución del País a la Oferta",
+            "contributionTooltip": "Porcentaje de participación de cada país anfitrión en el total de créditos acuñados.",
+            "contributionItemTooltip": "{country}: {credits} créditos ({pct}% de la oferta total en {projects} proyectos)"
         },
         "methodologies": {
             "adoptionTitle": "Adopción de Metodologías",
             "adoptionSub": "Metodologías más utilizadas por volumen de crédito",
+            "adoptionTooltip": "Metodologías clasificadas por volumen de créditos acuñados, con el número de proyectos que aplican cada una.",
+            "itemTooltip": "{methodology}: {credits} créditos en {projects} proyectos",
             "projectsCount": "{count}p"
         },
         "sdgs": {
             "cobenefitTitle": "Cobertura de Co-beneficios ODS",
             "cobenefitSub": "Número de proyectos que afirman contribuir a cada Objetivo de Desarrollo Sostenible de la ONU",
+            "cobenefitTooltip": "Proyectos que afirman contribuir a cada Objetivo de Desarrollo Sostenible de la ONU, con el volumen de créditos asociado",
             "alignmentTitle": "Matriz de Alineación con ODS",
             "alignmentSub": "Los 17 Objetivos de Desarrollo Sostenible — cobertura y volumen de créditos",
+            "alignmentTooltip": "Los 17 Objetivos de Desarrollo Sostenible de la ONU con proyectos contribuyentes y volumen de créditos mapeado.",
+            "itemTooltip": "ODS {sdg} — {name}: {projects} proyectos ({credits} créditos)",
             "projectsLabel": "Proyectos",
             "creditsLabel": "Créditos",
             "projectsCount": "{count} proy"
         },
         "statusDist": {
             "title": "Distribución del Estado",
-            "subtitle": "Dónde se sitúan los proyectos en el flujo de trabajo de la política hoy"
+            "subtitle": "Dónde se sitúan los proyectos en el flujo de trabajo de la política hoy",
+            "tooltip": "Dónde se sitúan todos los proyectos en el flujo de trabajo de la política hoy."
         },
         "developers": {
             "title": "Clasificación de los Principales Desarrolladores",
             "subtitle": "Clasificados por créditos acuñados — alcance multipaís y multisectorial",
+            "tooltip": "Organizaciones desarrolladoras clasificadas por créditos acumulados acuñados, con amplitud entre países y sectores",
             "noData": "Sin datos de desarrolladores disponibles",
             "columns": {
                 "rank": "Posición",
@@ -1503,17 +1536,25 @@
         "registries": {
             "throughputTitle": "Rendimiento del Registro",
             "throughputSub": "Promedio de créditos acuñados por proyecto, por registro — indicador de escala de calidad del proyecto",
+            "throughputTooltip": "Promedio de créditos acuñados por proyecto para cada registro (créditos ÷ proyectos).",
+            "throughputItemTooltip": "{registry}: {avg} créditos promedio/proyecto ({credits} totales en {projects} proyectos)",
             "perProj": "/proy",
             "heatmapTitle": "Mapa de Calor de la Canalización por Registro",
             "heatmapSub": "Recuento de proyectos por etapa del ciclo de vida, principales registros",
+            "heatmapTooltip": "Recuento de proyectos en cada etapa del ciclo de vida, por registro",
+            "heatCellTooltip": "{registry} — {stage}: {count} proyectos",
             "colRegistry": "Registro",
             "noHeatData": "Sin datos del registro",
             "marketShareTitle": "Cuota de Mercado del Registro",
-            "marketShareSub": "Cuota del total de créditos acuñados"
+            "marketShareSub": "Cuota del total de créditos acuñados",
+            "marketShareTooltip": "Cuota de cada registro del total de créditos acuñados en la red.",
+            "marketShareItemTooltip": "{registry}: {credits} créditos ({pct}% del total, {projects} proyectos)"
         },
         "vintageConcentration": {
             "title": "Concentración de Añadas",
-            "subtitle": "Señal de riesgo: una fuerte concentración en añadas más antiguas puede indicar una menor integridad de la línea de base según los principios CCP / ICVCM"
+            "subtitle": "Señal de riesgo: una fuerte concentración en añadas más antiguas puede indicar una menor integridad de la línea de base según los principios CCP / ICVCM",
+            "tooltip": "Señal de riesgo: una fuerte concentración en añadas más antiguas puede indicar una menor integridad de la línea de base según los principios CCP / ICVCM.",
+            "itemTooltip": "{age}: {credits} créditos ({pct}% de la oferta total)"
         }
     },
     "vcViewer": {
@@ -1702,8 +1743,10 @@
                 "cancel": "Cancelar",
                 "addAll": "Agregar todos los proyectos a la lista de seguimiento",
                 "addAllSuccess": "{count} proyectos agregados",
+                "addAllPartial": "{count} proyectos agregados ({skipped} omitidos — el límite de la lista de seguimiento es {limit})",
+                "limitReached": "Límite de la lista de seguimiento alcanzado (máximo {limit} proyectos)",
                 "showSelectedOnly": "Mostrar solo seleccionados",
-                "footer": "{count} elementos en total · no se permiten duplicados"
+                "footerWithLimit": "{count} / {limit} elementos · no se permiten duplicados"
             },
             "widgets": {
                 "title": "Biblioteca de widgets",
@@ -2688,7 +2731,7 @@
         "entries": {
             "numbers-changed": {
                 "question": "Los números cambiaron, o todo desapareció",
-                "answer": "Revisa el selector de red en la barra superior. El Atlas cubre más de una red Hedera: mainnet contiene datos reales de créditos de carbono en producción, mientras que testnet contiene registros de prueba publicados por registros y desarrolladores que están probando cosas. Los dos son conjuntos de datos completamente separados. Cambiar entre ellos modifica cada cifra en cada página, y un proyecto que existe en uno puede no existir en absoluto en el otro.\n\nSi la página se ve vacía, confirma que estás en la red que querías antes de asumir que falta algo."
+                "answer": "Revisa el selector de red en la barra superior. El Atlas cubre más de una red Hedera. Mainnet contiene datos reales de créditos de carbono en producción, mientras que testnet contiene registros de prueba publicados por registros y desarrolladores que están probando cosas. Los dos son conjuntos de datos completamente separados. Cambiar entre ellos modifica cada cifra en cada página, y un proyecto que existe en uno puede no existir en absoluto en el otro.\n\nSi la página se ve vacía, confirma que estás en la red que querías antes de asumir que falta algo."
             },
             "link-different-data": {
                 "question": "Copié un enlace y mi colega vio datos diferentes",
@@ -2696,11 +2739,11 @@
             },
             "missing-project": {
                 "question": "¿Por qué falta un proyecto (o una emisión, o una metodología)?",
-                "answer": "Casi siempre es retraso de sincronización. El Atlas copia registros de la cadena de forma continua, pero un registro publicado hace unos minutos puede no haberse recogido todavía.\n\nRevisa \"Datos sincronizados hasta\" al pie de la barra lateral: esa marca de tiempo indica qué tan actuales están los datos. Si el registro que buscas se publicó después de esa marca, aún no ha llegado. La página de Estado de sincronización muestra en qué está trabajando el proceso y si va con retraso.\n\nSi la marca de tiempo está actualizada y el registro sigue sin aparecer, puede que no se haya publicado en la red que lee el Atlas, o que esté en la otra red."
+                "answer": "Casi siempre es retraso de sincronización. El Atlas copia registros de la cadena de forma continua, pero un registro publicado hace unos minutos puede no haberse recogido todavía.\n\nRevisa \"Datos sincronizados hasta\" al pie de la barra lateral, y esa marca de tiempo indica qué tan actuales están los datos. Si el registro que buscas se publicó después de esa marca, aún no ha llegado. La página de Estado de sincronización muestra en qué está trabajando el proceso y si va con retraso.\n\nSi la marca de tiempo está actualizada y el registro sigue sin aparecer, puede que no se haya publicado en la red que lee el Atlas, o que esté en la otra red."
             },
             "no-issuances": {
                 "question": "¿Por qué un proyecto no muestra emisiones?",
-                "answer": "Porque aún no ha emitido créditos. Una gran parte de los proyectos del Atlas están en fase de canalización: registrados, documentados y en proceso de validación, pero sin haber llegado todavía al punto de acuñar créditos. Su registro de proyecto está completo y sus documentos son legibles; simplemente no hay nada en el historial de emisiones que mostrar.\n\nEsto es normal y no es un error de datos."
+                "answer": "Porque aún no ha emitido créditos. Una gran parte de los proyectos del Atlas están en fase de canalización: registrados, documentados y en proceso de validación, pero sin haber llegado todavía al punto de acuñar créditos. Su registro de proyecto está completo y sus documentos son legibles, pero simplemente no hay nada en el historial de emisiones que mostrar.\n\nEsto es normal y no es un error de datos."
             },
             "no-projected-volume": {
                 "question": "¿Por qué el volumen proyectado dice \"Sin estimaciones disponibles\"?",
@@ -2708,11 +2751,11 @@
             },
             "minted-vs-supply": {
                 "question": "El total acuñado no coincide con el suministro actual",
-                "answer": "Estas miden dos cosas distintas, y se espera que difieran. El total acuñado es el conteo acumulado de cada crédito emitido para ese proyecto: un número que solo aumenta. El suministro actual es cuántos de esos créditos siguen existiendo y en manos de alguien. Los créditos salen del suministro cuando se retiran (se cancelan de forma permanente, normalmente porque alguien reclamó la compensación) y cambian de manos cuando se transfieren.\n\nUn proyecto con un total acuñado grande y un suministro actual pequeño ha tenido la mayoría de sus créditos retirados, que es el estado final previsto para un crédito de carbono."
+                "answer": "Estas miden dos cosas distintas, y se espera que difieran. El total acuñado es el conteo acumulado de cada crédito emitido para ese proyecto, un número que solo aumenta. El suministro actual es cuántos de esos créditos siguen existiendo y en manos de alguien. Los créditos salen del suministro cuando se retiran (se cancelan de forma permanente, normalmente porque alguien reclamó la compensación) y cambian de manos cuando se transfieren.\n\nUn proyecto con un total acuñado grande y un suministro actual pequeño ha tenido la mayoría de sus créditos retirados, que es el estado final previsto para un crédito de carbono."
             },
             "declared-vs-minted": {
                 "question": "Una emisión indica que los montos declarado y acuñado difieren",
-                "answer": "Son datos independientes y el Atlas informa ambos en lugar de elegir uno. Declarado es el monto escrito en el documento de acuñación de Guardian del registro: una declaración de lo que se pretendía emitir. Acuñado en cadena es lo que la cadena Hedera realmente registró.\n\n• Menos acuñado que declarado: la acuñación falló parcialmente o nunca se completó. El retiro no es la causa; los créditos retirados siguen contando como acuñados.\n• Más acuñado que declarado: se crearon más créditos en la cadena de los que indicaba el documento. Nada obliga a que ambos coincidan; son acciones separadas del registro.\n• \"No coincide\": la acuñación en cadena aún no se ha vinculado al documento y la cifra declarada aparece como sustituto. Esto se resuelve a medida que avanza la sincronización.\n\nLos totales del panel y de las tarjetas de estadísticas usan la cifra en cadena, por lo que pueden ser menores que las cifras publicadas por el propio registro. Esa diferencia es precisamente el punto: es la diferencia entre lo documentado y lo que hizo la cadena."
+                "answer": "Son datos independientes y el Atlas informa ambos en lugar de elegir uno. Declarado es el monto escrito en el documento de acuñación de Guardian del registro, una declaración de lo que se pretendía emitir. Acuñado en cadena es lo que la cadena Hedera realmente registró.\n\n• Menos acuñado que declarado: la acuñación falló parcialmente o nunca se completó. El retiro no es la causa; los créditos retirados siguen contando como acuñados.\n• Más acuñado que declarado: se crearon más créditos en la cadena de los que indicaba el documento. Nada obliga a que ambos coincidan; son acciones separadas del registro.\n• \"No coincide\": la acuñación en cadena aún no se ha vinculado al documento y la cifra declarada aparece como sustituto. Esto se resuelve a medida que avanza la sincronización.\n\nLos totales del panel y de las tarjetas de estadísticas usan la cifra en cadena, por lo que pueden ser menores que las cifras publicadas por el propio registro. Esa diferencia es precisamente el punto: es la diferencia entre lo documentado y lo que hizo la cadena."
             },
             "transferred-dash": {
                 "question": "Transferido muestra un guion en lugar de un número",
@@ -2720,7 +2763,7 @@
             },
             "transferred-vs-transactions-empty": {
                 "question": "Transferido muestra un número pero la tabla de transacciones está vacía",
-                "answer": "Ambos son correctos; responden preguntas distintas a partir de fuentes distintas. Transferido indica dónde están los créditos ahora: cuántos están en manos de una cuenta distinta a la tesorería del token. Eso proviene de la propiedad actual, que la cadena reporta por completo en cuanto se sincronizan los seriales. Transacciones indican cuándo se movieron los créditos y entre quiénes. Guardian no escribe ningún documento de transferencia, así que cada movimiento debe leerse del historial de transacciones de la propia cuenta de tesorería, y esas cuentas se revisan en segundo plano. Hasta que se haya revisado la tesorería de un proyecto, el Atlas puede decirte dónde están los créditos sin poder decirte todavía cuándo llegaron ahí.\n\n\"Historial de transacciones aún no disponible\" significa que el historial de la cuenta emisora aún no se ha leído; puede haber transferencias. \"Sin transacciones todavía\" significa que el historial ya se leyó y estos créditos realmente no se han movido.\n\nEl conteo deliberadamente no se calcula a partir del registro de transacciones: hacerlo reportaría cero para cualquier tesorería aún no revisada, y también contaría créditos que fueron transferidos y luego retirados como si siguieran en circulación."
+                "answer": "Ambos son correctos; responden preguntas distintas a partir de fuentes distintas. Transferido indica dónde están los créditos ahora, es decir, cuántos están en manos de una cuenta distinta a la tesorería del token. Eso proviene de la propiedad actual, que la cadena reporta por completo en cuanto se sincronizan los seriales. Transacciones indican cuándo se movieron los créditos y entre quiénes. Guardian no escribe ningún documento de transferencia, así que cada movimiento debe leerse del historial de transacciones de la propia cuenta de tesorería, y esas cuentas se revisan en segundo plano. Hasta que se haya revisado la tesorería de un proyecto, el Atlas puede decirte dónde están los créditos sin poder decirte todavía cuándo llegaron ahí.\n\n\"Historial de transacciones aún no disponible\" significa que el historial de la cuenta emisora aún no se ha leído, por lo que puede haber transferencias. \"Sin transacciones todavía\" significa que el historial ya se leyó y estos créditos realmente no se han movido.\n\nEl conteo deliberadamente no se calcula a partir del registro de transacciones: hacerlo reportaría cero para cualquier tesorería aún no revisada, y también contaría créditos que fueron transferidos y luego retirados como si siguieran en circulación."
             },
             "unlisted-serials": {
                 "question": "Un token tiene seriales que el Atlas no muestra",
@@ -2728,7 +2771,7 @@
             },
             "no-verification-email": {
                 "question": "No recibí el correo de verificación",
-                "answer": "Primero revisa tu carpeta de spam o correo no deseado; el correo de verificación automático es un falso positivo frecuente.\n\nSi de verdad no está ahí, usa Reenviar verificación en el aviso que aparece en la parte superior de la página. El reenvío está limitado: si lo presionas repetidamente, se te pedirá esperar antes de poder enviar otro mensaje. Esa demora es intencional y esperarla es la única solución.\n\nSi varios intentos a lo largo de un período más largo no producen nada, es posible que la dirección se haya escrito mal al registrarse; contacta a un administrador, que puede verificar con qué dirección se creó la cuenta."
+                "answer": "Primero revisa tu carpeta de spam o correo no deseado, ya que el correo de verificación automático es un falso positivo frecuente.\n\nSi de verdad no está ahí, usa Reenviar verificación en el aviso que aparece en la parte superior de la página. El reenvío está limitado: si lo presionas repetidamente, se te pedirá esperar antes de poder enviar otro mensaje. Esa demora es intencional y esperarla es la única solución.\n\nSi varios intentos a lo largo de un período más largo no producen nada, es posible que la dirección se haya escrito mal al registrarse, así que contacta a un administrador, que puede verificar con qué dirección se creó la cuenta."
             },
             "forced-password-change": {
                 "question": "Se me pide cambiar mi contraseña inmediatamente después de iniciar sesión",
@@ -2736,15 +2779,15 @@
             },
             "greyed-out-button": {
                 "question": "Un botón está deshabilitado, o falta una pestaña",
-                "answer": "Tres posibles razones, en orden de probabilidad:\n\n1. Requiere una cuenta. Portafolio, Informes, filtros rápidos guardados, notificaciones y claves de API requieren que hayas iniciado sesión. Inicia sesión y estarán disponibles. Ten en cuenta que Descargar datos no es uno de estos: la exportación a CSV funciona sin cuenta.\n2. Requiere permisos de administrador. La gestión de usuarios y las acciones de mantenimiento sobre proyectos, metodologías y el proceso de sincronización están restringidas a administradores. Si no ves Gestión de usuarios en tu menú de cuenta, no tienes esos permisos.\n3. La función está desactivada para toda la plataforma. Algunas capacidades pueden desactivarse para todos mediante configuración. En ese caso, nadie las ve, sin importar el nivel de la cuenta.\n\nSi crees que deberías tener acceso a algo que no puedes alcanzar, un administrador puede confirmar a qué tiene derecho tu cuenta."
+                "answer": "Tres posibles razones, en orden de probabilidad:\n\n1. Requiere una cuenta. Portafolio, Informes, filtros rápidos guardados, notificaciones y claves de API requieren que hayas iniciado sesión. Inicia sesión y estarán disponibles. Ten en cuenta que Descargar datos no es uno de estos, ya que la exportación a CSV funciona sin cuenta.\n2. Requiere permisos de administrador. La gestión de usuarios y las acciones de mantenimiento sobre proyectos, metodologías y el proceso de sincronización están restringidas a administradores. Si no ves Gestión de usuarios en tu menú de cuenta, no tienes esos permisos.\n3. La función está desactivada para toda la plataforma. Algunas capacidades pueden desactivarse para todos mediante configuración. En ese caso, nadie las ve, sin importar el nivel de la cuenta.\n\nSi crees que deberías tener acceso a algo que no puedes alcanzar, un administrador puede confirmar a qué tiene derecho tu cuenta."
             },
             "empty-portfolio-new-device": {
                 "question": "Mi panel guardado o lista de seguimiento está vacío en un dispositivo nuevo",
-                "answer": "Tu Portafolio se guarda vinculado a tu cuenta, así que iniciar sesión en otro lugar debería traerlo contigo. Dos cosas lo limitan más de lo que la gente espera: es por red (una lista de seguimiento creada en mainnet no aparece mientras ves testnet) y es por cuenta (si tienes más de un inicio de sesión, cada uno mantiene su propio Portafolio).\n\nSi estás en la red y la cuenta correctas y sigue vacío, es que aún no se ha añadido nada a esa combinación."
+                "answer": "Tu Portafolio se guarda vinculado a tu cuenta, así que iniciar sesión en otro lugar debería traerlo contigo. Dos cosas lo limitan más de lo que la gente espera: es por red, por lo que una lista de seguimiento creada en mainnet no aparece mientras ves testnet, y es por cuenta, por lo que si tienes más de un inicio de sesión, cada uno mantiene su propio Portafolio.\n\nSi estás en la red y la cuenta correctas y sigue vacío, es que aún no se ha añadido nada a esa combinación."
             },
             "tour-wont-restart": {
                 "question": "El recorrido no vuelve a iniciarse",
-                "answer": "Una vez que lo has visto, el recorrido no se inicia solo una segunda vez; eso es intencional, para que no te interrumpa en cada inicio de sesión.\n\nPara volver a hacerlo, usa el botón de ayuda (?) en la barra superior y elige Hacer el recorrido guiado, o ve a Configuración de la cuenta y usa la tarjeta del recorrido del producto ahí. Puedes reiniciarlo tantas veces como quieras."
+                "answer": "Una vez que lo has visto, el recorrido no se inicia solo una segunda vez. Eso es intencional, para que no te interrumpa en cada inicio de sesión.\n\nPara volver a hacerlo, usa el botón de ayuda (?) en la barra superior y elige Hacer el recorrido guiado, o ve a Configuración de la cuenta y usa la tarjeta del recorrido del producto ahí. Puedes reiniciarlo tantas veces como quieras."
             },
             "tour-restarted-new-computer": {
                 "question": "El recorrido volvió a iniciarse en otro equipo",
@@ -2757,7 +2800,7 @@
         },
         "stillStuck": {
             "title": "¿Sigues sin encontrar la respuesta?",
-            "body": "Busca el término en el glosario: sorprendentemente muchos problemas aparentes son diferencias de vocabulario entre registros. Revisa Estado de sincronización si es una pregunta de \"faltan datos o están desactualizados\". Usa el botón de comentarios para reportarlo, indicando en qué red estabas, en qué página, y qué esperabas ver en su lugar: esos tres detalles resuelven la mayoría de los reportes sin necesidad de seguimiento."
+            "body": "Busca el término en el glosario, ya que sorprendentemente muchos problemas aparentes son diferencias de vocabulario entre registros. Revisa Estado de sincronización si es una pregunta de \"faltan datos o están desactualizados\". Usa el botón de comentarios para reportarlo, indicando en qué red estabas, en qué página, y qué esperabas ver en su lugar, ya que esos tres detalles resuelven la mayoría de los reportes sin necesidad de seguimiento."
         }
     }
 }

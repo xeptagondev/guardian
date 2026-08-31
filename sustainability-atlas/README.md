@@ -127,7 +127,7 @@ docker compose up -d
 This starts Postgres, Redict, IPFS, the API, the frontend, guardian-sync, and one
 all-in-one worker per network (`worker-mainnet`, `worker-testnet`).
 
-Two services are behind opt-in profiles:
+Optional extras are behind opt-in profiles:
 
 ```bash
 # BullMQ dashboard — bound to 127.0.0.1, reach it locally or via an SSH tunnel.
@@ -135,8 +135,10 @@ Two services are behind opt-in profiles:
 # published by default. The admin API covers the same operations behind auth.
 docker compose --profile monitoring up -d bull-board
 
-# Role-partitioned workers — see Horizontal Scaling below.
-docker compose --profile roles-testnet up -d
+# Role-partitioned workers — needs the matching overlay file, see Horizontal
+# Scaling below for why a bare --profile is not enough.
+docker compose -f docker-compose.yml -f docker-compose.roles-testnet.yml \
+    --profile roles-testnet up -d
 ```
 
 **Postgres connection ceiling.** `max_connections` is raised to 200
@@ -152,15 +154,46 @@ Each network runs **one all-in-one worker** by default. Two ways to scale it.
 
 ### Role-partitioned workers (shipped)
 
-`docker-compose.yml` ships a four-role split per network. It **replaces** that
-network's all-in-one worker — stop it first, or both consume the same queues
-(safe, thanks to leader election and jobId dedup, but it wastes capacity and
-doubles that network's mirror-node request rate):
+`docker-compose.yml` ships a four-role split per network, activated by a profile
+plus a small overlay file:
 
 ```bash
-docker compose stop worker-testnet
-docker compose --profile roles-testnet up -d --scale worker-ingest-testnet=3
+docker compose -f docker-compose.yml -f docker-compose.roles-testnet.yml \
+    --profile roles-testnet up -d --scale worker-ingest-testnet=3
 ```
+
+**Why the overlay is required.** Compose starts every service that has no
+`profiles:` key, whatever profile you name. The all-in-one `worker-testnet` has
+no profile, so `docker compose --profile roles-testnet up -d` on its own starts
+it *alongside* the four role workers and both tiers consume the same queues.
+Stopping it first does not stick either — the next `up` starts it again. The
+overlay is what actually takes it out of the set Compose brings up; it does
+nothing else:
+
+```yaml
+services:
+    worker-testnet:
+        profiles: ['disabled']   # nothing activates 'disabled'
+```
+
+Running both tiers is *safe* (leader election and jobId dedup hold), but it
+wastes capacity and doubles that network's mirror-node request rate, so the
+overlay is the supported way in.
+
+Switching a host that is already running the all-in-one worker? Remove it once —
+with the overlay in the command it stays down:
+
+```bash
+docker compose rm -sf worker-testnet
+```
+
+| Overlay | Splits | Leaves alone |
+|---|---|---|
+| `docker-compose.roles-testnet.yml` | testnet → 4 roles | `worker-mainnet` |
+| `docker-compose.roles-mainnet.yml` | mainnet → 4 roles | `worker-testnet` |
+
+Pass both `-f` overlays and both `--profile` flags to split both networks; that
+is 8 workers, so check the connection budget above first.
 
 | Role | Queues | Why separate |
 |---|---|---|
@@ -174,8 +207,9 @@ leader-elected, so replicas of it are fine; it seeds jobs at boot and owns the
 repeatable schedules. Ingest deliberately has no `container_name`, which is what
 allows `--scale`.
 
-The mainnet equivalent ships commented out next to the testnet block — uncomment
-it and use `--profile roles-mainnet`.
+The mainnet equivalent is defined next to the testnet block and is inert until
+you name its profile, so it needs no uncommenting — use
+`-f docker-compose.roles-mainnet.yml --profile roles-mainnet`.
 
 ### Manual partitioning
 
@@ -214,7 +248,9 @@ sustainability-atlas/
 │       ├── services/               2 services (Hedera, IPFS)
 │       └── schedulers/             Job orchestrator with leader election
 ├── frontend/                       Nuxt 3 application
-├── docker-compose.yml              PostgreSQL + Redict + Worker
+├── docker-compose.yml              Full stack: stores, workers, API, frontend
+├── docker-compose-dev.yml          Infra only (local dev)
+├── docker-compose.roles-*.yml      Overlays: split one network into 4 role workers
 ├── Dockerfile                      Multi-stage build
 ├── docs/architecture/README.md     Data pipeline deep-dive
 └── .env.example                    Environment variable template

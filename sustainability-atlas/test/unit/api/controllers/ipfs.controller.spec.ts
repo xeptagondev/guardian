@@ -44,7 +44,27 @@ describe('IpfsController#fetch', () => {
         const controller = new IpfsController(makeService());
         const result = await controller.fetch('bafyValidCid');
         expect(result).toBeInstanceOf(StreamableFile);
-        expect(result.options.disposition).toContain('bafyValidCid');
+        expect(result.options.disposition).toContain('filename="bafyValidCid.png"');
         expect(result.options.type).toBe('image/png');
+    });
+
+    it('appends a .json extension for JSON content, which has no magic bytes', async () => {
+        const service = makeService({
+            fetchContent: jest.fn(async () => Buffer.from('{"type":["VerifiableCredential"]}')),
+        });
+        const controller = new IpfsController(service);
+        const result = await controller.fetch('bafyJsonCid');
+        expect(result.options.type).toBe('application/json');
+        expect(result.options.disposition).toContain('filename="bafyJsonCid.json"');
+    });
+
+    it('leaves the filename extensionless when the type cannot be determined', async () => {
+        const service = makeService({
+            fetchContent: jest.fn(async () => Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00])),
+        });
+        const controller = new IpfsController(service);
+        const result = await controller.fetch('bafyOpaqueCid');
+        expect(result.options.type).toBe('application/octet-stream');
+        expect(result.options.disposition).toContain('filename="bafyOpaqueCid"');
     });
 });

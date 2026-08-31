@@ -31,7 +31,9 @@ export class IpfsController {
         description:
             'Fetches content for the given CID via the configured IPFS gateways (with local ' +
             'zip-cache reuse) and streams it back as a downloadable file. The response Content-Type ' +
-            'is a best-guess based on the file\'s bytes; falls back to application/octet-stream.',
+            'is a best-guess based on the file\'s bytes (magic-byte detection for binary formats, ' +
+            'content sniffing for JSON/HTML/CSV/text); falls back to application/octet-stream. The ' +
+            'attachment filename is the CID plus the matching extension, where one could be determined.',
     })
     @ApiParam({ name: 'cid', description: 'IPFS content identifier (CIDv0 or CIDv1)' })
     @ApiProduces('application/octet-stream')
@@ -59,10 +61,11 @@ export class IpfsController {
             );
         }
 
-        const type = await sniffMime(buffer);
+        const { mime, ext } = await sniffMime(buffer);
+        const filename = ext ? `${parsedCid}.${ext}` : parsedCid;
         return new StreamableFile(buffer, {
-            type,
-            disposition: `attachment; filename="${parsedCid}"`,
+            type: mime,
+            disposition: `attachment; filename="${filename}"`,
             length: buffer.length,
         });
     }

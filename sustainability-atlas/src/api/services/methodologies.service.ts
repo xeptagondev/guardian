@@ -29,6 +29,41 @@ const OPTIONS_CACHE_TTL_SECONDS = 60;
 // materialized view its stats are read from.
 const FIND_ALL_CACHE_TTL_SECONDS = 60;
 
+// Same 60s convention as the other caches in this file. A worker-driven
+// re-decode can't proactively invalidate this from another process without
+// new cross-process plumbing, so this TTL is the self-heal backstop for that
+// path; admin edits (updateMapping) and manual re-decodes (redecodePolicy) in
+// MappingReprocessService proactively refresh/clear it instead of waiting.
+export const DECODED_CACHE_TTL_SECONDS = 60;
+
+// Shorter TTL for the includeAllFields=true variant: entries can be multi-MB
+// (SE-196: up to ~7 MB for the largest methodology) against a Redict instance
+// configured `maxmemory-policy noeviction`, so this bounds how long that
+// larger footprint sits in memory. Still long enough to fix the actual
+// complaint (SE-198: every "Edit mapping" click on a 400+ schema methodology
+// re-paid the ~2-8s driver-parse cost, because this variant was never cached
+// at all) — admin edit-mapping traffic is low-volume/low-concurrency, so a
+// handful of these entries alive for 20s is a bounded, acceptable cost next
+// to fixing a multi-second delay on every click.
+export const DECODED_FULL_CACHE_TTL_SECONDS = 20;
+
+/**
+ * Cache key for the (thin, default) `findDecoded` response — shared with
+ * MappingReprocessService so its post-write cache refresh/invalidation targets
+ * the exact same entry. Keyed by the raw URL id (instance topic or policy
+ * topic, whichever the caller used) rather than the resolved policyTopicId —
+ * simpler, at the minor cost of a separate cache entry per URL form for the
+ * same methodology.
+ */
+export function decodedCacheKey(network: string, id: string): string {
+    return `methodology-decoded:${network}:${id}`;
+}
+
+/** Cache key for the includeAllFields=true variant — distinct entry, own TTL. */
+export function decodedFullCacheKey(network: string, id: string): string {
+    return `methodology-decoded-full:${network}:${id}`;
+}
+
 @Injectable()
 export class MethodologiesService {
     private readonly logger = new Logger(MethodologiesService.name);
@@ -219,12 +254,39 @@ export class MethodologiesService {
         }
     }
 
-    async findDecoded(network: string, id: string): Promise<DecodedMethodologyResponseDto | null> {
+    /**
+     * Cache-aside + single-flight for `findDecoded`, mirroring findAll's
+     * pattern above. Thin and full (`includeAllFields=true`) responses are
+     * cached under separate keys/TTLs — see DECODED_FULL_CACHE_TTL_SECONDS for
+     * why the full variant is cached at all despite its larger footprint.
+     */
+    async findDecoded(
+        network: string,
+        id: string,
+        includeAllFields = false,
+    ): Promise<DecodedMethodologyResponseDto | null> {
         const ds = this.dataSources.getDataSource(network);
-        const repo = new PgPolicySchemaRepository(ds);
-        const row = await repo.findDecoded(id);
-        if (!row) return null;
-        return DecodedMethodologyResponseDto.fromRow(row);
+        const cacheKey = includeAllFields ? decodedFullCacheKey(network, id) : decodedCacheKey(network, id);
+        const ttl = includeAllFields ? DECODED_FULL_CACHE_TTL_SECONDS : DECODED_CACHE_TTL_SECONDS;
+
+        // getJson can't distinguish "cache miss" from "cached null", so — same as
+        // findAll/findNameOptions above — only the found (truthy) case is cached;
+        // a 404 always falls through and re-resolves against the DB.
+        const cached = await this.redis.getJson<DecodedMethodologyResponseDto>(cacheKey);
+        if (cached) return cached;
+
+        return this.singleFlight.run(cacheKey, async () => {
+            const cachedAgain = await this.redis.getJson<DecodedMethodologyResponseDto>(cacheKey);
+            if (cachedAgain) return cachedAgain;
+
+            const repo = new PgPolicySchemaRepository(ds);
+            const row = await repo.findDecoded(id);
+            if (!row) return null;
+
+            const result = DecodedMethodologyResponseDto.fromRow(row, includeAllFields);
+            await this.redis.setJson(cacheKey, result, ttl);
+            return result;
+        });
     }
 
     /**

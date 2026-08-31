@@ -68,6 +68,12 @@ const { widgets, widgetVisible, toggleWidget, setWidget, widgetGroups } = usePor
 const { isAuthenticated } = useAuth();
 const { hydrateFromApi, pushType } = usePortfolioSync();
 
+// Server-configured cap (WATCHLIST_MAX_PROJECTS), fetched alongside the
+// watchlist itself (GET /me/dashboard) so there's a single source of truth —
+// no separate frontend config to drift out of sync. Placeholder value until
+// the first hydrate resolves (matches the backend's own default).
+const watchlistLimit = ref(50);
+
 // All chart data filtered by the active watchlist (empty watchlist ⇒ empty portfolio)
 const {
     filteredProjects,
@@ -331,6 +337,10 @@ function pendingHasItem(id: string, type: WatchlistItemType): boolean {
 
 function pendingAddItem(item: WatchlistItem): void {
     if (pendingHasItem(item.id, item.type)) return;
+    if (pendingWatchlist.value.length >= watchlistLimit.value) {
+        toast(t('portfolio.modal.watchlist.limitReached', { limit: watchlistLimit.value }));
+        return;
+    }
     pendingWatchlist.value = [...pendingWatchlist.value, item];
 }
 
@@ -373,8 +383,15 @@ async function addAllMatching() {
             .filter(m => !pendingHasItem(m.id, 'project'))
             .map(m => ({ id: m.id, type: 'project' as const, name: m.name, meta: '' }));
     }
+    const headroom = Math.max(0, watchlistLimit.value - pendingWatchlist.value.length);
+    const skipped = Math.max(0, additions.length - headroom);
+    additions = additions.slice(0, headroom);
     pendingWatchlist.value = [...pendingWatchlist.value, ...additions];
-    toast(t('portfolio.modal.watchlist.addAllSuccess', { count: additions.length }));
+    if (skipped > 0) {
+        toast(t('portfolio.modal.watchlist.addAllPartial', { count: additions.length, skipped, limit: watchlistLimit.value }));
+    } else {
+        toast(t('portfolio.modal.watchlist.addAllSuccess', { count: additions.length }));
+    }
 }
 
 function openWatchlist() {
@@ -778,6 +795,7 @@ async function applyRemote(
         hydrating.value = false;
         return;
     }
+    watchlistLimit.value = remote.watchlistLimit ?? watchlistLimit.value;
     const remoteWatchlist = remote.watchlist ?? [];
     if (remoteWatchlist.length > 0) {
         // Server has saved items — server is the source of truth.
@@ -1826,7 +1844,8 @@ onUnmounted(() => {
                                 <button
                                     v-if="watchlistCandidates.length > 0"
                                     type="button"
-                                    class="inline-flex items-center gap-1 rounded-md py-1.5 text-xs transition-colors text-muted-foreground hover:text-primary"
+                                    :disabled="pendingWatchlist.length >= watchlistLimit"
+                                    class="inline-flex items-center gap-1 rounded-md py-1.5 text-xs transition-colors text-muted-foreground hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
                                     @click="addAllMatching()"
                                 >
                                     <ListPlus class="h-3 w-3" />
@@ -1859,7 +1878,8 @@ onUnmounted(() => {
                                 </button>
                                 <button
                                     v-else
-                                    class="flex items-center gap-1 rounded-lg border border-primary/30 px-3 py-1.5 text-xs text-primary hover:bg-primary/5 transition-colors shrink-0"
+                                    :disabled="pendingWatchlist.length >= watchlistLimit"
+                                    class="flex items-center gap-1 rounded-lg border border-primary/30 px-3 py-1.5 text-xs text-primary hover:bg-primary/5 transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                     @click="pendingAddItem({ id: item.id, type: item.type, name: item.name, meta: item.meta })"
                                 >
                                     <Plus class="h-3 w-3" />
@@ -1875,7 +1895,7 @@ onUnmounted(() => {
                         </div>
                         <!-- Footer -->
                         <div class="px-6 py-4 border-t flex items-center justify-between shrink-0">
-                            <span class="text-xs text-muted-foreground">{{ $t('portfolio.modal.watchlist.footer', { count: pendingWatchlist.length }) }}</span>
+                            <span class="text-xs text-muted-foreground">{{ $t('portfolio.modal.watchlist.footerWithLimit', { count: pendingWatchlist.length, limit: watchlistLimit }) }}</span>
                             <div class="flex items-center gap-2">
                                 <button
                                     class="rounded-lg px-4 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"

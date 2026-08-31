@@ -129,6 +129,7 @@ export class CreditsService {
             projectKey: query.projectKey,
             methodologyId: query.methodologyId,
             linkedOnly: query.linkedOnly,
+            retiredOnly: query.retiredOnly,
             supplyMin: query.supplyMin,
             supplyMax: query.supplyMax,
             mintDateFrom: query.mintDateFrom,

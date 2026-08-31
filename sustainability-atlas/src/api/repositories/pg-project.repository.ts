@@ -625,16 +625,15 @@ export class PgProjectRepository extends ProjectRepository {
             totalIssued = [...mintsByToken.values()].reduce((s, v) => s + v.total, 0);
             totalDeclared = [...mintsByToken.values()].reduce((s, v) => s + v.declared, 0);
 
-            // Retirement, most-specific evidence first — same rule as
+            // Retirement, verified evidence only — same rule as
             // mv_project_stats.total_retired, so list and detail agree.
             //
             // Retired serials this project's own mint events account for are
-            // summed per mint (exact, and per vintage). Only the residue — retired
-            // serials no mint claims, plus documented fungible retirements, which
-            // are token-level by nature — falls back to whole-token counting.
-            // Previously the whole token's retirements were charged to the
-            // project, which over-reported whenever a token spans several mints
-            // or projects.
+            // summed per mint (exact, and per vintage). Orphan serials — deleted
+            // on-chain but matching no mint link — are deliberately excluded:
+            // nothing ties them to a policy, so they are not provably Guardian
+            // issuances. The only residue is documented fungible retirement,
+            // which is token-level by nature.
             totalRetired = issuanceEvents.reduce((s, e) => s + (e.serialRetiredCount ?? 0), 0);
             // Transfers are only knowable per serial, so this covers non-fungible
             // credits attributed to a mint event. Fungible balances can't be
@@ -653,10 +652,10 @@ export class PgProjectRepository extends ProjectRepository {
             )];
 
             if (projectTokenIds.length > 0) {
-                // Residue is only charged for tokens this project alone mints —
-                // when several projects share a token there is no way to say
-                // whose credits the unattributable part was, and counting it for
-                // each would report one retirement several times.
+                // Fungible retirement is only charged for tokens this project
+                // alone mints — when several projects share a token there is no
+                // way to say whose credits were retired, and counting it for each
+                // would report one retirement several times.
                 const [residue]: Array<{ retired: string }> = await this.dataSource.query(
                     `WITH sole AS (
                         SELECT pml.token_id
@@ -665,25 +664,13 @@ export class PgProjectRepository extends ProjectRepository {
                         GROUP BY pml.token_id
                         HAVING COUNT(DISTINCT pml.project_key) = 1
                      )
-                     SELECT (
-                        COALESCE((
-                            SELECT COUNT(*) FROM nft_cache n
-                            WHERE n."tokenId" IN (SELECT token_id FROM sole) AND n.deleted = true
-                              AND NOT EXISTS (
-                                  SELECT 1 FROM project_mint_link p
-                                  WHERE p.token_id = n."tokenId"
-                                    AND p.vp_consensus_timestamp = n."metadataTimestamp"
-                              )
-                        ), 0)
-                        +
-                        COALESCE((
-                            SELECT SUM(tre.amount / (10::numeric ^ COALESCE(tc.decimals, 0)))
-                            FROM token_retire_event tre
-                            JOIN token_cache tc
-                              ON tc."tokenId" = tre.token_id AND tc.type = 'FUNGIBLE_COMMON'
-                            WHERE tre.token_id IN (SELECT token_id FROM sole) AND tre.amount IS NOT NULL
-                        ), 0)
-                     )::text AS retired`,
+                     SELECT COALESCE((
+                        SELECT SUM(tre.amount / (10::numeric ^ COALESCE(tc.decimals, 0)))
+                        FROM token_retire_event tre
+                        JOIN token_cache tc
+                          ON tc."tokenId" = tre.token_id AND tc.type = 'FUNGIBLE_COMMON'
+                        WHERE tre.token_id IN (SELECT token_id FROM sole) AND tre.amount IS NOT NULL
+                     ), 0)::text AS retired`,
                     [projectTokenIds],
                 );
                 totalRetired += parseFloat(residue?.retired ?? '0');
