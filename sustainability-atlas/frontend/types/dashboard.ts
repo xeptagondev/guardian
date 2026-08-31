@@ -22,7 +22,7 @@ export interface DashboardMintStatsDto {
 // ── Dashboard summary ────────────────────────────────────────────────────────
 // Server-side aggregates from GET /:network/dashboard/summary. Country / sector
 // / vintage / registry labels arrive as raw stored values; display
-// normalisation (ISO country codes, "Unknown" bucketing) stays on the client.
+// normalisation (ISO country codes, "Other" bucketing) stays on the client.
 
 export interface DashboardTotals {
     registries: number;

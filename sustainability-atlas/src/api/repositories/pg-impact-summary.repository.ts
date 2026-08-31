@@ -114,7 +114,7 @@ export class PgImpactSummaryRepository extends ImpactSummaryRepository {
         };
     }
 
-    /** One pass over PROJECT rows grouped by country (LEFT JOINed to mv_project_stats), covering every row exactly once — including 'Unknown' for blank/missing country — so summing this result set gives grand totals guaranteed consistent with the per-country breakdown. 'Unknown' is excluded from `activeCountries`. */
+    /** One pass over PROJECT rows grouped by country (LEFT JOINed to mv_project_stats), covering every row exactly once — including 'Other' for blank/missing country (matching the Projects page's bucket name for unrecognized/blank country) — so summing this result set gives grand totals guaranteed consistent with the per-country breakdown. 'Other' is excluded from `activeCountries`. */
     private async getGeoAndTotals(): Promise<{
         totalCreditsIssued: number;
         totalRetiredInferred: number;
@@ -124,10 +124,10 @@ export class PgImpactSummaryRepository extends ImpactSummaryRepository {
     }> {
         const rows: RawGeoRow[] = await this.dataSource.query(`
             SELECT
-                COALESCE(NULLIF(bv."businessData"->>'country', ''), 'Unknown') AS country,
-                COUNT(*)::int                                                  AS project_count,
-                COALESCE(SUM(ps.total_issued), 0)::bigint                      AS credits_issued,
-                COALESCE(SUM(ps.total_retired), 0)::bigint                     AS credits_retired
+                COALESCE(NULLIF(bv."businessData"->>'country', ''), 'Other') AS country,
+                COUNT(*)::int                                                AS project_count,
+                COALESCE(SUM(ps.total_issued), 0)::bigint                    AS credits_issued,
+                COALESCE(SUM(ps.total_retired), 0)::bigint                   AS credits_retired
             FROM business_view bv
             LEFT JOIN ${MV_PROJECT_STATS_NAME} ps ON ps."projectKey" = bv."projectKey"
             WHERE bv."viewType" = 'PROJECT'
@@ -149,7 +149,7 @@ export class PgImpactSummaryRepository extends ImpactSummaryRepository {
             totalCreditsIssued += creditsIssued;
             totalRetiredInferred += creditsRetired;
             activeProjects += projectCount;
-            if (row.country !== 'Unknown') activeCountries += 1;
+            if (row.country !== 'Other') activeCountries += 1;
 
             geographicDistribution.push({ country: row.country, projectCount, creditsIssued });
         }
@@ -334,7 +334,7 @@ export class PgImpactSummaryRepository extends ImpactSummaryRepository {
         const rows: RawProjectBreakdownRow[] = await this.dataSource.query(`
             SELECT
                 bv."businessData"->>'name'                                     AS name,
-                COALESCE(NULLIF(bv."businessData"->>'country', ''), 'Unknown')  AS country,
+                COALESCE(NULLIF(bv."businessData"->>'country', ''), 'Other')    AS country,
                 bv."businessData"->>'methodology'                              AS methodology,
                 bv."businessData"->>'status'                                   AS status,
                 reg.registry_name,
