@@ -10,7 +10,7 @@ import { naturalCompare } from '~/lib/utils';
 import { niceAxis } from '~/lib/chart-scale';
 import { allocateDonutColors } from '~/lib/chart-colors';
 import { SDG_LIST, getLocalizedSDGName } from '~/lib/sdgs';
-import { normalizeCountryName } from '~/composables/useProjects';
+import { normalizeCountryName, OTHER_COUNTRY } from '~/composables/useProjects';
 import { LIFECYCLE_STAGES as CANONICAL_LIFECYCLE_STAGES } from '~/lib/lifecycle';
 import { SECTOR_I18N_KEYS } from '~/types/enums';
 import type { LabelCount } from '~/types/dashboard';
@@ -185,9 +185,14 @@ const methodologyTop = computed(() => topBins(methodologyRows.value, 'credits', 
 // merge into one row instead of splitting credits/projects across near-
 // duplicates, and unrecognized values collapse into "Other" rather than
 // each showing up as its own row (see useProjects.ts's normalizeCountryName).
+// normalizeCountryName returns '' for a genuinely empty/null country (as
+// opposed to OTHER_COUNTRY for a non-empty but unrecognized one) — fold that
+// case into OTHER_COUNTRY too so a missing country never falls through to
+// toBins' own "Unknown" fallback; this view only ever shows "Other" or a
+// real country name.
 const countryRows = computed<BinRow[]>(() =>
     toBins(summary.value.countries.map(c => ({
-        label: normalizeCountryName(c.country ?? ''),
+        label: normalizeCountryName(c.country ?? '') || OTHER_COUNTRY,
         projectCount: c.projects,
         credits: c.credits,
         methodologies: c.methodologies,

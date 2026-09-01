@@ -325,6 +325,7 @@
         "mdash": "—",
         "refresh": "Refresh",
         "cancel": "Cancel",
+        "unknown": "Unknown",
         "unknownError": "Unknown error",
         "showMore": "Show more",
         "showLess": "Show less",
