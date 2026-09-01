@@ -82,7 +82,7 @@ export const IWA_TO_CDOP: Record<string, string> = {
     "ActivityImpactModule.validations": "project.project_status",
     "Validation.validationDate": "project.project_status_updated_at",
     "MRVRequirements.claimPeriod": "project.number_of_crediting_periods",
-    "ActivityImpactModule.firstYearIssuance": "project.current_crediting_period_duration",
+    "ActivityImpactModule.firstYearIssuance": "vintage.vintage",
     "AccountableImpactOrganization.name": "project_stakeholder.project_developer_name",
     "AccountableImpactOrganization.developers": "project_stakeholder.project_stakeholder_name",
     "OriginationProcessAgreement.name": "registry.current_registry",

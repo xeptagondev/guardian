@@ -72,6 +72,19 @@ export function findCountryInText(text: string): string | null {
     return null;
 }
 
+/**
+ * True when `name` is an exact (case-insensitive) match for a known ISO
+ * 3166-1 country name. Used to tell "this token already is a real country"
+ * apart from a sub-national place name left over after a "<place>, <country>"
+ * value gets comma-split (see ProjectMapperService's findCountryInText
+ * fallback).
+ */
+export function isKnownCountryName(name: string): boolean {
+    if (!name) return false;
+    const lower = name.trim().toLowerCase();
+    return knownCountries().some(c => c.toLowerCase() === lower);
+}
+
 // ---------------------------------------------------------------------------
 // Sector normalisation
 // ---------------------------------------------------------------------------
