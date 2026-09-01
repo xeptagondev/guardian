@@ -9,6 +9,7 @@ import {
     unwrapGeoJsonGeometry,
     resolveCountryName,
     findCountryInText,
+    isKnownCountryName,
 } from '../project-mapper/helpers';
 import {
     extractLatLngStrings,
@@ -395,14 +396,21 @@ export class ProjectMapperService {
         }
         let country = countries[0] ?? null;
 
-        // When the extracted value is a narrative phrase rather than a country
-        // name (e.g. "districts of Jaipur ... in North-West India"), scan it
-        // for any known country name embedded in the text and use that. This
-        // runs before geo fallback because text-based detection is cheaper and
-        // more accurate when the country is explicitly named.
-        const looksLikeNarrative = (s: string | null): boolean =>
-            !!s && (s.length > 60 || /\s/.test(s.trim()));
-        if (rawCountry && looksLikeNarrative(country)) {
+        // The raw value can be "<place>, <country>" — a specific forest/
+        // reserve/district named before its country, common in localized
+        // REDD+/forestry methodologies (e.g. "districts of Jaipur ... in
+        // North-West India", or "Bangui, Central African Republic"). The
+        // comma-split above keeps only the first segment, so a single-word
+        // place name (no internal whitespace) would otherwise slip through
+        // as `country` untouched. Whenever there's more than one segment and
+        // the chosen one isn't itself a recognized country, scan the full
+        // raw value for one instead. Skipped when `country` already IS a
+        // recognized country (e.g. "US, India" → "United States"), so a
+        // correct pick is never overwritten by another country name
+        // mentioned elsewhere in the raw text. Runs before geo fallback
+        // because text-based detection is cheaper and more accurate when the
+        // country is explicitly named.
+        if (rawCountry && countries.length > 1 && !isKnownCountryName(country)) {
             const fromText = findCountryInText(rawCountry);
             if (fromText) country = fromText;
         }
@@ -410,15 +418,18 @@ export class ProjectMapperService {
         // Geo fallback: derive country via point-in-polygon when:
         //   1. No country was extracted, OR
         //   2. The extracted value is clearly not a country name (a numeric
-        //      string, coordinate notation like "90.3563° E", or a short
-        //      non-word like "TST" / "tes"). These come from mis-mapped fields
-        //      where 'country' was pointed at a longitude or test value.
+        //      string, coordinate notation like "90.3563° E" or DMS notation
+        //      like `-22° 24' 59.99" S`, or a short non-word like "TST" /
+        //      "tes"). These come from mis-mapped fields where 'country' was
+        //      pointed at a latitude/longitude field instead.
         const isValidCountry = (s: string | null): boolean => {
             if (!s) return false;
             const trimmed = s.trim();
             if (trimmed.length < 4 || trimmed.length > 100) return false;
-            // Looks like a number or coordinate (e.g. "32.5825", "90.3563° E", "-63.236047")
+            // Decimal-degree coordinate (e.g. "32.5825", "90.3563° E", "-63.236047")
             if (/^-?\d+(\.\d+)?(\s*°\s*[NSEW])?$/.test(trimmed)) return false;
+            // DMS coordinate (e.g. `-22° 24' 59.99" S`, `47° 51' 60.00" E`)
+            if (/^-?\d{1,3}(\.\d+)?\s*°\s*(\d{1,2}(\.\d+)?\s*['’]\s*)?(\d{1,2}(\.\d+)?\s*["”]\s*)?[NSEW]?$/.test(trimmed)) return false;
             // No letters at all → not a country name
             if (!/[a-zA-Z]/.test(trimmed)) return false;
             return true;
@@ -428,6 +439,14 @@ export class ProjectMapperService {
             const lookup = await this.reverseGeoService.lookupCountry(latVal, lng);
             if (lookup) country = lookup.name;
         }
+
+        // Re-trim regardless of which path set `country` above — notably the
+        // geo fallback, which can pass through a raw third-party GeoJSON
+        // property with no trim of its own. JS's trim() strips whitespace a
+        // plain SQL TRIM() doesn't (e.g. a non-breaking space), so a stray
+        // char here would silently drop the project into PgProjectRepository
+        // .applyCountryFilter's "Other" bucket despite displaying correctly.
+        if (country) country = country.trim();
 
         // Display name: VC-supplied name when present, else project key (so a row
         // exists even before the registration VC lands).

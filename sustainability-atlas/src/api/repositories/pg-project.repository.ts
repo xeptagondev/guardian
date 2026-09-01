@@ -31,6 +31,22 @@ const EXPORT_BATCH_SIZE = 2000;
 /** Ceiling on rows a single export may stream; exceeding it throws rather than truncating. */
 const EXPORT_MAX_ROWS = 100_000;
 
+/**
+ * `businessData.country`, trimmed of the whitespace classes JS's String.trim()
+ * strips but a plain SQL TRIM() (and Postgres's regex `\s` class) does not —
+ * notably a non-breaking space (U+00A0), a stray BOM (U+FEFF), and several
+ * other Unicode space separators (e.g. U+202F narrow no-break space, a
+ * common copy/paste artifact from Word/PDF-sourced registry text) that
+ * Postgres's `\s` doesn't cover but ECMAScript's WhiteSpace/LineTerminator
+ * production does. Without this, a country value with one of these trailing
+ * chars (invisible in most editors) passes the frontend's resolveCountryCode
+ * (re-trimmed with JS on every render, so it displays as "Peru" with the
+ * correct flag) but fails every match here, landing the project in the
+ * "Other" bucket instead.
+ */
+const TRIMMED_COUNTRY_SQL =
+    `regexp_replace(bv."businessData"->>'country', '^[\\t\\n\\v\\f\\r \\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]+|[\\t\\n\\v\\f\\r \\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]+$', '', 'g')`;
+
 /** Raw row shape for `findAllForExport` (see `ProjectExportRow` doc). */
 interface RawExportRow {
     project_name: string | null;
@@ -156,9 +172,13 @@ export class PgProjectRepository extends ProjectRepository {
      * resolveCountryCode) and matches every raw form on record for that code
      * (CODE_TO_ALIASES), so selecting "Mexico" also catches projects stored
      * as "MEX". The `__other__` sentinel (see recognized-countries.ts) means
-     * "every project whose country is non-empty but isn't a recognized ISO
-     * name/alpha-3 code" — a NOT-IN-list clause, since ILIKE can't express
-     * it. The filter is multi-select, so selections arrive `|`-joined (same
+     * "every project whose country isn't a recognized ISO name/alpha-3 code"
+     * — this includes both a non-empty-but-unrecognized value AND a missing
+     * one (null/empty, shown as "—" in the UI), so the "Other" bucket and
+     * filter agree with each other: every project not claimed by a specific
+     * country lands in exactly one of them. A NOT-IN-list clause, since
+     * ILIKE can't express it. The filter is multi-select, so selections
+     * arrive `|`-joined (same
      * convention as QueryBuilder's other multi-value filters, e.g.
      * `__other__|MEX`) and need OR, not AND, semantics — this builds the
      * full OR'd clause itself (mirroring QueryBuilder's private
@@ -184,8 +204,8 @@ export class PgProjectRepository extends ProjectRepository {
             if (p === OTHER_COUNTRY_FILTER_VALUE) {
                 const tokens = builder.nextParam(RECOGNIZED_COUNTRY_TOKENS);
                 clauses.push(
-                    `(NULLIF(TRIM(bv."businessData"->>'country'), '') IS NOT NULL ` +
-                    `AND LOWER(TRIM(bv."businessData"->>'country')) <> ALL(${tokens}::text[]))`,
+                    `(NULLIF(${TRIMMED_COUNTRY_SQL}, '') IS NULL ` +
+                    `OR LOWER(${TRIMMED_COUNTRY_SQL}) <> ALL(${tokens}::text[]))`,
                 );
                 continue;
             }
@@ -193,7 +213,7 @@ export class PgProjectRepository extends ProjectRepository {
             const code = COUNTRY_TOKEN_TO_CODE[p.toLowerCase()];
             if (code) {
                 const aliases = builder.nextParam(CODE_TO_ALIASES[code] ?? [p.toLowerCase()]);
-                clauses.push(`LOWER(TRIM(bv."businessData"->>'country')) = ANY(${aliases}::text[])`);
+                clauses.push(`LOWER(${TRIMMED_COUNTRY_SQL}) = ANY(${aliases}::text[])`);
             } else {
                 // Not a recognized token — a legacy/arbitrary value (e.g. an
                 // old bookmarked link). Fall back to the previous substring
