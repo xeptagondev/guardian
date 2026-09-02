@@ -365,9 +365,11 @@ export class QueueStatusController {
         { payload: IpfsCidStatusListDto; expiresAt: number }
     >();
 
-    /** Last successfully computed total per cacheKey, kept indefinitely (capped
-     * by size, not TTL) — see the countSql fallback in listIpfsStatus. The
-     * count query has no filter to prune the common (unfiltered) case, so its
+    /** Last successfully computed total per totalCacheKey (filters only — NOT
+     * page/limit/sortBy/sortDir, which don't affect the total), kept
+     * indefinitely (capped by size, not TTL) — see the countSql fallback in
+     * listIpfsStatus. The count query has no filter to prune the common
+     * (unfiltered) case, so its
      * cost is tied to message_ipfs_cid's full size regardless of how cheap the
      * data query is; under real concurrent load on this database (background
      * materialized-view refreshes, business_view rebuilds) it can occasionally
@@ -1342,6 +1344,25 @@ export class QueueStatusController {
             page, limit, sortBy, sortDir,
         ].join(':');
 
+        // Separate, coarser key for the total-count fallback: the total only
+        // depends on the filter conditions, never on page/limit/sortBy/sortDir.
+        // Keying it the same as cacheKey (as the first version of this did)
+        // meant every distinct page or sort order needed its OWN successful
+        // count before it could fall back, even though they all share the same
+        // answer — so paging through a view whose count keeps timing out could
+        // show "0" on every page rather than reusing the one total that did
+        // succeed for that filter set.
+        const totalCacheKey = [
+            'ipfs-status-total',
+            network.toLowerCase(),
+            query.topicId ?? '',
+            query.includeChildTopics ? '1' : '0',
+            query.messageType ?? '',
+            query.cid ?? '',
+            query.errorCategory ?? '',
+            query.status ?? '',
+        ].join(':');
+
         if (!query.fresh) {
             const cached = this.ipfsStatusCache.get(cacheKey);
             if (cached && cached.expiresAt > Date.now()) return cached.payload;
@@ -1492,16 +1513,16 @@ export class QueueStatusController {
 
         const total = countRows
             ? Number(countRows[0]?.total ?? 0)
-            : this.ipfsStatusTotalCache.get(cacheKey) ?? 0;
+            : this.ipfsStatusTotalCache.get(totalCacheKey) ?? 0;
         if (countRows) {
             // Same unbounded-cardinality concern as ipfsStatusCache (topicId is
             // free text) — cap it the same way, evicting the oldest entry.
-            if (!this.ipfsStatusTotalCache.has(cacheKey)
+            if (!this.ipfsStatusTotalCache.has(totalCacheKey)
                 && this.ipfsStatusTotalCache.size >= IPFS_STATUS_CACHE_MAX_ENTRIES) {
                 const oldest = this.ipfsStatusTotalCache.keys().next().value;
                 if (oldest !== undefined) this.ipfsStatusTotalCache.delete(oldest);
             }
-            this.ipfsStatusTotalCache.set(cacheKey, total);
+            this.ipfsStatusTotalCache.set(totalCacheKey, total);
         }
 
         const toV1 = (raw: string): string => {
