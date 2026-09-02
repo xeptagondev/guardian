@@ -104,7 +104,7 @@ export class MessageProcessProcessor extends WorkerHost {
         }
 
         // Upsert into message table
-        await this.dataSource.query(
+        const [{ id: messageId }]: Array<{ id: string }> = await this.dataSource.query(
             `INSERT INTO message (
                 "consensusTimestamp",
                 "topicId",
@@ -147,7 +147,8 @@ export class MessageProcessProcessor extends WorkerHost {
                     ELSE 'mirror_node'
                 END,
                 "lastUpdate" = EXCLUDED."lastUpdate",
-                "updatedAt" = NOW()`,
+                "updatedAt" = NOW()
+            RETURNING id`,
             [
                 consensusTimestamp,
                 topicId,
@@ -170,6 +171,26 @@ export class MessageProcessProcessor extends WorkerHost {
                 Date.now().toString(),
             ],
         );
+
+        // Reconcile message_ipfs_cid — the precomputed (cid, message) relationship
+        // GET /:network/ipfs-status reads instead of unnest()ing message.files
+        // live on every request. `files` can change on reprocess (project-reparse
+        // requeues from sequence 0), so this deletes whatever this message used to
+        // reference that it no longer does, then inserts whatever's new.
+        // `cid <> ALL($2)` against an empty array is vacuously true — deletes
+        // every existing row for this message when files is now empty, correctly.
+        await this.dataSource.query(
+            `DELETE FROM message_ipfs_cid WHERE "messageId" = $1 AND cid <> ALL($2::text[])`,
+            [messageId, parsed.files],
+        );
+        if (parsed.files.length > 0) {
+            await this.dataSource.query(
+                `INSERT INTO message_ipfs_cid (cid, "messageId", "topicId", "messageType")
+                 SELECT unnest($1::text[]), $2, $3, $4
+                 ON CONFLICT (cid, "messageId") DO NOTHING`,
+                [parsed.files, messageId, topicId, parsed.type],
+            );
+        }
 
         const isPublishedPolicy =
             parsed.type === 'Instance-Policy' &&

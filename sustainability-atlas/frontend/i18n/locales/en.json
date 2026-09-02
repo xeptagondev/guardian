@@ -2488,6 +2488,7 @@
             "filterTopicPlaceholder": "Filter by topic ID...",
             "includeChildTopics": "Include child topics",
             "noDocuments": "No IPFS documents found",
+            "loadFailed": "Failed to load IPFS documents.",
             "copyCid": "Copy CID",
             "copyCidV1": "Copy CID v1",
             "columns": {

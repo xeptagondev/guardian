@@ -885,9 +885,17 @@ export class MappingReprocessService {
         // Clear the ipfs_fetch_failure table for these CIDs so the boot-time
         // safety net doesn't immediately re-park them.
         if (cidsToRefresh.length > 0) {
+            const refreshCids = cidsToRefresh.map(c => c.cid);
             await ds.query(
                 `DELETE FROM ipfs_fetch_failure WHERE cid = ANY($1::text[])`,
-                [cidsToRefresh.map(c => c.cid)],
+                [refreshCids],
+            );
+            // Keep message_ipfs_cid.status in sync (see schema-bootstrap.ts) —
+            // these CIDs are back to pending until the re-queued fetch below
+            // resolves them.
+            await ds.query(
+                `UPDATE message_ipfs_cid SET status = 'pending' WHERE cid = ANY($1::text[]) AND status <> 'fetched'`,
+                [refreshCids],
             );
         }
 
