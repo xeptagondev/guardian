@@ -191,6 +191,8 @@ export function mapApiProject(raw: Record<string, any>): Project {
         methodologyId: raw.methodologyId ?? '',
         registry: raw.registryName ?? raw.registry ?? raw.registryDid ?? 'Unknown Registry',
         developer: raw.developer ?? '',
+        developerEmail: raw.developerEmail ?? null,
+        developerPhone: raw.developerPhone ?? null,
         credits: raw.credits ?? 0,
         status: raw.lifecycleStage ?? raw.status ?? 'Registered',
         vintage: raw.vintage ?? '',

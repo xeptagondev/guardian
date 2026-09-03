@@ -12,6 +12,8 @@ export type ResolvedFieldPaths = {
     description: string | null;
     country: string | null;
     developer: string | null;
+    developerEmail: string | null;
+    developerPhone: string | null;
     category: string | null;
     scale: string | null;
     sector: string | null;

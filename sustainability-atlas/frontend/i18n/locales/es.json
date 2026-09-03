@@ -588,6 +588,8 @@
             "methodologyVersion": "Versión de la metodología",
             "registry": "Registro",
             "developer": "Desarrollador",
+            "developerEmail": "Correo del desarrollador",
+            "developerPhone": "Teléfono del desarrollador",
             "sector": "Sector",
             "sectoralScope": "Alcance sectorial",
             "category": "Categoría",

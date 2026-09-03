@@ -32,6 +32,12 @@ export class ResolvedFieldsDto {
     developer: ResolvedFieldDto | null;
 
     @ApiPropertyOptional({ type: ResolvedFieldDto, nullable: true })
+    developerEmail: ResolvedFieldDto | null;
+
+    @ApiPropertyOptional({ type: ResolvedFieldDto, nullable: true })
+    developerPhone: ResolvedFieldDto | null;
+
+    @ApiPropertyOptional({ type: ResolvedFieldDto, nullable: true })
     category: ResolvedFieldDto | null;
 
     @ApiPropertyOptional({ type: ResolvedFieldDto, nullable: true })
@@ -336,6 +342,8 @@ export class DecodedMethodologyResponseDto {
                 description: buildResolvedField(resolvedFields['description']),
                 country: buildResolvedField(resolvedFields['country']),
                 developer: buildResolvedField(resolvedFields['developer']),
+                developerEmail: buildResolvedField(resolvedFields['developerEmail']),
+                developerPhone: buildResolvedField(resolvedFields['developerPhone']),
                 category: buildResolvedField(resolvedFields['category']),
                 scale: buildResolvedField(resolvedFields['scale']),
                 sector: buildResolvedField(resolvedFields['sector']),

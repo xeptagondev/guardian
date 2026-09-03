@@ -514,6 +514,20 @@ export class ProjectMapperService {
             newFields.developer = developer;
             if (explicitOverrideFields.has('developer')) overrideBusinessKeys.add('developer');
         }
+        // Project-participant contact details. Kept adjacent to `developer`
+        // because they come off the same schema/VC; extraction is gated on a
+        // shape guard (normalizeEmail/normalizePhone) so a mis-mapped narrative
+        // field can't land here as a bogus "email".
+        const developerEmail = normalizeEmail(extracted['developerEmail']);
+        if (developerEmail) {
+            newFields.developerEmail = developerEmail;
+            if (explicitOverrideFields.has('developerEmail')) overrideBusinessKeys.add('developerEmail');
+        }
+        const developerPhone = normalizePhone(extracted['developerPhone']);
+        if (developerPhone) {
+            newFields.developerPhone = developerPhone;
+            if (explicitOverrideFields.has('developerPhone')) overrideBusinessKeys.add('developerPhone');
+        }
         // vintage/createdAt can also be seeded by the unrelated {from,to} fallback
         // scan above — only tag as an override when the value actually came from
         // the mapped vintageRaw field, otherwise an override on vintageRaw could
@@ -1024,6 +1038,31 @@ function parseEstimatedAnnualCredits(raw: unknown): number | null {
         return isFinite(n) && n > 0 ? n : null;
     }
     return null;
+}
+
+/**
+ * Accepts a mapped contact value only when it actually looks like an email.
+ * The fuzzy mapper's low match threshold can land a narrative field here on
+ * schemas that have no real email field — this is a defensive guard.
+ */
+function normalizeEmail(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    const s = raw.trim();
+    if (s.length > 254) return null;
+    return /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]{2,}$/.test(s) ? s : null;
+}
+
+/**
+ * Accepts a mapped contact value only when it plausibly is a phone number:
+ * short, and at least 6 digits after stripping formatting characters.
+ */
+function normalizePhone(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    const s = raw.trim();
+    if (!s || s.length > 64) return null;
+    const digits = s.replace(/\D/g, '');
+    if (digits.length < 6 || digits.length > 20) return null;
+    return /^[+()\d\s./ext-]+$/i.test(s) ? s : null;
 }
 
 /**
