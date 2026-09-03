@@ -14,6 +14,17 @@ const METADATA_BACKFILL_BATCH = 50_000;
  *  so a partial pass costs freshness rather than correctness. */
 const METADATA_BACKFILL_BUDGET_MS = 60_000;
 
+/** Messages scanned per pass of the message_ipfs_cid backfill (below). Batches
+ *  on `message` rows, not on the unnested cid rows a batch produces, since the
+ *  cursor has to advance over `message.id` regardless of how many files each
+ *  message carries. */
+const IPFS_CID_BACKFILL_BATCH = 50_000;
+/** Same per-boot budget rationale as METADATA_BACKFILL_BUDGET_MS — this one's
+ *  watermark is persisted (see message_ipfs_cid_backfill below), so unlike the
+ *  nft_cache backfill a completed run costs an indexed no-op on every later
+ *  boot instead of a full re-scan. */
+const IPFS_CID_BACKFILL_BUDGET_MS = 60_000;
+
 const bootstrapLogger = new Logger('SchemaBootstrap');
 
 /**
@@ -30,13 +41,14 @@ async function addColumnIfMissing(
     table: string,
     column: string,
     typeSql: string,
-): Promise<void> {
+): Promise<boolean> {
     const [existing] = await dataSource.query(
         `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
         [table, column],
     );
-    if (existing) return;
+    if (existing) return false;
     await dataSource.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "${column}" ${typeSql}`);
+    return true;
 }
 
 /**
@@ -336,6 +348,176 @@ export async function bootstrapSchema(dataSource: DataSource): Promise<void> {
         ON nft_cache ("tokenId", "metadataTimestamp")
         WHERE "metadataTimestamp" IS NOT NULL
     `);
+
+    // ── IPFS CID relationship (message_ipfs_cid) ────────────────────────────
+    // GET /:network/ipfs-status's default (unfiltered) view used to unnest
+    // message.files across the ENTIRE message table on every request — cost
+    // scales with total message count, not the 20 rows the panel shows. At
+    // scale this exceeds the API's own statement_timeout outright (measured
+    // 38.9s vs a 15s timeout at 3.4M messages locally). This table precomputes
+    // the (cid, message) relationship incrementally at ingestion time (see the
+    // reconcile step in message-process.processor.ts) so the API can do a
+    // plain indexed, paginated SELECT against a table sized to the CID count
+    // instead of a live unnest() over a table that only ever grows.
+    //
+    // No FK to message(id) — consistent with every other per-network derived
+    // table in this file (project_mint_link, contract_cache, etc.), none of
+    // which reference message despite several being keyed by message data.
+    // message is the hottest table in the system; an FK here would tax every
+    // write against it to maintain a constraint nothing actually needs, since
+    // message rows are never deleted and their id is stable across upsert.
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS message_ipfs_cid (
+            cid           text        NOT NULL,
+            "messageId"   bigint      NOT NULL,
+            "topicId"     varchar(20) NOT NULL,
+            "messageType" varchar(50) NOT NULL,
+            CONSTRAINT "PK_message_ipfs_cid" PRIMARY KEY (cid, "messageId")
+        )
+    `);
+    // Serves the already-fast topicId-filtered query shape (today: 4.6ms at
+    // 3.4M messages once topicId prunes message before unnesting — this index
+    // gives the same win with no unnest step at all).
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_ipfs_cid_topic
+        ON message_ipfs_cid ("topicId")
+    `);
+    // The PK's leading column (cid) already serves cid-only lookups/filters —
+    // this index is for the reconcile step's per-message DELETE (below and in
+    // message-process.processor.ts), which filters on messageId alone and
+    // runs on every message upsert. Without it that DELETE is a full scan of
+    // this (multi-million-row, at scale) table on every single ingested
+    // message.
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_ipfs_cid_message
+        ON message_ipfs_cid ("messageId")
+    `);
+
+    // Denormalized fetch status ('fetched' | 'failed' | 'pending'), kept in sync
+    // by whatever writes to ipfs_files/ipfs_fetch_failure (ipfs-fetch.processor.ts,
+    // IpfsFetchFailureRepository, and the admin retry endpoints in
+    // queue-status.controller.ts / mapping-reprocess.service.ts — see each for
+    // its own reconcile call). This exists ONLY so ordering by status can be
+    // index-driven: the original derived form (`CASE WHEN ipfs.cid IS NOT NULL
+    // THEN 'fetched' ...`) spans two joined tables and can't be indexed at all,
+    // so `ORDER BY <that CASE> LIMIT 20` always had to fully sort every matching
+    // row before applying LIMIT — measured 30.1s even after message_ipfs_cid
+    // made the row *scan* itself cheap. A real column fixes the indexing half;
+    // see the default `sortDir` flip in queue-status.controller.ts for the
+    // other half (this column alone doesn't help while the default direction
+    // still visits 'pending' — ~97% of rows — before the two small groups).
+    await addColumnIfMissing(
+        dataSource, 'message_ipfs_cid', 'status', `varchar(10) NOT NULL DEFAULT 'pending'`,
+    );
+    await dataSource.query(`
+        CREATE INDEX IF NOT EXISTS idx_message_ipfs_cid_status
+        ON message_ipfs_cid (status)
+    `);
+
+    // Persisted backfill progress. Unlike the nft_cache backfill above (which
+    // resets its cursor to 0 every boot and relies on "metadataTimestamp IS
+    // NULL" to cheaply skip already-done rows), message_ipfs_cid has no such
+    // per-row marker on `message` to test "already backfilled" without an
+    // anti-join against a multi-million-row table — so the watermark itself
+    // has to survive restarts, or every boot after completion would re-pay a
+    // full scan just to confirm there's nothing left to do.
+    await dataSource.query(`
+        CREATE TABLE IF NOT EXISTS message_ipfs_cid_backfill (
+            source       varchar(30) NOT NULL,
+            "lastValue"  varchar(40),
+            "updatedAt"  timestamptz NOT NULL DEFAULT now(),
+            CONSTRAINT "PK_message_ipfs_cid_backfill" PRIMARY KEY (source)
+        )
+    `);
+
+    const [ipfsCidWatermark] = await dataSource.query(
+        `SELECT "lastValue" FROM message_ipfs_cid_backfill WHERE source = 'message_ipfs_cid'`,
+    );
+    let ipfsCidCursor: string = ipfsCidWatermark?.lastValue ?? '0';
+    let ipfsCidBackfilled = 0;
+    let ipfsCidBackfillDone = true;
+    const ipfsCidBackfillDeadline = Date.now() + IPFS_CID_BACKFILL_BUDGET_MS;
+    for (;;) {
+        if (Date.now() > ipfsCidBackfillDeadline) {
+            ipfsCidBackfillDone = false;
+            break;
+        }
+        // Batches on message rows (not the cid rows they unnest into) so the
+        // cursor advances by a predictable amount regardless of how many
+        // files any one message carries. ON CONFLICT DO NOTHING makes this
+        // safe to re-run over a range already covered by the live write path
+        // (e.g. a message ingested after this boot's cursor was last read).
+        const [batch]: Array<{ max_id: string | null; seen: string }> = await dataSource.query(
+            `
+            WITH candidate AS (
+                SELECT id, "topicId", type, files
+                FROM message
+                WHERE files IS NOT NULL
+                  AND id > $1::bigint
+                ORDER BY id
+                LIMIT ${IPFS_CID_BACKFILL_BATCH}
+            ), inserted AS (
+                INSERT INTO message_ipfs_cid (cid, "messageId", "topicId", "messageType")
+                SELECT unnest(c.files), c.id, c."topicId", c.type
+                FROM candidate c
+                ON CONFLICT (cid, "messageId") DO NOTHING
+                RETURNING 1
+            )
+            SELECT MAX(id)::text AS max_id, COUNT(*)::text AS seen FROM candidate
+            `,
+            [ipfsCidCursor],
+        );
+        if (!batch || batch.seen === '0' || batch.max_id === null) {
+            break;
+        }
+        ipfsCidBackfilled += Number(batch.seen);
+        ipfsCidCursor = batch.max_id;
+    }
+    await dataSource.query(
+        `INSERT INTO message_ipfs_cid_backfill (source, "lastValue", "updatedAt")
+         VALUES ('message_ipfs_cid', $1, now())
+         ON CONFLICT (source) DO UPDATE SET "lastValue" = EXCLUDED."lastValue", "updatedAt" = now()`,
+        [ipfsCidCursor],
+    );
+    if (ipfsCidBackfilled > 0) {
+        bootstrapLogger.log(
+            `message_ipfs_cid backfill: ${ipfsCidBackfilled} message(s) this pass` +
+            (ipfsCidBackfillDone ? ' (complete)' : ' — time budget reached, resuming next boot'),
+        );
+    }
+
+    // Sync message_ipfs_cid.status for any row the two backfills above just
+    // inserted with the column's 'pending' default. Must run AFTER the row
+    // backfill, not gated to "only once when the column was first added": the
+    // row backfill can span many boots, so a row inserted on a later boot needs
+    // this too, and a status column added mid-way through a still-running row
+    // backfill would otherwise never correct rows backfilled afterward. Safe
+    // and cheap to run unconditionally every boot — bounded by ipfs_files/
+    // ipfs_fetch_failure's size (small, tens of thousands of rows even at
+    // 3.4M-message scale), not by message_ipfs_cid's.
+    const [{ count: ipfsCidFetchedSynced }] = await dataSource.query(`
+        WITH updated AS (
+            UPDATE message_ipfs_cid mc SET status = 'fetched'
+            FROM ipfs_files i
+            WHERE i.cid = mc.cid AND mc.status <> 'fetched'
+            RETURNING 1
+        )
+        SELECT COUNT(*)::text AS count FROM updated
+    `);
+    const [{ count: ipfsCidFailedSynced }] = await dataSource.query(`
+        WITH updated AS (
+            UPDATE message_ipfs_cid mc SET status = 'failed'
+            FROM ipfs_fetch_failure f
+            WHERE f.cid = mc.cid AND mc.status = 'pending'
+            RETURNING 1
+        )
+        SELECT COUNT(*)::text AS count FROM updated
+    `);
+    if (Number(ipfsCidFetchedSynced) > 0 || Number(ipfsCidFailedSynced) > 0) {
+        bootstrapLogger.log(
+            `message_ipfs_cid.status sync: ${ipfsCidFetchedSynced} -> fetched, ${ipfsCidFailedSynced} -> failed`,
+        );
+    }
 
     // ── Fungible mint transactions ─────────────────────────────────────────
     // Fungible tokens have no per-unit metadata, so Guardian carries the mint

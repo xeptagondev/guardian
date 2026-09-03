@@ -2486,6 +2486,7 @@
             "filterTopicPlaceholder": "Filtrar por ID de tema...",
             "includeChildTopics": "Incluir temas hijos",
             "noDocuments": "No se encontraron documentos IPFS",
+            "loadFailed": "No se pudieron cargar los documentos IPFS.",
             "copyCid": "Copiar CID",
             "copyCidV1": "Copiar CID v1",
             "columns": {
