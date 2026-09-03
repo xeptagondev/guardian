@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Hash } from 'lucide-vue-next';
+import { Hash, Mail, PhoneCall, Check } from 'lucide-vue-next';
 import type { Project } from '~/types/models';
 import { formatCredits } from '~/lib/format';
 import { formatDate } from '~/lib/format';
@@ -16,6 +16,16 @@ const props = defineProps<{
 
 const { t } = useI18n();
 const { network } = useNetwork();
+
+const phoneCopied = ref(false);
+
+async function copyDeveloperPhone(phone: string) {
+    try {
+        await navigator.clipboard.writeText(phone);
+        phoneCopied.value = true;
+        setTimeout(() => { phoneCopied.value = false; }, 2000);
+    } catch { /* ignore */ }
+}
 
 function translateSector(raw?: string): string {
     if (!raw) return '—';
@@ -121,7 +131,32 @@ function tip(iwaPaths: string): string {
                     {{ $t('projects.details.developer') }}
                     <InfoTooltip :text="tip('ActivityImpactModule.developers')" />
                 </div>
-                <div class="text-sm font-medium text-foreground">{{ project.developer || '—' }}</div>
+                <div class="text-sm font-medium text-foreground flex items-center gap-3">
+                    <span>{{ project.developer || '—' }}</span>
+                    <InfoTooltip v-if="project.developerEmail" :text="project.developerEmail">
+                        <a
+                            :href="`mailto:${project.developerEmail}`"
+                            :aria-label="$t('projects.details.developerEmail')"
+                            class="text-muted-foreground/50 hover:text-primary transition-colors"
+                        >
+                            <Mail class="h-3.5 w-3.5" />
+                        </a>
+                    </InfoTooltip>
+                    <InfoTooltip
+                        v-if="project.developerPhone"
+                        :text="phoneCopied ? $t('common.copied') : project.developerPhone"
+                    >
+                        <button
+                            type="button"
+                            :aria-label="$t('projects.details.developerPhone')"
+                            class="cursor-pointer text-muted-foreground/50 hover:text-primary transition-colors"
+                            @click="copyDeveloperPhone(project.developerPhone!)"
+                        >
+                            <Check v-if="phoneCopied" class="h-3.5 w-3.5 text-stat-green" />
+                            <PhoneCall v-else class="h-3.5 w-3.5" />
+                        </button>
+                    </InfoTooltip>
+                </div>
             </div>
 
             <!-- Country -->

@@ -10,7 +10,7 @@
 
 export interface ProjectExtractField {
     /** Stable key used everywhere (DB, API, frontend). */
-    key: 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriod' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo' | 'estimatedAnnualCredits';
+    key: 'name' | 'description' | 'country' | 'developer' | 'developerEmail' | 'developerPhone' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriod' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo' | 'estimatedAnnualCredits';
     /** Human-readable label shown in the UI. */
     label: string;
     /** Keywords matched against schema field title + description (lowercase). */
@@ -54,6 +54,23 @@ export const PROJECT_EXTRACT_FIELDS: ProjectExtractField[] = [
         label: 'Developer',
         keywords: ['developer', 'proponent', 'organization', 'project developer', 'applicant'],
         iwaField: 'ActivityImpactModule.developers',
+    },
+    {
+        key: 'developerEmail',
+        label: 'Developer Email',
+        // Guardian project schemas title this "Project Participant Email" /
+        // "Contact Email" (e.g. field14, format: email). Kept off the
+        // `developer` entry deliberately — that field must stay the org NAME.
+        keywords: ['email', 'mail', 'e-mail', 'contact email', 'participant email', 'email address'],
+        // Registry/VVB/auditor contact blocks live in the same policies and
+        // would otherwise outscore the project participant's own contact info.
+        exclude: ['vvb', 'validator', 'verifier', 'auditor', 'registry', 'standard registry', 'agent', 'phone', 'telephone'],
+    },
+    {
+        key: 'developerPhone',
+        label: 'Developer Phone',
+        keywords: ['telephone', 'phone', 'phone number', 'contact number', 'mobile'],
+        exclude: ['vvb', 'validator', 'verifier', 'auditor', 'registry', 'standard registry', 'agent', 'email', 'e-mail'],
     },
     {
         key: 'category',
