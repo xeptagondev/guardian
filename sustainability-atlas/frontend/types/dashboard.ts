@@ -61,7 +61,9 @@ export interface CountryBreakdown {
 }
 
 export interface DashboardMapPoint {
+    id: string;
     name: string | null;
+    country: string | null;
     lat: number;
     lng: number;
     credits: number;
