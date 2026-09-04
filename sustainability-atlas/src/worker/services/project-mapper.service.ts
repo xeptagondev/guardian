@@ -415,34 +415,35 @@ export class ProjectMapperService {
             if (fromText) country = fromText;
         }
 
-        // Geo fallback: derive country via point-in-polygon when:
-        //   1. No country was extracted, OR
-        //   2. The extracted value is clearly not a country name (a numeric
-        //      string, coordinate notation like "90.3563° E" or DMS notation
-        //      like `-22° 24' 59.99" S`, or a short non-word like "TST" /
-        //      "tes"). These come from mis-mapped fields where 'country' was
-        //      pointed at a latitude/longitude field instead.
-        const isValidCountry = (s: string | null): boolean => {
-            if (!s) return false;
-            const trimmed = s.trim();
-            if (trimmed.length < 4 || trimmed.length > 100) return false;
-            // Decimal-degree coordinate (e.g. "32.5825", "90.3563° E", "-63.236047")
-            if (/^-?\d+(\.\d+)?(\s*°\s*[NSEW])?$/.test(trimmed)) return false;
-            // DMS coordinate (e.g. `-22° 24' 59.99" S`, `47° 51' 60.00" E`)
-            if (/^-?\d{1,3}(\.\d+)?\s*°\s*(\d{1,2}(\.\d+)?\s*['’]\s*)?(\d{1,2}(\.\d+)?\s*["”]\s*)?[NSEW]?$/.test(trimmed)) return false;
-            // No letters at all → not a country name
-            if (!/[a-zA-Z]/.test(trimmed)) return false;
-            return true;
-        };
-        if (!isValidCountry(country) && geoLngLat) {
+        // Geo fallback: when the extracted country isn't a real, recognized
+        // country name — null/empty, a coordinate string like "90.3563° E" or
+        // `-22° 24' 59.99" S` (a mis-mapped lat/lng field), or free text that
+        // just isn't a country ("Valle de los Tigres Project Area", a site
+        // name mapped to the wrong field) — and this same VC also carries its
+        // own `geo` field, resolve the real country from those coordinates.
+        //
+        // This does NOT touch `country` itself — it's written to the sibling
+        // `geoCountryCode` key instead (an ISO 3166-1 alpha-3 code), so the
+        // original (if wrong) VC-sourced value is never overwritten/lost. See
+        // docs/dashboard-map-country-shading-investigation.md and
+        // PgProjectRepository.applyCountryFilter, which reads this key to pull
+        // a project out of the "Other" bucket and make it selectable by its
+        // recovered country once this is set.
+        //
+        // Only handles the case where the bad country and the good geo arrive
+        // on the SAME VC. When they're split across different VCs for the
+        // same project (arrival order isn't guaranteed), this can't resolve
+        // it — that's what scripts/backfill-geo-country-code.ts is for.
+        let geoCountryCode: string | null = null;
+        if (!isKnownCountryName(country ?? '') && geoLngLat) {
             const [lng, latVal] = geoLngLat;
             const lookup = await this.reverseGeoService.lookupCountry(latVal, lng);
-            if (lookup) country = lookup.name;
+            if (lookup) geoCountryCode = lookup.code;
         }
 
         // Re-trim regardless of which path set `country` above — notably the
-        // geo fallback, which can pass through a raw third-party GeoJSON
-        // property with no trim of its own. JS's trim() strips whitespace a
+        // text-scan fallback a few lines up, which can pass through a raw
+        // value with no trim of its own. JS's trim() strips whitespace a
         // plain SQL TRIM() doesn't (e.g. a non-breaking space), so a stray
         // char here would silently drop the project into PgProjectRepository
         // .applyCountryFilter's "Other" bucket despite displaying correctly.
@@ -497,6 +498,9 @@ export class ProjectMapperService {
         } else if (sourcesCountry && rawCountry) {
             newFields.country = null;
             if (explicitOverrideFields.has('country')) overrideBusinessKeys.add('country');
+        }
+        if (geoCountryCode) {
+            newFields.geoCountryCode = geoCountryCode;
         }
         if (lat !== null && lng !== null) {
             newFields.lat = lat;

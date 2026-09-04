@@ -106,7 +106,9 @@ export interface CountryBreakdownRow {
 }
 
 export interface MapPointRow {
+    projectKey: string;
     name: string | null;
+    country: string | null;
     lat: string | null;
     lng: string | null;
     credits: string | null;

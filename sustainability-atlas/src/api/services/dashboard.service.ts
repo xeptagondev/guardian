@@ -198,7 +198,9 @@ export class DashboardService {
             },
             mapPoints: mapPoints
                 .map(r => ({
+                    id: r.projectKey,
                     name: r.name,
+                    country: r.country,
                     lat: Number(r.lat),
                     lng: Number(r.lng),
                     credits: Number(r.credits) || 0,
