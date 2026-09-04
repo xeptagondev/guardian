@@ -20,9 +20,15 @@ const { network } = useNetwork();
 
 const phoneCopied = ref(false);
 
-async function copyDeveloperPhone(phone: string) {
+// project.dto.ts already falls back to the legacy singular businessData key
+// for rows written before array support existed, so these are always the
+// full list — no fallback needed here.
+const developerEmails = computed(() => props.project.developerEmails ?? []);
+const developerPhones = computed(() => props.project.developerPhones ?? []);
+
+async function copyDeveloperPhones(phones: string[]) {
     try {
-        await navigator.clipboard.writeText(phone);
+        await navigator.clipboard.writeText(phones.join('\n'));
         phoneCopied.value = true;
         setTimeout(() => { phoneCopied.value = false; }, 2000);
     } catch { /* ignore */ }
@@ -139,9 +145,9 @@ function tip(iwaPaths: string): string {
                 </div>
                 <div class="text-sm font-medium text-foreground flex items-center gap-3">
                     <span>{{ project.developer || '—' }}</span>
-                    <InfoTooltip v-if="project.developerEmail" :text="project.developerEmail">
+                    <InfoTooltip v-if="developerEmails.length" :text="developerEmails.join('\n')">
                         <a
-                            :href="`mailto:${project.developerEmail}`"
+                            :href="`mailto:${developerEmails.join(',')}`"
                             :aria-label="$t('projects.details.developerEmail')"
                             class="text-muted-foreground/50 hover:text-primary transition-colors"
                         >
@@ -149,14 +155,14 @@ function tip(iwaPaths: string): string {
                         </a>
                     </InfoTooltip>
                     <InfoTooltip
-                        v-if="project.developerPhone"
-                        :text="phoneCopied ? $t('common.copied') : project.developerPhone"
+                        v-if="developerPhones.length"
+                        :text="phoneCopied ? $t('common.copied') : developerPhones.join('\n')"
                     >
                         <button
                             type="button"
                             :aria-label="$t('projects.details.developerPhone')"
                             class="cursor-pointer text-muted-foreground/50 hover:text-primary transition-colors"
-                            @click="copyDeveloperPhone(project.developerPhone!)"
+                            @click="copyDeveloperPhones(developerPhones)"
                         >
                             <Check v-if="phoneCopied" class="h-3.5 w-3.5 text-stat-green" />
                             <PhoneCall v-else class="h-3.5 w-3.5" />

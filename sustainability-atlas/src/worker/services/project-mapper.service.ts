@@ -261,6 +261,12 @@ export class ProjectMapperService {
         let geoLngLat: [number, number] | null = null;
         let geoPolygon: ParsedGeoPolygon | null = null;
         let estimatedAmount: number | null = null;
+        // Kept as the raw (possibly array, one element per developer) value —
+        // unwrapValue() below would join a multi-developer array into one
+        // comma-joined string, which normalizeEmail/normalizePhone would then
+        // reject wholesale. See extractContactList.
+        let developerEmailRaw: unknown = null;
+        let developerPhoneRaw: unknown = null;
 
         for (const field of PROJECT_EXTRACT_FIELDS) {
             // `name` is always allowed (it only ever GAP-FILLS via the merge SQL —
@@ -285,6 +291,10 @@ export class ProjectMapperService {
                 if (typeof to === 'string') extracted[field.key] = to;
             } else if (field.key === 'estimatedAnnualCredits') {
                 estimatedAmount = parseEstimatedAnnualCredits(raw);
+            } else if (field.key === 'developerEmail') {
+                developerEmailRaw = raw;
+            } else if (field.key === 'developerPhone') {
+                developerPhoneRaw = raw;
             } else {
                 const s = unwrapValue(raw);
                 if (s) extracted[field.key] = s;
@@ -519,18 +529,24 @@ export class ProjectMapperService {
             if (explicitOverrideFields.has('developer')) overrideBusinessKeys.add('developer');
         }
         // Project-participant contact details. Kept adjacent to `developer`
-        // because they come off the same schema/VC; extraction is gated on a
-        // shape guard (normalizeEmail/normalizePhone) so a mis-mapped narrative
-        // field can't land here as a bogus "email".
-        const developerEmail = normalizeEmail(extracted['developerEmail']);
-        if (developerEmail) {
-            newFields.developerEmail = developerEmail;
-            if (explicitOverrideFields.has('developerEmail')) overrideBusinessKeys.add('developerEmail');
+        // because they come off the same schema/VC; each candidate is
+        // validated independently (shape guard: normalizeEmail/normalizePhone)
+        // so a mis-mapped narrative field can't land here as a bogus contact,
+        // and so one bad entry among several developers doesn't drop the good
+        // ones (see extractContactList). Only the plural key is written —
+        // rows written before this array support existed have a legacy
+        // singular `developerEmail`/`developerPhone` key instead, which
+        // ProjectDto falls back to reading; that fallback is the only place
+        // the singular key still matters, so it's not written here anymore.
+        const developerEmails = extractContactList(developerEmailRaw, normalizeEmail);
+        if (developerEmails.length > 0) {
+            newFields.developerEmails = developerEmails;
+            if (explicitOverrideFields.has('developerEmail')) overrideBusinessKeys.add('developerEmails');
         }
-        const developerPhone = normalizePhone(extracted['developerPhone']);
-        if (developerPhone) {
-            newFields.developerPhone = developerPhone;
-            if (explicitOverrideFields.has('developerPhone')) overrideBusinessKeys.add('developerPhone');
+        const developerPhones = extractContactList(developerPhoneRaw, normalizePhone);
+        if (developerPhones.length > 0) {
+            newFields.developerPhones = developerPhones;
+            if (explicitOverrideFields.has('developerPhone')) overrideBusinessKeys.add('developerPhones');
         }
         // vintage/createdAt can also be seeded by the unrelated {from,to} fallback
         // scan above — only tag as an override when the value actually came from
@@ -1067,6 +1083,30 @@ function normalizePhone(raw: string | null | undefined): string | null {
     const digits = s.replace(/\D/g, '');
     if (digits.length < 6 || digits.length > 20) return null;
     return /^[+()\d\s./ext-]+$/i.test(s) ? s : null;
+}
+
+/**
+ * Validates a possibly-array contact value (one raw entry per developer)
+ * element-by-element instead of joining then validating — joining first
+ * (the old behavior) meant a single mis-mapped/narrative developer entry
+ * made normalizeEmail/normalizePhone reject the whole comma-joined string,
+ * silently dropping every developer's contact info whenever a project had
+ * more than one. A scalar `raw` is treated as a single-element list, so the
+ * single-developer path behaves exactly as before.
+ */
+function extractContactList(raw: unknown, normalize: (s: string | null | undefined) => string | null): string[] {
+    const items = Array.isArray(raw) ? raw : [raw];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+        const normalized = normalize(unwrapValue(item) || null);
+        if (!normalized) continue;
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(normalized);
+    }
+    return out;
 }
 
 /**
