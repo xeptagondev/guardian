@@ -19,15 +19,11 @@ const { network } = useNetwork();
 
 const phoneCopied = ref(false);
 
-// Fall back to the singular field so already-cached rows without the array
-// (or any other DTO consumer) still render exactly as before for the
-// single-developer case.
-const developerEmails = computed(() => props.project.developerEmails?.length
-    ? props.project.developerEmails
-    : props.project.developerEmail ? [props.project.developerEmail] : []);
-const developerPhones = computed(() => props.project.developerPhones?.length
-    ? props.project.developerPhones
-    : props.project.developerPhone ? [props.project.developerPhone] : []);
+// project.dto.ts already falls back to the legacy singular businessData key
+// for rows written before array support existed, so these are always the
+// full list — no fallback needed here.
+const developerEmails = computed(() => props.project.developerEmails ?? []);
+const developerPhones = computed(() => props.project.developerPhones ?? []);
 
 async function copyDeveloperPhones(phones: string[]) {
     try {

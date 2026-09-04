@@ -533,26 +533,20 @@ export class ProjectMapperService {
         // validated independently (shape guard: normalizeEmail/normalizePhone)
         // so a mis-mapped narrative field can't land here as a bogus contact,
         // and so one bad entry among several developers doesn't drop the good
-        // ones (see extractContactList). `developerEmail`/`developerPhone`
-        // stay as the first entry for backward compatibility with existing
-        // consumers of the singular field.
+        // ones (see extractContactList). Only the plural key is written —
+        // rows written before this array support existed have a legacy
+        // singular `developerEmail`/`developerPhone` key instead, which
+        // ProjectDto falls back to reading; that fallback is the only place
+        // the singular key still matters, so it's not written here anymore.
         const developerEmails = extractContactList(developerEmailRaw, normalizeEmail);
         if (developerEmails.length > 0) {
-            newFields.developerEmail = developerEmails[0];
             newFields.developerEmails = developerEmails;
-            if (explicitOverrideFields.has('developerEmail')) {
-                overrideBusinessKeys.add('developerEmail');
-                overrideBusinessKeys.add('developerEmails');
-            }
+            if (explicitOverrideFields.has('developerEmail')) overrideBusinessKeys.add('developerEmails');
         }
         const developerPhones = extractContactList(developerPhoneRaw, normalizePhone);
         if (developerPhones.length > 0) {
-            newFields.developerPhone = developerPhones[0];
             newFields.developerPhones = developerPhones;
-            if (explicitOverrideFields.has('developerPhone')) {
-                overrideBusinessKeys.add('developerPhone');
-                overrideBusinessKeys.add('developerPhones');
-            }
+            if (explicitOverrideFields.has('developerPhone')) overrideBusinessKeys.add('developerPhones');
         }
         // vintage/createdAt can also be seeded by the unrelated {from,to} fallback
         // scan above — only tag as an override when the value actually came from

@@ -1070,6 +1070,8 @@
                     "geo": "Geo / Ubicación",
                     "country": "País",
                     "developer": "Desarrollador",
+                    "developerEmail": "Correo del desarrollador",
+                    "developerPhone": "Teléfono del desarrollador",
                     "sector": "Sector",
                     "category": "Categoría",
                     "scale": "Escala",
