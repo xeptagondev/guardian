@@ -583,17 +583,33 @@ export class ProjectResponseDto {
         nullable: true,
         description:
             'Detail-page-only (full=true) contact email for the project participant/developer, ' +
-            'when the policy schema exposes one. Always null on list responses.',
+            'when the policy schema exposes one. First entry of developerEmails. Always null on list responses.',
     })
     developerEmail: string | null;
+
+    @ApiProperty({
+        type: [String],
+        description:
+            'Detail-page-only (full=true) contact emails for every developer on the project, ' +
+            'when the policy schema exposes them. Empty on list responses.',
+    })
+    developerEmails: string[];
 
     @ApiProperty({
         nullable: true,
         description:
             'Detail-page-only (full=true) contact telephone for the project participant/developer, ' +
-            'when the policy schema exposes one. Always null on list responses.',
+            'when the policy schema exposes one. First entry of developerPhones. Always null on list responses.',
     })
     developerPhone: string | null;
+
+    @ApiProperty({
+        type: [String],
+        description:
+            'Detail-page-only (full=true) contact phone numbers for every developer on the project, ' +
+            'when the policy schema exposes them. Empty on list responses.',
+    })
+    developerPhones: string[];
 
     @ApiProperty({ nullable: true, description: 'Accumulated emission reduction credits (ER_y)' })
     credits: number | null;
@@ -1017,7 +1033,9 @@ export class ProjectResponseDto {
             // Detail-page-only, matching linkedSchemas/mrvSchemas: contact details
             // never ship on list rows (privacy + payload weight).
             developerEmail: full && typeof data['developerEmail'] === 'string' ? data['developerEmail'] : null,
+            developerEmails: full && Array.isArray(data['developerEmails']) ? (data['developerEmails'] as string[]) : [],
             developerPhone: full && typeof data['developerPhone'] === 'string' ? data['developerPhone'] : null,
+            developerPhones: full && Array.isArray(data['developerPhones']) ? (data['developerPhones'] as string[]) : [],
             credits: typeof data['credits'] === 'number' ? data['credits'] : null,
             status: typeof data['status'] === 'string' ? data['status'] : null,
             vintage: typeof data['vintage'] === 'string' ? data['vintage'] : null,

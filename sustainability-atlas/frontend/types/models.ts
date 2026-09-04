@@ -216,10 +216,14 @@ export interface Project {
     methodologyId: string;
     registry: string;
     developer: string;
-    /** Detail-endpoint only (null on list responses). */
+    /** Detail-endpoint only (null on list responses). First entry of developerEmails. */
     developerEmail?: string | null;
-    /** Detail-endpoint only (null on list responses). */
+    /** Detail-endpoint only (empty on list responses). All developer emails, in order. */
+    developerEmails?: string[];
+    /** Detail-endpoint only (null on list responses). First entry of developerPhones. */
     developerPhone?: string | null;
+    /** Detail-endpoint only (empty on list responses). All developer phone numbers, in order. */
+    developerPhones?: string[];
     credits: number;
     status: 'Registered' | 'Under Validation' | 'Verified' | 'Issuing' | 'Completed';
     vintage: string;

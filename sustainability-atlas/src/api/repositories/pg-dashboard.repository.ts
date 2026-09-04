@@ -143,6 +143,8 @@ export interface ProjectScopeRow {
     totalRetired: string; // bigint as string
     lat: string | null;
     lng: string | null;
+    /** ISO 3166-1 alpha-3 code from ReverseGeoService, written at ingest when `country` couldn't be resolved from the VC's own fields but coordinates were available — see project-mapper.service.ts. Node-side fallback for rows whose `country` is blank/unrecognized (see resolveScopeRowCountries in dashboard-aggregation.util.ts). */
+    geoCountryCode: string | null;
     /** Pre-validated in SQL (regex + 2000..2030 range) so Node only ever averages already-valid years. */
     vintageYear: number | null;
     /** Pre-computed in SQL (same date-parsing/guard logic getPortfolioMetrics used) so Node only ever averages already-valid durations. */
@@ -241,6 +243,7 @@ export class PgDashboardRepository {
                 COALESCE(ps.total_retired, 0)::bigint                           AS "totalRetired",
                 bv."businessData"->>'lat'                                       AS lat,
                 bv."businessData"->>'lng'                                       AS lng,
+                bv."businessData"->>'geoCountryCode'                            AS "geoCountryCode",
                 CASE
                     WHEN (bv."businessData"->>'vintage') ~ '^[0-9]{4}$'
                      AND (bv."businessData"->>'vintage')::int BETWEEN 2000 AND 2030
