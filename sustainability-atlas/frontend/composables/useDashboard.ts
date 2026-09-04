@@ -4,6 +4,7 @@ import { formatCredits } from '~/lib/format';
 import { ALPHA3_TO_NAME as CODE_TO_COUNTRY, OTHER_COUNTRY, resolveCountryCode } from '~/composables/useProjects';
 import { allocateDonutColors } from '~/lib/chart-colors';
 import { useNetworkActivity } from './useNetworkActivity';
+import { useGeocodedCountries } from './useGeocodedCountries';
 
 export function useDashboard(filters?: Ref<{ developer?: string; registry?: string }>) {
     const { summary, pending } = useDashboardSummary(filters);
@@ -90,6 +91,10 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
                 code: c.code,
                 projects: c.projects,
                 credits: formatCredits(c.credits),
+                // Unformatted total, kept alongside the display string above so
+                // mapCountries (below) can add recovered-project credits to it
+                // without having to parse a locale-formatted string back apart.
+                creditsRaw: c.credits,
                 methodologies: c.methodologies,
                 developer: c.developer,
                 registry: c.registry,
@@ -97,18 +102,56 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
             .sort((a, b) => b.projects - a.projects);
     });
 
-    // World-map countries: exclude the 'UNK' bucket. Painting it would map
-    // every unknown project onto the first matching GeoJSON feature (or worse,
-    // a single arbitrary country if 'UNK' happened to alias one).
+    // Reverse-geocode fallback for the map's choropleth: a project whose
+    // stored `country` is blank/unrecognized still gets a pin (mapPoints only
+    // needs lat/lng), but was previously dropped from every country bucket
+    // outright — so a real project in e.g. Madagascar or Peru never shaded
+    // that country even though it visibly "exists" there. This mirrors the
+    // same lat/lng → country recovery already used on the projects list,
+    // methodology detail, and portfolio pages (see
+    // docs/dashboard-map-country-shading-investigation.md).
+    const mapPointsWithCode = computed(() =>
+        summary.value.mapPoints.map(p => ({
+            ...p,
+            country: p.country ?? '',
+            countryCode: resolveCountryCode(p.country ?? ''),
+        })),
+    );
+    const { resolvedCode } = useGeocodedCountries(mapPointsWithCode);
+
+    // World-map countries: countries whose stored value already resolved
+    // shade straight from the aggregated country table (excluding the 'UNK'
+    // bucket — painting it would map every unknown project onto the first
+    // matching GeoJSON feature, or worse, a single arbitrary country if
+    // 'UNK' happened to alias one). Projects that landed in 'UNK' but have
+    // real coordinates get folded in separately once/if their reverse-geo
+    // lookup resolves, so they're not silently excluded from shading.
     const mapCountries = computed<MapCountry[]>(() => {
-        return countries.value
-            .filter(c => c.code !== 'UNK')
-            .map(c => ({
-                country: c.name,
-                countryCode: c.code,
-                projects: c.projects,
-                credits: c.credits,
-            }));
+        const buckets = new Map<string, { name: string; projects: number; credits: number }>();
+        for (const c of countries.value) {
+            if (c.code === 'UNK') continue;
+            buckets.set(c.code, { name: c.name, projects: c.projects, credits: c.creditsRaw });
+        }
+
+        for (const point of mapPointsWithCode.value) {
+            if (point.countryCode !== 'UNK') continue; // already counted above
+            const recovered = resolvedCode(point);
+            if (recovered === 'UNK') continue; // not (yet) geocoded, or genuinely unresolvable
+            const existing = buckets.get(recovered);
+            if (existing) {
+                existing.projects += 1;
+                existing.credits += point.credits;
+            } else {
+                buckets.set(recovered, { name: CODE_TO_COUNTRY[recovered] || recovered, projects: 1, credits: point.credits });
+            }
+        }
+
+        return Array.from(buckets.entries()).map(([code, b]) => ({
+            country: b.name,
+            countryCode: code,
+            projects: b.projects,
+            credits: formatCredits(b.credits),
+        }));
     });
 
     const mapPoints = computed<MapPoint[]>(() =>
@@ -231,7 +274,24 @@ export function useDashboard(filters?: Ref<{ developer?: string; registry?: stri
     // Country detail for the side panel
     function getCountryDetail(code: string) {
         const countryData = countries.value.find(c => c.code === code);
-        if (!countryData) return null;
+        if (!countryData) {
+            // Not in the raw country table — this is a country the map only
+            // shades via the reverse-geo recovery in `mapCountries` (its
+            // stored `country` value never resolved server-side, so the
+            // countrySectors/countryRegistries breakdowns below have nothing
+            // to match either). Show what's known — name/projects/credits —
+            // without the sector/registry breakdown rather than nothing.
+            const recovered = mapCountries.value.find(c => c.countryCode === code);
+            if (!recovered) return null;
+            return {
+                name: recovered.country,
+                flag: '',
+                projects: recovered.projects,
+                credits: recovered.credits,
+                sectors: [],
+                registries: [],
+            };
+        }
 
         // The API groups by the raw stored country string, so fold in every raw
         // value that maps to this ISO code — the same merge `countries` does.

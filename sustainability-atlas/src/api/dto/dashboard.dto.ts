@@ -183,8 +183,14 @@ export class RegistryStatusCellDto {
 }
 
 export class MapPointDto {
+    @ApiProperty({ description: 'Stable project identifier, for client-side per-point lookups (e.g. country recovery)' })
+    id: string;
+
     @ApiProperty({ nullable: true })
     name: string | null;
+
+    @ApiProperty({ nullable: true, description: 'Raw country string as stored on the project' })
+    country: string | null;
 
     @ApiProperty()
     lat: number;

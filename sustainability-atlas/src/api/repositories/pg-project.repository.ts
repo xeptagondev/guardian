@@ -203,9 +203,16 @@ export class PgProjectRepository extends ProjectRepository {
         for (const p of parts) {
             if (p === OTHER_COUNTRY_FILTER_VALUE) {
                 const tokens = builder.nextParam(RECOGNIZED_COUNTRY_TOKENS);
+                // A row whose stored country is unrecognized but has been
+                // reverse-geocoded from its coordinates (businessData.geoCountryCode
+                // — see scripts/backfill-geo-country-code.ts and the write-time
+                // fallback in project-mapper.service.ts) has a known country even
+                // though the raw text doesn't reflect it, so it's excluded from
+                // "Other" here and instead matched by that code below.
                 clauses.push(
-                    `(NULLIF(${TRIMMED_COUNTRY_SQL}, '') IS NULL ` +
-                    `OR LOWER(${TRIMMED_COUNTRY_SQL}) <> ALL(${tokens}::text[]))`,
+                    `((NULLIF(${TRIMMED_COUNTRY_SQL}, '') IS NULL ` +
+                    `OR LOWER(${TRIMMED_COUNTRY_SQL}) <> ALL(${tokens}::text[])) ` +
+                    `AND bv."businessData"->>'geoCountryCode' IS NULL)`,
                 );
                 continue;
             }
@@ -213,7 +220,15 @@ export class PgProjectRepository extends ProjectRepository {
             const code = COUNTRY_TOKEN_TO_CODE[p.toLowerCase()];
             if (code) {
                 const aliases = builder.nextParam(CODE_TO_ALIASES[code] ?? [p.toLowerCase()]);
-                clauses.push(`LOWER(${TRIMMED_COUNTRY_SQL}) = ANY(${aliases}::text[])`);
+                // OR-in a match against the reverse-geocoded code so a project whose
+                // stored country text never resolved (garbage/mis-mapped field) but
+                // was recovered from its coordinates is still selectable by that
+                // recovered country, not just by "Other".
+                const geoCode = builder.nextParam(code);
+                clauses.push(
+                    `(LOWER(${TRIMMED_COUNTRY_SQL}) = ANY(${aliases}::text[]) ` +
+                    `OR bv."businessData"->>'geoCountryCode' = ${geoCode})`,
+                );
             } else {
                 // Not a recognized token — a legacy/arbitrary value (e.g. an
                 // old bookmarked link). Fall back to the previous substring
@@ -363,7 +378,12 @@ export class PgProjectRepository extends ProjectRepository {
         const summarySql = `
             SELECT
                 SUM(COALESCE(ps.issuance_count, 0))::bigint                        AS total_issuances,
-                COUNT(DISTINCT NULLIF(bv."businessData"->>'country', ''))::int     AS unique_countries,
+                -- Prefer the reverse-geocoded code (businessData.geoCountryCode)
+                -- over the raw stored country when present, so a project whose
+                -- country text never resolved but was recovered from its
+                -- coordinates counts once under its real country instead of
+                -- inflating this total as its own distinct "country".
+                COUNT(DISTINCT NULLIF(COALESCE(bv."businessData"->>'geoCountryCode', bv."businessData"->>'country'), ''))::int AS unique_countries,
                 COUNT(DISTINCT reg.registry_name)::int                             AS unique_registries
             FROM business_view bv
             ${REGISTRY_NAME_JOIN}
@@ -1508,7 +1528,12 @@ export class PgProjectRepository extends ProjectRepository {
                     COALESCE(bv."businessData"->>'sector', '')         AS sector,
                     COALESCE(bv."businessData"->>'sectoralScope', '')  AS "sectoralScope",
                     COALESCE(bv."businessData"->>'vintage', '')        AS vintage,
-                    COALESCE(bv."businessData"->>'country', '')        AS country
+                    -- Prefer the reverse-geocoded code over the raw stored value
+                    -- (same rationale as applyCountryFilter/unique_countries above)
+                    -- so a recovered country like "MDG" appears as its own
+                    -- selectable option instead of the unrecognized raw text that
+                    -- would otherwise just collapse into "Other" client-side.
+                    COALESCE(NULLIF(bv."businessData"->>'geoCountryCode', ''), bv."businessData"->>'country', '') AS country
                 FROM business_view bv
                 ${REGISTRY_NAME_JOIN}
                 WHERE bv."viewType" = 'PROJECT'
