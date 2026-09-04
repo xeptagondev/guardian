@@ -81,6 +81,9 @@ export default defineNuxtConfig({
             feedbackWebhookUrl: process.env.NUXT_PUBLIC_FEEDBACK_WEBHOOK_URL || '',
             // Optional shared secret sent with feedback; must match SHARED_SECRET in the Apps Script (set via NUXT_PUBLIC_FEEDBACK_TOKEN).
             feedbackToken: process.env.NUXT_PUBLIC_FEEDBACK_TOKEN || '',
+            // CARTO Basemaps API key, required on raster tile requests to basemaps.cartocdn.com
+            // since CARTO started watermarking unauthenticated requests. Set via NUXT_PUBLIC_CARTO_API_KEY.
+            cartoApiKey: process.env.NUXT_PUBLIC_CARTO_API_KEY || '',
         },
     },
 
