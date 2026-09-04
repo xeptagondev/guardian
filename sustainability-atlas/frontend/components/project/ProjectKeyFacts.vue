@@ -5,6 +5,7 @@ import { formatCredits } from '~/lib/format';
 import { formatDate } from '~/lib/format';
 import { useMethodologyApi } from '~/composables/api/useMethodologiesApi';
 import { IWA_TO_CADTRUST, IWA_TO_CDOP } from '~/lib/standard-field-mappings.generated';
+import { mapIwaPathV1ToV3 } from '~/lib/iwa-version';
 import { SECTOR_I18N_KEYS } from '~/types/enums';
 import { formatNumber } from '~/lib/format';
 
@@ -64,7 +65,12 @@ const totalCreditsValue = computed(() => props.project.projectedIssuance?.totalT
     : t('projects.notEstimated'));
 
 function tip(iwaPaths: string): string {
-    const paths = iwaPaths.split(',');
+    // Normalise to IWA v3 so the tooltip and the CADTrust/CDOP lookups agree
+    // with what the export endpoint now emits.
+    const paths = iwaPaths.split(',').map(p => {
+        const raw = p.trim();
+        return mapIwaPathV1ToV3(raw) ?? raw;
+    });
     const iwaLine = `IWA: ${paths.join(', ')}`;
     const ctSet = new Set(paths.map(p => IWA_TO_CADTRUST[p]).filter(Boolean));
     const cdSet = new Set(paths.map(p => IWA_TO_CDOP[p]).filter(Boolean));

@@ -45,7 +45,8 @@ export const IWA_TO_CADTRUST: Record<string, string> = {
     "Attestation.type": "rating.rating_type",
     "Attestation.tag.name": "rating.rating_name",
     "QualityStandard.standard": "program.program_registry",
-    "PACompliance.correspondingAdjustment": "aef_t2_authorizations.aef_t2_authorizations_purposes_for_authorization"
+    "PACompliance.correspondingAdjustment": "aef_t2_authorizations.aef_t2_authorizations_purposes_for_authorization",
+    "QualityStandard.methdologyAndTools": "methodology.methodology_code"
 };
 
 /** IWA field path → CDOP field path (entity.field_name) */
