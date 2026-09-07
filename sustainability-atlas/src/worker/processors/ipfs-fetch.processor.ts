@@ -51,6 +51,7 @@ export class IpfsFetchProcessor extends WorkerHost implements OnModuleInit {
             this.logger.debug(`CID ${cid} already exists in ipfs_files, skipping fetch`);
             // Clean up any stale failure record and publish recovery event
             await this.failureRepo.deleteFailure(cid);
+            await this.markCidFetched(cid);
             await this.publishEvent({ type: 'ipfs-fetch-recovered', cid, timestamp: Date.now() });
             return;
         }
@@ -80,6 +81,7 @@ export class IpfsFetchProcessor extends WorkerHost implements OnModuleInit {
              ON CONFLICT (cid) DO NOTHING`,
             [cid, content, content.length],
         );
+        await this.markCidFetched(cid);
 
         // Try to parse as JSON and update message.documents
         let parsedDocument: Record<string, unknown> | null = null;
@@ -157,6 +159,20 @@ export class IpfsFetchProcessor extends WorkerHost implements OnModuleInit {
         });
 
         this.logger.log(`IPFS content fetched for CID ${cid} (${content.length} bytes)`);
+    }
+
+    /**
+     * Keeps message_ipfs_cid.status in sync — see its column comment in
+     * schema-bootstrap.ts. Called from both places in this file that mean
+     * "this CID is fetched": a fresh successful fetch, and the early-return
+     * path for a CID that already had an ipfs_files row (which may predate
+     * this column, or may not have gone through the reconcile path yet).
+     */
+    private async markCidFetched(cid: string): Promise<void> {
+        await this.dataSource.query(
+            `UPDATE message_ipfs_cid SET status = 'fetched' WHERE cid = $1 AND status <> 'fetched'`,
+            [cid],
+        );
     }
 
     private async publishEvent(payload: Record<string, unknown>): Promise<void> {

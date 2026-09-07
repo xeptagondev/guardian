@@ -146,6 +146,12 @@ class IpfsStatusQueryDto {
     @Transform(({ value }) => value === 'true' || value === true)
     includeChildTopics?: boolean;
 
+    /** Bypass the short-lived server-side cache for this request (read-policy
+     * flag, not a filter — deliberately excluded from the cache key). */
+    @IsOptional()
+    @Transform(({ value }) => value === 'true' || value === true)
+    fresh?: boolean;
+
     @IsOptional()
     @IsString()
     messageType?: string;
@@ -182,10 +188,15 @@ class IpfsStatusQueryDto {
     @IsIn(['lastFailedAt', 'attemptCount', 'firstFailedAt', 'status'])
     sortBy?: string = 'status';
 
+    // Default asc, not desc — see the sortDir comment in listIpfsStatus for why:
+    // 'pending' (the overwhelming majority of rows) sorts alphabetically after
+    // 'failed'/'fetched', so desc forces a full sort through it before LIMIT
+    // can apply even with status now indexed. Also better matches the panel's
+    // actual intent — failures surfaced first, not the least-actionable bucket.
     @IsOptional()
     @IsString()
     @IsIn(['asc', 'desc'])
-    sortDir?: string = 'desc';
+    sortDir?: string = 'asc';
 }
 
 class RetryByTopicBodyDto {
@@ -316,6 +327,11 @@ const RETRY_BY_TOPIC_MAX = 2000;
 const QUEUE_COUNTS_TTL_MS = 5_000;
 /** Newest failed jobs scanned when grouping by reason (public endpoint). */
 const GROUP_SCAN_MAX = 2000;
+/** TTL for the cached /ipfs-status page. */
+const IPFS_STATUS_TTL_MS = 15_000;
+/** Ceiling on distinct cached /ipfs-status filter combinations — topicId is free-text
+ * (unbounded cardinality), so without a cap a crawler could grow this Map forever. */
+const IPFS_STATUS_CACHE_MAX_ENTRIES = 200;
 
 // The sync-status page is VIEWABLE by everyone (read-only): all GET/SSE endpoints
 // here are PUBLIC so guests/users can see queue + sync + IPFS status. Only the
@@ -342,6 +358,26 @@ export class QueueStatusController {
         string,
         { items: QueueStatusItemDto[]; expiresAt: number }
     >();
+
+    /** Short-lived /ipfs-status page snapshot per network+filter — see listIpfsStatus. */
+    private readonly ipfsStatusCache = new Map<
+        string,
+        { payload: IpfsCidStatusListDto; expiresAt: number }
+    >();
+
+    /** Last successfully computed total per totalCacheKey (filters only — NOT
+     * page/limit/sortBy/sortDir, which don't affect the total), kept
+     * indefinitely (capped by size, not TTL) — see the countSql fallback in
+     * listIpfsStatus. The count query has no filter to prune the common
+     * (unfiltered) case, so its
+     * cost is tied to message_ipfs_cid's full size regardless of how cheap the
+     * data query is; under real concurrent load on this database (background
+     * materialized-view refreshes, business_view rebuilds) it can occasionally
+     * miss the statement_timeout even when the row data comes back fine. A
+     * slightly-stale total on the pagination footer is a far smaller problem
+     * than failing the whole panel over a number nobody is watching that
+     * closely. */
+    private readonly ipfsStatusTotalCache = new Map<string, number>();
 
     constructor(
         private readonly queueRegistry: QueueRegistry,
@@ -1268,6 +1304,7 @@ export class QueueStatusController {
         description: 'Sort column (default status)',
     })
     @ApiQuery({ name: 'sortDir', required: false, type: String, enum: ['asc', 'desc'], description: 'Sort direction (default desc)' })
+    @ApiQuery({ name: 'fresh', required: false, type: Boolean, description: 'Bypass the short-lived server-side cache for this request' })
     @ApiResponse({ status: 200, type: IpfsCidStatusListDto })
     @ApiResponse({ status: 404, description: 'Network not configured on this API instance' })
     async listIpfsStatus(
@@ -1279,20 +1316,70 @@ export class QueueStatusController {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
         const sortBy = query.sortBy ?? 'status';
-        const sortDir = (query.sortDir ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+        // Default ASC, not DESC: 'failed' < 'fetched' < 'pending' alphabetically,
+        // and 'pending' is ~97% of rows at scale (measured on testnet locally).
+        // DESC forces a full sort through that dominant group before LIMIT can
+        // apply even with status now indexed (measured 30.1s); ASC lets the
+        // index scan terminate after the two small groups (measured 1.5s). This
+        // also happens to match the panel's actual intent better — surfacing
+        // failures first, not the least-actionable "pending" bucket.
+        const sortDir = (query.sortDir ?? 'asc').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
         const offset = (page - 1) * limit;
 
-        // The derived status expression is reused in ORDER BY and status filter.
-        const statusExpr = `CASE WHEN ipfs.cid IS NOT NULL THEN 'fetched' WHEN f.cid IS NOT NULL THEN 'failed' ELSE 'pending' END`;
+        // This endpoint's default (unfiltered) view does a full sequential scan +
+        // unnest over the entire `message` table, so cache it the same way
+        // listQueues/getSyncStatus cache their own full-table work. Built from the
+        // resolved values (post-default) so `?limit=20` and an omitted `limit`
+        // share one entry. `fresh` is a read-policy flag, not a filter — it must
+        // never enter the key, or a fresh request would warm a key nothing else reads.
+        const cacheKey = [
+            'ipfs-status',
+            network.toLowerCase(),
+            query.topicId ?? '',
+            query.includeChildTopics ? '1' : '0',
+            query.messageType ?? '',
+            query.cid ?? '',
+            query.errorCategory ?? '',
+            query.status ?? '',
+            page, limit, sortBy, sortDir,
+        ].join(':');
 
-        // Map sort columns to SQL expressions.
+        // Separate, coarser key for the total-count fallback: the total only
+        // depends on the filter conditions, never on page/limit/sortBy/sortDir.
+        // Keying it the same as cacheKey (as the first version of this did)
+        // meant every distinct page or sort order needed its OWN successful
+        // count before it could fall back, even though they all share the same
+        // answer — so paging through a view whose count keeps timing out could
+        // show "0" on every page rather than reusing the one total that did
+        // succeed for that filter set.
+        const totalCacheKey = [
+            'ipfs-status-total',
+            network.toLowerCase(),
+            query.topicId ?? '',
+            query.includeChildTopics ? '1' : '0',
+            query.messageType ?? '',
+            query.cid ?? '',
+            query.errorCategory ?? '',
+            query.status ?? '',
+        ].join(':');
+
+        if (!query.fresh) {
+            const cached = this.ipfsStatusCache.get(cacheKey);
+            if (cached && cached.expiresAt > Date.now()) return cached.payload;
+        }
+
+        // mc.status is a real, indexed column (see schema-bootstrap.ts) — NOT a
+        // derived CASE over the ipfs_files/ipfs_fetch_failure joins as before.
+        // That's what makes the sortDir default above actually matter: a
+        // derived cross-table expression can't be indexed at all, so ordering
+        // by it always required a full sort regardless of direction.
         const sortColMap: Record<string, string> = {
             lastFailedAt: 'f."lastFailedAt"',
             attemptCount: 'f."attemptCount"',
             firstFailedAt: 'f."firstFailedAt"',
-            status: statusExpr,
+            status: 'mc.status',
         };
-        const orderExpr = `${sortColMap[sortBy] ?? statusExpr} ${sortDir}`;
+        const orderExpr = `${sortColMap[sortBy] ?? 'mc.status'} ${sortDir}`;
 
         // Build WHERE clauses incrementally. Start with an always-true sentinel
         // so subsequent AND clauses can always be appended uniformly.
@@ -1312,20 +1399,20 @@ export class QueueStatusController {
                     JOIN _topic_tree d ON (t.options->>'parentId') = d."topicId"
                     WHERE t.type = 'Topic'
                 ) `;
-                conditions.push(`m."topicId" IN (SELECT "topicId" FROM _topic_tree)`);
+                conditions.push(`mc."topicId" IN (SELECT "topicId" FROM _topic_tree)`);
             } else {
-                conditions.push(`m."topicId" = $${params.length}`);
+                conditions.push(`mc."topicId" = $${params.length}`);
             }
         }
 
         if (query.messageType) {
             params.push(query.messageType);
-            conditions.push(`m.type = $${params.length}`);
+            conditions.push(`mc."messageType" = $${params.length}`);
         }
 
         if (query.cid) {
             params.push(`%${query.cid}%`);
-            conditions.push(`c.cid ILIKE $${params.length}`);
+            conditions.push(`mc.cid ILIKE $${params.length}`);
         }
 
         if (query.errorCategory) {
@@ -1333,28 +1420,35 @@ export class QueueStatusController {
             conditions.push(`f."errorCategory" = $${params.length}`);
         }
 
-        // status filter: translate the derived value into concrete join conditions.
-        if (query.status === 'fetched') {
-            conditions.push(`ipfs.cid IS NOT NULL`);
-        } else if (query.status === 'failed') {
-            conditions.push(`f.cid IS NOT NULL`);
-        } else if (query.status === 'pending') {
-            conditions.push(`ipfs.cid IS NULL AND f.cid IS NULL`);
+        if (query.status) {
+            params.push(query.status);
+            conditions.push(`mc.status = $${params.length}`);
         }
 
         const whereClause = conditions.join(' AND ');
 
         // Core FROM + JOIN fragment shared by count and data queries.
+        // message_ipfs_cid precomputes the (cid, message) relationship at
+        // ingestion time (see message-process.processor.ts's reconcile step),
+        // so this no longer touches `message` at all — it used to be
+        // `FROM message m, unnest(m.files) AS c(cid)`, an unfiltered scan +
+        // unnest of the entire message table on every request (cost scaled
+        // with total message count, not the 20 rows the panel shows; measured
+        // 38.9s at 3.4M messages locally, past the API's own 15s
+        // statement_timeout). No ipfs_files join anymore either — mc.status is
+        // already the fetched/failed/pending outcome (kept in sync by whatever
+        // writes to ipfs_files/ipfs_fetch_failure), so ipfs_files itself is no
+        // longer needed here at all. ipfs_fetch_failure stays joined for the
+        // per-failure metadata (lastError, attemptCount, etc.) that mc doesn't
+        // carry.
         const fromFragment = `
-            FROM message m,
-                 unnest(m.files) AS c(cid)
-            LEFT JOIN ipfs_files ipfs ON ipfs.cid = c.cid
-            LEFT JOIN ipfs_fetch_failure f ON f.cid = c.cid
+            FROM message_ipfs_cid mc
+            LEFT JOIN ipfs_fetch_failure f ON f.cid = mc.cid
         `;
 
         // Total count (same joins + filters, no pagination).
         const countSql = `${topicCte}
-            SELECT COUNT(DISTINCT c.cid)::int AS total
+            SELECT COUNT(DISTINCT mc.cid)::int AS total
             ${fromFragment}
             WHERE ${whereClause}
         `;
@@ -1367,10 +1461,10 @@ export class QueueStatusController {
 
         const dataSql = `${topicCte}
             SELECT DISTINCT
-                c.cid,
-                m."topicId"                   AS "topicId",
-                m.type                        AS "messageType",
-                ${statusExpr}                 AS status,
+                mc.cid,
+                mc."topicId"                   AS "topicId",
+                mc."messageType"                AS "messageType",
+                mc.status                     AS status,
                 f."lastError",
                 f."errorCategory",
                 f."attemptCount",
@@ -1383,8 +1477,16 @@ export class QueueStatusController {
             LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}
         `;
 
-        const [[countRow], rows]: [
-            Array<{ total: number }>,
+        // The count query has no LIMIT/status-index to lean on — it always
+        // touches every matching row, so under concurrent load elsewhere on
+        // this database it's the one piece of this endpoint still exposed to
+        // a statement_timeout (measured: the data query itself came back fine
+        // in the same incident that produced this fallback). Not fatal to the
+        // request: the row data is what the panel actually renders, and a
+        // pagination total one refresh cycle stale beats a 500 for the whole
+        // panel over a count nobody is watching that closely.
+        const [countRows, rows]: [
+            Array<{ total: number }> | null,
             Array<{
                 cid: string;
                 topicId: string | null;
@@ -1398,11 +1500,30 @@ export class QueueStatusController {
                 lastFailedAt: string | null;
             }>,
         ] = await Promise.all([
-            ds.query(countSql, params.slice(0, params.length - 2)),
+            ds.query(countSql, params.slice(0, params.length - 2)).catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.logger.warn(
+                    `listIpfsStatus count query failed for network=${network} — ` +
+                    `falling back to last known total: ${msg}`,
+                );
+                return null;
+            }),
             ds.query(dataSql, params),
         ]);
 
-        const total = Number(countRow?.total ?? 0);
+        const total = countRows
+            ? Number(countRows[0]?.total ?? 0)
+            : this.ipfsStatusTotalCache.get(totalCacheKey) ?? 0;
+        if (countRows) {
+            // Same unbounded-cardinality concern as ipfsStatusCache (topicId is
+            // free text) — cap it the same way, evicting the oldest entry.
+            if (!this.ipfsStatusTotalCache.has(totalCacheKey)
+                && this.ipfsStatusTotalCache.size >= IPFS_STATUS_CACHE_MAX_ENTRIES) {
+                const oldest = this.ipfsStatusTotalCache.keys().next().value;
+                if (oldest !== undefined) this.ipfsStatusTotalCache.delete(oldest);
+            }
+            this.ipfsStatusTotalCache.set(totalCacheKey, total);
+        }
 
         const toV1 = (raw: string): string => {
             try { return new CID(raw).toV1().toString('base32'); }
@@ -1423,7 +1544,7 @@ export class QueueStatusController {
             lastFailedAt: r.lastFailedAt != null ? String(r.lastFailedAt) : null,
         }));
 
-        return {
+        const payload: IpfsCidStatusListDto = {
             data,
             meta: {
                 page,
@@ -1432,6 +1553,33 @@ export class QueueStatusController {
                 totalPages: Math.ceil(total / limit),
             },
         };
+        this.setIpfsStatusCache(cacheKey, payload);
+        return payload;
+    }
+
+    /** Write-through for listIpfsStatus's cache, with sweep-on-write eviction —
+     * topicId is free-text, so nothing else ever expires a stale Map entry. */
+    private setIpfsStatusCache(key: string, payload: IpfsCidStatusListDto): void {
+        const now = Date.now();
+        for (const [k, v] of this.ipfsStatusCache) {
+            if (v.expiresAt <= now) this.ipfsStatusCache.delete(k);
+        }
+        // Map preserves insertion order, so the first key is the oldest write.
+        while (this.ipfsStatusCache.size >= IPFS_STATUS_CACHE_MAX_ENTRIES) {
+            const oldest = this.ipfsStatusCache.keys().next().value;
+            if (oldest === undefined) break;
+            this.ipfsStatusCache.delete(oldest);
+        }
+        this.ipfsStatusCache.set(key, { payload, expiresAt: now + IPFS_STATUS_TTL_MS });
+    }
+
+    /** Drops every cached ipfs-status page for a network after an action that
+     * changes the underlying ipfs_fetch_failure rows (a retry). */
+    private invalidateIpfsStatus(network: string): void {
+        const prefix = `ipfs-status:${network.toLowerCase()}:`;
+        for (const k of this.ipfsStatusCache.keys()) {
+            if (k.startsWith(prefix)) this.ipfsStatusCache.delete(k);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1484,6 +1632,13 @@ export class QueueStatusController {
         // Delete the failure record — the boot-time safety net scans this table
         // and would re-park the CID if the record remains.
         await ds.query(`DELETE FROM ipfs_fetch_failure WHERE cid = $1`, [cid]);
+        // Keep message_ipfs_cid.status in sync (see schema-bootstrap.ts) — the
+        // CID is back to pending until the re-queued fetch below resolves it.
+        // Guarded against 'fetched' in case a fetch races ahead of this request.
+        await ds.query(
+            `UPDATE message_ipfs_cid SET status = 'pending' WHERE cid = $1 AND status <> 'fetched'`,
+            [cid],
+        );
 
         // Remove any stale BullMQ job (completed, failed, or waiting) so the
         // new add() is not de-duplicated against a prior entry.
@@ -1506,6 +1661,7 @@ export class QueueStatusController {
             `IPFS manual retry queued: cid=${cid} network=${network} manualRetryCount=${updatedRetryCount}`,
         );
 
+        this.invalidateIpfsStatus(network);
         return { queued: true, cid };
     }
 
@@ -1587,6 +1743,11 @@ export class QueueStatusController {
             `DELETE FROM ipfs_fetch_failure WHERE cid = ANY($1::text[])`,
             [cids],
         );
+        // Keep message_ipfs_cid.status in sync (see schema-bootstrap.ts).
+        await ds.query(
+            `UPDATE message_ipfs_cid SET status = 'pending' WHERE cid = ANY($1::text[]) AND status <> 'fetched'`,
+            [cids],
+        );
 
         const ipfsQueue = this.queueRegistry.getQueue(network, BASE_QUEUE_NAMES.IPFS_FETCH);
 
@@ -1629,6 +1790,7 @@ export class QueueStatusController {
             `retryIpfsFailuresByTopic: network=${network} topicId=${topicId} queued=${queued} hasMore=${hasMore}`,
         );
 
+        this.invalidateIpfsStatus(network);
         return { queued, topicId, hasMore };
     }
 }

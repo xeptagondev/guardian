@@ -17,8 +17,9 @@ export interface ProjectExtractField {
     keywords: string[];
     /** Words that, if present, disqualify a candidate. */
     exclude?: string[];
-    /** Corresponding IWA DMRV spec field path. CADTrust/CDOP paths are derived
-     *  from this via the generated mapping in standard-field-mappings.generated.ts. */
+    /** IWA DMRV v3 spec field path (comma-separated when one project field spans
+     *  two IWA properties). CADTrust/CDOP paths derive from this via
+     *  standard-field-mappings.generated.ts. */
     iwaField?: string;
 }
 
