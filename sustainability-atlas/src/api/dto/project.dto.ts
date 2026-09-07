@@ -580,20 +580,20 @@ export class ProjectResponseDto {
     developer: string | null;
 
     @ApiProperty({
-        nullable: true,
+        type: [String],
         description:
-            'Detail-page-only (full=true) contact email for the project participant/developer, ' +
-            'when the policy schema exposes one. Always null on list responses.',
+            'Detail-page-only (full=true) contact emails for every developer on the project, ' +
+            'when the policy schema exposes them. Empty on list responses.',
     })
-    developerEmail: string | null;
+    developerEmails: string[];
 
     @ApiProperty({
-        nullable: true,
+        type: [String],
         description:
-            'Detail-page-only (full=true) contact telephone for the project participant/developer, ' +
-            'when the policy schema exposes one. Always null on list responses.',
+            'Detail-page-only (full=true) contact phone numbers for every developer on the project, ' +
+            'when the policy schema exposes them. Empty on list responses.',
     })
-    developerPhone: string | null;
+    developerPhones: string[];
 
     @ApiProperty({ nullable: true, description: 'Accumulated emission reduction credits (ER_y)' })
     credits: number | null;
@@ -1015,9 +1015,20 @@ export class ProjectResponseDto {
             registryName: row.registryName,
             developer: typeof data['developer'] === 'string' ? data['developer'] : null,
             // Detail-page-only, matching linkedSchemas/mrvSchemas: contact details
-            // never ship on list rows (privacy + payload weight).
-            developerEmail: full && typeof data['developerEmail'] === 'string' ? data['developerEmail'] : null,
-            developerPhone: full && typeof data['developerPhone'] === 'string' ? data['developerPhone'] : null,
+            // never ship on list rows (privacy + payload weight). Falls back to
+            // the legacy singular businessData key for rows written before
+            // array support existed — project-mapper.service.ts no longer
+            // writes that key, but old rows still have it instead of the array.
+            developerEmails: full
+                ? (Array.isArray(data['developerEmails'])
+                    ? (data['developerEmails'] as string[])
+                    : typeof data['developerEmail'] === 'string' ? [data['developerEmail']] : [])
+                : [],
+            developerPhones: full
+                ? (Array.isArray(data['developerPhones'])
+                    ? (data['developerPhones'] as string[])
+                    : typeof data['developerPhone'] === 'string' ? [data['developerPhone']] : [])
+                : [],
             credits: typeof data['credits'] === 'number' ? data['credits'] : null,
             status: typeof data['status'] === 'string' ? data['status'] : null,
             vintage: typeof data['vintage'] === 'string' ? data['vintage'] : null,

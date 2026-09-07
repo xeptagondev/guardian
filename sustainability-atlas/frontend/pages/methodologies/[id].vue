@@ -481,6 +481,8 @@ const EDITABLE_FIELD_KEYS: ResolvedFieldKey[] = [
   'description',
   'country',
   'developer',
+  'developerEmail',
+  'developerPhone',
   'category',
   'scale',
   'sector',
@@ -497,6 +499,8 @@ const FIELD_LABELS: Record<ResolvedFieldKey, string> = {
   description: 'Description',
   country: 'Country',
   developer: 'Developer',
+  developerEmail: 'Developer Email',
+  developerPhone: 'Developer Phone',
   category: 'Category',
   scale: 'Scale',
   sector: 'Sector',
@@ -827,7 +831,7 @@ const formatLastAttempt = (ts: string | null | undefined): string => {
   }
 };
 
-type ResolvedFieldKey = 'name' | 'description' | 'country' | 'developer' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo' | 'estimatedAnnualCredits';
+type ResolvedFieldKey = 'name' | 'description' | 'country' | 'developer' | 'developerEmail' | 'developerPhone' | 'category' | 'scale' | 'sector' | 'vintageRaw' | 'creditingPeriodStart' | 'creditingPeriodEnd' | 'sdgOrCobenefits' | 'geo' | 'estimatedAnnualCredits';
 
 interface ProjectFieldRow {
   labelKey: string;
@@ -840,6 +844,8 @@ const PROJECT_FIELD_ROWS: ProjectFieldRow[] = [
   { labelKey: 'geo', fieldKey: 'geo' },
   { labelKey: 'country', fieldKey: 'country' },
   { labelKey: 'developer', fieldKey: 'developer' },
+  { labelKey: 'developerEmail', fieldKey: 'developerEmail' },
+  { labelKey: 'developerPhone', fieldKey: 'developerPhone' },
   { labelKey: 'sector', fieldKey: 'sector' },
   { labelKey: 'category', fieldKey: 'category' },
   { labelKey: 'scale', fieldKey: 'scale' },

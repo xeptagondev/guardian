@@ -61,7 +61,7 @@ export const COUNTRY_ALPHA3: Record<string, string> = {
     'Oman': 'OMN',
     // P
     'Pakistan': 'PAK', 'Palau': 'PLW', 'Palestine': 'PSE', 'Panama': 'PAN',
-    'Papua New Guinea': 'PNG', 'Paraguay': 'PRY', 'Peru': 'PER', 'Philippines': 'PHL',
+    'Papua New Guinea': 'PNG', 'Paraguay': 'PRY', 'Peru': 'PER', 'Perú': 'PER', 'Philippines': 'PHL',
     'Poland': 'POL', 'Portugal': 'PRT', 'Puerto Rico': 'PRI', 
     // Q
     'Qatar': 'QAT',
@@ -191,8 +191,8 @@ export function mapApiProject(raw: Record<string, any>): Project {
         methodologyId: raw.methodologyId ?? '',
         registry: raw.registryName ?? raw.registry ?? raw.registryDid ?? 'Unknown Registry',
         developer: raw.developer ?? '',
-        developerEmail: raw.developerEmail ?? null,
-        developerPhone: raw.developerPhone ?? null,
+        developerEmails: Array.isArray(raw.developerEmails) ? raw.developerEmails : [],
+        developerPhones: Array.isArray(raw.developerPhones) ? raw.developerPhones : [],
         credits: raw.credits ?? 0,
         status: raw.lifecycleStage ?? raw.status ?? 'Registered',
         vintage: raw.vintage ?? '',
