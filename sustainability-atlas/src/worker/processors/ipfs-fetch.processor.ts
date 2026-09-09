@@ -41,47 +41,54 @@ export class IpfsFetchProcessor extends WorkerHost implements OnModuleInit {
 
         this.logger.debug(`Fetching IPFS content for CID ${cid}`);
 
-        // Check if already fetched
-        const existing = await this.dataSource.query(
-            `SELECT id FROM ipfs_files WHERE cid = $1 LIMIT 1`,
+        // Check if the bytes are already cached. IMPORTANT: this only tells us the
+        // CID has been downloaded before — NOT that THIS job's message row got its
+        // documents written or went through project mapping. A prior job for the
+        // same CID (this one or an earlier message sharing it) can have inserted
+        // into ipfs_files and then died before reaching the write-back/mapping
+        // steps below (worker crash, OOM, restart) — with no self-healing path,
+        // since every future job for that CID would otherwise take this shortcut
+        // forever. So we skip only the network round-trip when cached; the
+        // write-back and project-mapping steps always run.
+        const existing: Array<{ content: Buffer }> = await this.dataSource.query(
+            `SELECT content FROM ipfs_files WHERE cid = $1 LIMIT 1`,
             [cid],
         );
 
-        if (existing.length > 0) {
-            this.logger.debug(`CID ${cid} already exists in ipfs_files, skipping fetch`);
-            // Clean up any stale failure record and publish recovery event
-            await this.failureRepo.deleteFailure(cid);
-            await this.markCidFetched(cid);
-            await this.publishEvent({ type: 'ipfs-fetch-recovered', cid, timestamp: Date.now() });
-            return;
-        }
-
-        // Fetch content from IPFS — classify and handle errors
         let content: Buffer;
-        try {
-            content = await this.ipfsService.fetchContent(cid);
-        } catch (err: unknown) {
-            const error = err instanceof Error ? err : new Error(String(err));
-            const category = IpfsService.classifyError(error);
+        if (existing.length > 0) {
+            this.logger.debug(`CID ${cid} already exists in ipfs_files, reusing cached content`);
+            content = existing[0].content;
+            // deleteFailure/publishEvent('ipfs-fetch-recovered') run unconditionally
+            // at the end of this method — no need to duplicate them here.
+            await this.markCidFetched(cid);
+        } else {
+            // Fetch content from IPFS — classify and handle errors
+            try {
+                content = await this.ipfsService.fetchContent(cid);
+            } catch (err: unknown) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                const category = IpfsService.classifyError(error);
 
-            if (category === 'permanent') {
-                // Permanent failures (404, invalid CID, 410) should not be retried —
-                // wrap in UnrecoverableError so BullMQ skips remaining attempts.
-                throw new UnrecoverableError(error.message);
+                if (category === 'permanent') {
+                    // Permanent failures (404, invalid CID, 410) should not be retried —
+                    // wrap in UnrecoverableError so BullMQ skips remaining attempts.
+                    throw new UnrecoverableError(error.message);
+                }
+
+                // Transient failure — rethrow so BullMQ retries per backoff config
+                throw error;
             }
 
-            // Transient failure — rethrow so BullMQ retries per backoff config
-            throw error;
+            // Store in ipfs_files
+            await this.dataSource.query(
+                `INSERT INTO ipfs_files (cid, content, size, "createdAt")
+                 VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT (cid) DO NOTHING`,
+                [cid, content, content.length],
+            );
+            await this.markCidFetched(cid);
         }
-
-        // Store in ipfs_files
-        await this.dataSource.query(
-            `INSERT INTO ipfs_files (cid, content, size, "createdAt")
-             VALUES ($1, $2, $3, NOW())
-             ON CONFLICT (cid) DO NOTHING`,
-            [cid, content, content.length],
-        );
-        await this.markCidFetched(cid);
 
         // Try to parse as JSON and update message.documents
         let parsedDocument: Record<string, unknown> | null = null;
