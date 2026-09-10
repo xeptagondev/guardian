@@ -1175,14 +1175,14 @@ function getResolvedField(fieldKey: string) {
       <!-- Header -->
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0">
-          <div class="flex items-center gap-3 mb-2">
+          <div class="flex items-center gap-3 mb-2 min-w-0">
             <div
-              class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10"
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10"
             >
               <BookOpen class="h-5 w-5 text-primary" />
             </div>
-            <div>
-              <h1 class="text-2xl font-bold text-foreground">
+            <div class="min-w-0">
+              <h1 class="text-2xl font-bold text-foreground break-words">
                 {{ methodology.name }}
               </h1>
               <p class="text-sm text-muted-foreground">
