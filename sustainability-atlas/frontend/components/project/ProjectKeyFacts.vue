@@ -97,7 +97,7 @@ function tip(iwaPaths: string): string {
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2">
             <!-- Methodology -->
-            <div class="bg-card px-5 py-4 border-b sm:border-r">
+            <div class="bg-card px-5 py-4 border-b sm:border-r min-w-0">
                 <div class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
                     {{ $t('projects.details.methodology') }}
                     <InfoTooltip :text="tip('QualityStandard.name')" />
@@ -105,11 +105,11 @@ function tip(iwaPaths: string): string {
                 <AppLink
                     v-if="project.instanceTopicId"
                     :to="`/methodologies/${project.instanceTopicId}`"
-                    class="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors"
+                    class="block text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors break-words"
                 >
                     {{ fullMethodologyName }}
                 </AppLink>
-                <div v-else class="text-sm font-medium text-foreground">{{ fullMethodologyName || '—' }}</div>
+                <div v-else class="text-sm font-medium text-foreground break-words">{{ fullMethodologyName || '—' }}</div>
             </div>
 
             <!-- Methodology Version -->
