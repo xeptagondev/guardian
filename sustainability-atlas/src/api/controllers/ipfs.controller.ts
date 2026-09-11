@@ -18,7 +18,7 @@ import { sniffMime } from '@shared/utils/mime-sniff';
  * :network segment — IPFS content isn't tied to a Hedera network), mirroring
  * AccountController's cross-network convention.
  */
-@ApiTags('ipfs')
+@ApiTags('IPFS files')
 @ApiCookieAuth()
 @Controller('api/v1/ipfs')
 @UseGuards(JwtAuthGuard)
@@ -27,7 +27,7 @@ export class IpfsController {
 
     @Get(':cid')
     @ApiOperation({
-        summary: 'Fetch and download a file from IPFS by CID',
+        summary: 'Download a file from IPFS',
         description:
             'Fetches content for the given CID via the configured IPFS gateways (with local ' +
             'zip-cache reuse) and streams it back as a downloadable file. The response Content-Type ' +
@@ -41,7 +41,7 @@ export class IpfsController {
     @ApiResponse({ status: 400, description: 'Malformed CID' })
     @ApiResponse({ status: 401, description: 'Authentication required' })
     @ApiResponse({ status: 404, description: 'CID not found on any configured gateway' })
-    @ApiResponse({ status: 503, description: 'Gateways temporarily unreachable — try again' })
+    @ApiResponse({ status: 503, description: 'Gateways temporarily unreachable. Try again.' })
     async fetch(@Param('cid') cid: string): Promise<StreamableFile> {
         const parsedCid = this.ipfsService.parseCID(cid);
         if (!parsedCid) {

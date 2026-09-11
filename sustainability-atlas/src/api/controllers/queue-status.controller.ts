@@ -338,7 +338,7 @@ const IPFS_STATUS_CACHE_MAX_ENTRIES = 200;
 // state-changing ACTIONS (retry / requeue / ipfs-retry POSTs) are admin-gated via
 // @AdminWrite. (The Guardian-sync data is separately admin-only — see
 // guardian-sync.controller.) Read-vs-write is the access axis here.
-@ApiTags('queue-status')
+@ApiTags('Data pipeline')
 @Controller('api/v1')
 export class QueueStatusController {
     private readonly logger = new Logger(QueueStatusController.name);
@@ -395,7 +395,7 @@ export class QueueStatusController {
      */
     @Sse(':network/queues/events')
     @ApiOperation({
-        summary: 'Server-Sent Events stream for real-time queue status updates',
+        summary: 'Get live updates on the processing queues',
         description:
             'Streams job lifecycle events (completed, failed, active, waiting, stalled), ' +
             'debounced counts-changed snapshots, se:events pub/sub messages, ' +
@@ -432,7 +432,7 @@ export class QueueStatusController {
     @Get(':network/queues/redis-health')
     @AdminRead()
     @ApiOperation({
-        summary: 'Redis/Redict memory and connection pressure',
+        summary: 'Check queue storage health (memory and connections)',
         description:
             'One INFO call, cached briefly. Reports memory used against maxmemory, ' +
             'the configured eviction policy, and connected client count.',
@@ -479,10 +479,10 @@ export class QueueStatusController {
 
     @Get(':network/queues')
     @ApiOperation({
-        summary: 'List all BullMQ queues for a network with live job counts',
+        summary: 'List the processing queues with job counts',
         description:
             'Returns one entry per base queue name.  Counts are fetched live from ' +
-            'BullMQ/Redis on every call — no caching.',
+            'BullMQ/Redis on every call, with no caching.',
     })
     @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
     @ApiResponse({ status: 200, type: [QueueStatusItemDto] })
@@ -570,7 +570,7 @@ export class QueueStatusController {
 
     @Get(':network/queues/:baseName/failed')
     @ApiOperation({
-        summary: 'List failed jobs for a specific queue',
+        summary: 'List failed jobs in a queue',
         description:
             'When groupByReason=false (default): returns a paginated list of failed jobs. ' +
             'When groupByReason=true: returns jobs grouped by their failure reason.',
@@ -723,7 +723,7 @@ export class QueueStatusController {
     @AdminWrite()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
-        summary: 'Retry a single failed job',
+        summary: 'Retry one failed job',
         description:
             'Loads the job from the queue, validates it is in the failed state, ' +
             'checks the manual retry budget (max 3 unless force=true), ' +
@@ -787,7 +787,7 @@ export class QueueStatusController {
     @AdminWrite()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
-        summary: 'Retry all (or a batch of) failed jobs',
+        summary: 'Retry failed jobs in bulk',
         description:
             'Fetches up to `limit` failed jobs, applies the per-job manual retry budget, ' +
             'and re-queues eligible jobs.  Returns counts of retried, skipped, and errored jobs.',
@@ -887,7 +887,7 @@ export class QueueStatusController {
         summary: 'Pause a queue',
         description:
             'Stops workers picking up NEW jobs from this queue. Jobs already running ' +
-            'continue to completion, and producers can still enqueue — the backlog ' +
+            'continue to completion, and producers can still enqueue. The backlog ' +
             'simply stops being consumed.',
     })
     @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
@@ -907,7 +907,12 @@ export class QueueStatusController {
     @Post(':network/queues/:baseName/resume')
     @AdminWrite()
     @HttpCode(HttpStatus.OK)
-    @ApiOperation({ summary: 'Resume a paused queue' })
+    @ApiOperation({
+        summary: 'Resume a paused queue',
+        description:
+            'Lets workers pick up jobs from this queue again, starting with the backlog that built up while it ' +
+            'was paused.',
+    })
     @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
     @ApiParam({ name: 'baseName', description: 'Base queue name' })
     @ApiResponse({ status: 200, description: 'Queue resumed' })
@@ -926,10 +931,10 @@ export class QueueStatusController {
     @AdminWrite()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
-        summary: 'Remove finished jobs from a queue',
+        summary: 'Clear finished jobs from a queue',
         description:
             'Deletes completed or failed jobs older than `graceMs`, up to `limit` per ' +
-            'call. Only finished jobs are eligible — waiting, delayed and active jobs ' +
+            'call. Only finished jobs are eligible. Waiting, delayed and active jobs ' +
             'are never touched, so no pending work is lost. Repeat until `removed` ' +
             'comes back smaller than `limit`.',
     })
@@ -963,10 +968,10 @@ export class QueueStatusController {
 
     @Get(':network/sync-status')
     @ApiOperation({
-        summary: 'Get sync health summary for a network',
+        summary: 'Check how up to date the data is',
         description:
             'Returns aggregate stats (total/synced topics, total messages) and the lag ' +
-            'computed from MAX(lastUpdate) across ALL topic_cache rows — not just the page shown in the UI. ' +
+            'computed from MAX(lastUpdate) across ALL topic_cache rows, not just the page shown in the UI. ' +
             'Use /sync-status/topics and /sync-status/tokens for the paginated detail tables.',
     })
     @ApiParam({ name: 'network', enum: ['mainnet', 'testnet', 'previewnet'] })
@@ -1034,7 +1039,7 @@ export class QueueStatusController {
 
     @Get(':network/sync-status/topics')
     @ApiOperation({
-        summary: 'Paginated topic sync watermarks with optional search',
+        summary: 'See sync progress for each Guardian topic',
         description:
             'Returns topics from topic_cache ordered by message count desc. ' +
             'Use the search param to filter by topicId prefix/substring (case-insensitive).',
@@ -1114,7 +1119,7 @@ export class QueueStatusController {
     @AdminWrite()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
-        summary: 'Manually enqueue a topic for sync',
+        summary: 'Sync a Guardian topic now',
         description:
             'Upserts the topic into topic_cache (creating the row if missing, ' +
             'setting hasNext=true) and enqueues a job on the TOPIC_SYNC_PRIORITY ' +
@@ -1191,7 +1196,7 @@ export class QueueStatusController {
 
     @Get(':network/sync-status/tokens')
     @ApiOperation({
-        summary: 'Paginated token sync watermarks with optional search',
+        summary: 'See sync progress for each token',
         description:
             'Returns tokens from token_cache. ' +
             'Use the search param to filter by tokenId prefix/substring (case-insensitive).',
@@ -1267,7 +1272,7 @@ export class QueueStatusController {
 
     @Get(':network/ipfs-status')
     @ApiOperation({
-        summary: 'List all IPFS CIDs referenced by messages, with their fetch status',
+        summary: 'See which IPFS files have been downloaded',
         description:
             'Returns a paginated list of every CID found in message.files, ' +
             'enriched with the linked message\'s topicId and type, plus a derived status: ' +
@@ -1590,7 +1595,7 @@ export class QueueStatusController {
     @AdminWrite()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
-        summary: 'Retry IPFS fetch for a single failed CID',
+        summary: 'Retry downloading one IPFS file',
         description:
             'Verifies the CID exists in ipfs_fetch_failure, increments its manualRetryCount, ' +
             'deletes the failure record (so the boot-time safety net will not re-park it), ' +
@@ -1673,7 +1678,7 @@ export class QueueStatusController {
     @AdminWrite()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
-        summary: 'Retry all IPFS fetch failures linked to a given topicId',
+        summary: 'Retry all failed IPFS downloads for a topic',
         description:
             'Finds every CID in ipfs_fetch_failure whose linked message belongs to the given topicId, ' +
             'then for each: deletes the failure record, removes the stale BullMQ job, and re-enqueues ' +

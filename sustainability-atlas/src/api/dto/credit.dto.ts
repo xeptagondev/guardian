@@ -28,12 +28,12 @@ export class CreditQueryDto extends PaginationQueryDto {
     @IsString()
     tokenId?: string;
 
-    @ApiPropertyOptional({ description: 'Filter by exact project key (credentialSubject.id) — returns only issuances linked to this project. Supports a `|`-delimited list to scope to several projects at once.' })
+    @ApiPropertyOptional({ description: 'Filter by exact project key (credentialSubject.id). Returns only issuances linked to this project. Supports a `|`-delimited list to scope to several projects at once.' })
     @IsOptional()
     @IsString()
     projectKey?: string;
 
-    @ApiPropertyOptional({ description: 'Filter by methodology sourceTimestamp — returns only issuances linked to this methodology' })
+    @ApiPropertyOptional({ description: 'Filter by methodology sourceTimestamp. Returns only issuances linked to this methodology' })
     @IsOptional()
     @IsString()
     methodologyId?: string;

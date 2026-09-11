@@ -106,7 +106,7 @@ export class IssuanceEventDto {
         description:
             'HCS consensus timestamp of the mint VP-Document. Guardian base64-encodes this value into the ' +
             'metadata of every NFT serial minted for this event, or into the fungible TOKENMINT ' +
-            "transaction's memo — either way it is how the on-chain mint is attributed to this VC.",
+            "transaction's memo. Either way it is how the on-chain mint is attributed to this VC.",
     })
     vpConsensusTimestamp: string | null;
 
@@ -116,7 +116,7 @@ export class IssuanceEventDto {
             'What the ledger actually minted, in display units: the attributed serial count for ' +
             'non-fungible tokens, the summed mint-transaction amount (scaled by token decimals) for ' +
             'fungible ones. Null until the mint has been reconciled. Compare against `amount`, which is ' +
-            'only what the MintToken VC declared — the two differ when a mint partially failed.',
+            'only what the MintToken VC declared. The two differ when a mint partially failed.',
     })
     mintedAmount: number | null;
 
@@ -130,7 +130,7 @@ export class IssuanceEventDto {
         nullable: true,
         description:
             "Of those serials, how many are held by an account other than the token's treasury and are not " +
-            'retired — i.e. transferred to a third party. Ownership is the only transfer signal available: ' +
+            'retired, i.e. transferred to a third party. Ownership is the only transfer signal available: ' +
             'Guardian writes no transfer record. Null for fungible tokens, whose balances cannot be traced ' +
             'back to the mint that created them.',
     })
@@ -141,7 +141,7 @@ export class IssuanceEventDto {
         description:
             'How far the on-chain mint reconciles against the VC: "verified" (minted amount equals the ' +
             'declared amount), "mismatch" (both known but different), "unmatched" (VP resolved, but no ' +
-            'on-chain mint record carries its timestamp), "ambiguous" (multiple VPs claim this mint — not ' +
+            'on-chain mint record carries its timestamp), "ambiguous" (multiple VPs claim this mint, not ' +
             'attributed), or null (no VP resolved yet).',
     })
     mintMatchStatus: string | null;
@@ -200,7 +200,7 @@ export class MintSerialsResponseDto {
     @ApiProperty({ nullable: true, description: 'Hedera token ID these serials belong to' })
     tokenId: string | null;
 
-    @ApiProperty({ nullable: true, description: 'Mint reconciliation status — see IssuanceEventDto.mintMatchStatus' })
+    @ApiProperty({ nullable: true, description: 'Mint reconciliation status. See IssuanceEventDto.mintMatchStatus' })
     mintMatchStatus: string | null;
 
     @ApiProperty({ description: 'Serials this issuance produced in total, across every page' })
@@ -215,7 +215,7 @@ export class MintSerialsResponseDto {
     @ApiProperty({
         type: [SerialRangeDto],
         description:
-            'Serials as contiguous ranges, ascending — a run of consecutive serials sharing the same ' +
+            'Serials as contiguous ranges, ascending. A run of consecutive serials sharing the same ' +
             'retired state collapses to one entry. Lossless: every serial\'s status is implied by the ' +
             'range containing it. Enumerating them individually would mean ~1.6 MB for a large ' +
             'issuance where one range says the same thing.',
@@ -230,7 +230,7 @@ export class MintTransactionDto {
     @ApiProperty({
         enum: ['retirement', 'transfer'],
         description:
-            'Whether the credits changed hands or left circulation — exactly one of two values. ' +
+            'Whether the credits changed hands or left circulation (exactly one of two values). ' +
             '"transfer": the credits moved to another account and remain valid for future sale or ' +
             'retirement. "retirement": the credits can never be used again. A transfer that destroyed ' +
             'every credit it moved, and was their last movement, is a retirement in substance and is ' +
@@ -245,9 +245,9 @@ export class MintTransactionDto {
         enum: ['guardian', 'ledger'],
         nullable: true,
         description:
-            'How well documented the offset claim is. "guardian" — the registry\'s retirement ' +
+            'How well documented the offset claim is. "guardian": the registry\'s retirement ' +
             'contract recorded the claim on-chain, naming the retiring account and the exact ' +
-            'serials. "ledger" — the credits are provably destroyed, but nothing on-chain identifies ' +
+            'serials. "ledger": the credits are provably destroyed, but nothing on-chain identifies ' +
             'who claimed the offset or when. Null on transfers.',
     })
     retirementSource: 'guardian' | 'ledger' | null;
@@ -257,7 +257,7 @@ export class MintTransactionDto {
         description:
             'Account holding the credits at the moment they left circulation. Retirements only. ' +
             'Where the retirement is evidenced only by destruction, this is the last transfer\'s ' +
-            'recipient — the party that held the credits — not whoever sent them.',
+            'recipient (the party that held the credits), not whoever sent them.',
     })
     holderAccountId: string | null;
 
@@ -272,7 +272,7 @@ export class MintTransactionDto {
 
     @ApiProperty({
         description:
-            'On a transfer, how many of the credits it moved have since been retired — the rest are ' +
+            'On a transfer, how many of the credits it moved have since been retired. The rest are ' +
             'still held and remain tradable. Always 0 on a retirement, which covers every credit it names.',
     })
     retiredSince: number;
@@ -286,7 +286,7 @@ export class MintTransactionsResponseDto {
         description:
             'Whether every treasury behind these credits has had its transfer history ingested. ' +
             'False means transfers may exist that have not been read yet, so an empty result is ' +
-            '"not known yet" rather than "nothing happened". Retirements are unaffected — they come ' +
+            '"not known yet" rather than "nothing happened". Retirements are unaffected, as they come ' +
             'from the retirement contracts, not from the treasury sweep.',
     })
     transferHistorySynced: boolean;
@@ -330,7 +330,7 @@ export class ProjectedIssuanceDto {
     @ApiProperty({
         nullable: true,
         description:
-            'Total projected emission reduction (tCO2e) — the mapped Estimated Annual Credits value as-is, ' +
+            'Total projected emission reduction (tCO2e): the mapped Estimated Annual Credits value as-is, ' +
             'never multiplied out across the crediting period (a single figure cannot honestly stand in ' +
             'for every year). Null when no amount is mapped/extracted, in which case periodStart/periodEnd ' +
             'may still be populated on their own.',
@@ -407,17 +407,17 @@ export class ProjectQueryDto extends PaginationQueryDto {
     @IsString()
     status?: string;
 
-    @ApiPropertyOptional({ description: 'Filter by policy topic ID (exact match) — returns all projects under the same Guardian policy (every version of it)' })
+    @ApiPropertyOptional({ description: 'Filter by policy topic ID (exact match). Returns all projects under the same Guardian policy (every version of it)' })
     @IsOptional()
     @IsString()
     policyTopicId?: string;
 
-    @ApiPropertyOptional({ description: 'Filter by instance topic ID (exact match) — returns only projects registered against this specific version of the methodology. Supports a `|`-delimited list to match any of several versions.' })
+    @ApiPropertyOptional({ description: 'Filter by instance topic ID (exact match). Returns only projects registered against this specific version of the methodology. Supports a `|`-delimited list to match any of several versions.' })
     @IsOptional()
     @IsString()
     instanceTopicId?: string;
 
-    @ApiPropertyOptional({ description: 'Filter by SDG numbers — match-any. Supports a `|`-delimited list, e.g. "3|7|13".' })
+    @ApiPropertyOptional({ description: 'Filter by SDG numbers (match any). Supports a `|`-delimited list, e.g. "3|7|13".' })
     @IsOptional()
     @IsString()
     sdgs?: string;
@@ -432,7 +432,7 @@ export class ProjectQueryDto extends PaginationQueryDto {
     @IsString()
     sectoralScope?: string;
 
-    @ApiPropertyOptional({ description: 'Vintage year range as "min|max" — either bound may be omitted, e.g. "2018|" or "|2024".' })
+    @ApiPropertyOptional({ description: 'Vintage year range as "min|max". Either bound may be omitted, e.g. "2018|" or "|2024".' })
     @IsOptional()
     @IsString()
     vintageRange?: string;
@@ -447,7 +447,7 @@ export class ProjectQueryDto extends PaginationQueryDto {
     @IsString()
     lifecycleStage?: string;
 
-    @ApiPropertyOptional({ description: 'Expected issuance year range as "min|max" — either bound may be omitted.' })
+    @ApiPropertyOptional({ description: 'Expected issuance year range as "min|max". Either bound may be omitted.' })
     @IsOptional()
     @IsString()
     expectedIssuanceYearRange?: string;
@@ -459,7 +459,7 @@ export class ProjectQueryDto extends PaginationQueryDto {
 }
 
 export class MethodologyFilterOptionDto {
-    @ApiProperty({ description: "Methodology instance topic ID — matches a project's instanceTopicId" })
+    @ApiProperty({ description: "Methodology instance topic ID. Matches a project's instanceTopicId" })
     topicId: string;
 
     @ApiProperty({ nullable: true, description: 'Methodology display name' })
@@ -677,14 +677,14 @@ export class ProjectResponseDto {
     @ApiProperty({
         description:
             'Total credits the MintToken VCs declared. Differs from totalIssued when a mint partially ' +
-            'failed — the VC states an intent, the ledger records what happened.',
+            'failed. The VC states an intent, the ledger records what happened.',
     })
     totalDeclared: number;
 
     @ApiProperty({
         nullable: true,
         description:
-            "Non-fungible credits held by an account other than the token's treasury — transferred to a " +
+            "Non-fungible credits held by an account other than the token's treasury, i.e. transferred to a " +
             'third party. Null when transfers cannot be determined (list responses, or fungible-only ' +
             'projects, whose balances cannot be traced back to a mint event).',
     })
@@ -708,7 +708,7 @@ export class ProjectResponseDto {
     @ApiProperty({
         type: [LinkedSchemaDto],
         description:
-            'VCs attached to this project whose schema is bound to a policy externalDataBlock — pushed ' +
+            'VCs attached to this project whose schema is bound to a policy externalDataBlock, pushed ' +
             'external/IoT MRV data, reported separately from the regular Detailed Information schemas.',
     })
     mrvSchemas: LinkedSchemaDto[];

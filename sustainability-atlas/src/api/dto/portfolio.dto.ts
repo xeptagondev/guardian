@@ -54,7 +54,7 @@ export class PortfolioStatsDto {
         description:
             'Monthly retired amounts across the given project keys, sorted ascending. Each credit is ' +
             'dated by its retirement contract record where one exists, and otherwise by its last ' +
-            'movement — the point at which it left circulation.',
+            'movement, the point at which it left circulation.',
     })
     retirementSeries: MintSeriesEntryDto[];
 }

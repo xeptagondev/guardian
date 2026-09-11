@@ -10,13 +10,13 @@ import { PaginationMeta } from './pagination.dto';
  */
 
 export class IssuanceSummaryDto {
-    @ApiProperty({ description: 'HCS consensus timestamp of the MintToken credential — the issuance identifier' })
+    @ApiProperty({ description: 'HCS consensus timestamp of the MintToken credential, used as the issuance identifier' })
     mintConsensusTimestamp: string;
 
     @ApiProperty({ nullable: true, description: "Mint VP-Document timestamp; the value Guardian stamps into NFT metadata or the fungible mint transaction's memo" })
     vpConsensusTimestamp: string | null;
 
-    @ApiProperty({ nullable: true, description: 'Amount the MintToken credential declared — a statement of intent' })
+    @ApiProperty({ nullable: true, description: 'Amount the MintToken credential declared (a statement of intent)' })
     declaredAmount: number | null;
 
     @ApiProperty({ nullable: true, description: 'Amount the ledger actually minted. Null until reconciled.' })
@@ -25,7 +25,7 @@ export class IssuanceSummaryDto {
     @ApiProperty({
         nullable: true,
         description:
-            'verified | mismatch | unmatched | ambiguous | null — how the on-chain mint reconciles ' +
+            'verified | mismatch | unmatched | ambiguous | null: how the on-chain mint reconciles ' +
             'against the credential. See IssuanceEventDto.mintMatchStatus.',
     })
     mintMatchStatus: string | null;
@@ -63,7 +63,7 @@ export class RelatedProjectDto {
 export class IssuanceTokenInfoDto {
     @ApiProperty({ nullable: true }) tokenId: string | null;
 
-    @ApiProperty({ nullable: true, description: 'Current supply, scaled by token decimals. Net of retirements — not the amount minted.' })
+    @ApiProperty({ nullable: true, description: 'Current supply, scaled by token decimals. Net of retirements, not the amount minted.' })
     tokenSupply: number | null;
 
     @ApiProperty({ nullable: true }) decimals: number | null;

@@ -58,7 +58,7 @@ export class DashboardMintStatsDto {
         type: [MintSeriesEntryDto],
         description:
             'Monthly retired amounts, sorted ascending. Each credit is dated by its retirement ' +
-            'contract record where one exists, and otherwise by its last movement — the point at ' +
+            'contract record where one exists, and otherwise by its last movement, the point at ' +
             'which it left circulation. The series therefore sums to totalRetired.',
     })
     retirementSeries: MintSeriesEntryDto[];
