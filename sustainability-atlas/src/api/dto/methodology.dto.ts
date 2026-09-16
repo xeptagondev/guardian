@@ -48,7 +48,7 @@ export class MethodologyQueryDto extends PaginationQueryDto {
     @IsString()
     version?: string;
 
-    @ApiPropertyOptional({ description: 'Filter by Policy Topic ID (exact match) — returns all versions of the same policy' })
+    @ApiPropertyOptional({ description: 'Filter by Policy Topic ID (exact match). Returns all versions of the same policy' })
     @IsOptional()
     @IsString()
     policyTopicId?: string;
@@ -104,7 +104,7 @@ export class MethodologyResponseDto {
 
     @ApiProperty({
         nullable: true,
-        description: 'Policy Topic ID (businessData.topicId) — shared across all versions of the same policy',
+        description: 'Policy Topic ID (businessData.topicId), shared across all versions of the same policy',
     })
     policyTopicId: string | null;
 
