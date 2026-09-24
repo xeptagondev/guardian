@@ -990,7 +990,7 @@
             "schemas": "Esquemas",
             "description": "Descripción",
             "id": "ID",
-            "status": "Estado",
+            "status": "Estado de la Política",
             "type": "Tipo",
             "version": "Versión",
             "decoded": "Decodificado"
@@ -1009,11 +1009,11 @@
             "description": "Descripción",
             "decoded": "Estado de Decode",
             "decodedAll": "Todos",
-            "status": "Estado",
-            "hideDiscontinued": "Ocultar metodologías discontinuadas"
+            "status": "Estado de la Política",
+            "hideDiscontinued": "Ocultar políticas discontinuadas"
         },
         "statusValues": {
-            "published": "Publicada",
+            "published": "Activa",
             "to_be_discontinued": "Por discontinuar",
             "discontinued": "Discontinuada"
         },
@@ -1127,7 +1127,7 @@
                 "registry": "Registro",
                 "version": "Versión",
                 "schemas": "Esquemas",
-                "status": "Estado"
+                "status": "Estado de la Política"
             },
             "overview": {
                 "description": "Descripción",
@@ -1145,7 +1145,7 @@
                     "instancePolicyTopic": "Tópico de la instancia de política",
                     "published": "Publicada",
                     "schemas": "Esquemas",
-                    "status": "Estado"
+                    "status": "Estado de la Política"
                 },
                 "currentBadge": "Actual",
                 "noVersions": "No se encontraron versiones."
@@ -1253,7 +1253,7 @@
                 },
                 "compareRows": {
                     "version": "Versión",
-                    "status": "Estado",
+                    "status": "Estado de la Política",
                     "published": "Publicada",
                     "description": "Descripción",
                     "sectoralScopes": "Alcances sectoriales",
