@@ -59,6 +59,15 @@
     }
 }
 
+.st-applied-template-banner--preview {
+    background: var(--guardian-info-background, #E9F1FF);
+    color: color-mix(in srgb, var(--color-accent-blue-1, #2D6CDF) 70%, #000);
+
+    strong {
+        color: color-mix(in srgb, var(--color-accent-blue-1, #2D6CDF) 82%, #000);
+    }
+}
+
 .st-applied-template-version {
     padding: 2px 6px;
     border-radius: 6px;
@@ -459,6 +468,21 @@
     border: 1px solid color-mix(in srgb, var(--color-accent-red-1, #FF432A) 40%, var(--guardian-border-color, #E1E7EF));
     border-radius: 6px;
     padding: 4px 10px;
+
+    i { font-size: 13px; }
+}
+
+.sc-preview-mode-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--color-accent-blue-1, #2D6CDF) 70%, #000);
+    background: var(--guardian-info-background, #E9F1FF);
+    border: 1px solid color-mix(in srgb, var(--color-accent-blue-1, #2D6CDF) 40%, var(--guardian-border-color, #E1E7EF));
+    border-radius: 6px;
+    padding: 5px 11px;
 
     i { font-size: 13px; }
 }
@@ -3285,6 +3309,16 @@
         background: var(--guardian-hover);
         color: var(--guardian-font-color);
     }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: default;
+    }
+
+    &:disabled:hover {
+        background: var(--guardian-background);
+        color: var(--color-grey-5);
+    }
 }
 
 .sc-cond-type-note {
@@ -3306,7 +3340,8 @@
     border-radius: 6px;
     transition: color 0.12s, background 0.12s;
 
-    &:hover { color: var(--color-accent-red-1); background: var(--guardian-failure-background); }
+    &:hover:not(:disabled) { color: var(--color-accent-red-1); background: var(--guardian-failure-background); }
+    &:disabled { opacity: 0.3; cursor: default; }
 }
 
 .sc-cond-block-body {
@@ -3370,6 +3405,7 @@
     box-sizing: border-box;
 
     &:focus { border-color: var(--color-primary); }
+    &:disabled { opacity: 0.5; cursor: default; background: var(--guardian-grey-background); }
 }
 
 .sc-cond-val-wrap {
@@ -3414,7 +3450,8 @@
     transition: color 0.12s;
 
     i { font-size: 13px; }
-    &:hover { color: var(--color-primary); }
+    &:hover:not(:disabled) { color: var(--color-primary); }
+    &:disabled { opacity: 0.4; cursor: default; }
 }
 
 // THEN / ELSE 2-column grid
@@ -3560,7 +3597,8 @@
     flex-shrink: 0;
     transition: color 0.12s;
 
-    &:hover { color: var(--color-accent-red-1); }
+    &:hover:not(:disabled) { color: var(--color-accent-red-1); }
+    &:disabled { opacity: 0.3; cursor: default; }
 }
 
 .sc-cond-te-add-row {
@@ -3588,10 +3626,15 @@
 
     i { font-size: 13px; }
 
-    &:hover {
+    &:hover:not(:disabled) {
         border-color: var(--color-primary);
         color: var(--color-primary);
         background: color-mix(in srgb, var(--color-primary) 4%, transparent);
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: default;
     }
 }
 
@@ -3974,12 +4017,26 @@
     align-items: center;
     gap: 6px;
     font-size: 13px;
+    flex: 1 1 auto;
+    min-width: 0;
+
+    > span:not(.sc-ref-sel-ver) {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 }
 
 .sc-ref-sel-ver {
     font-size: 10px;
     color: var(--guardian-font-color-secondary, #848FA9);
     margin-left: auto;
+    flex-shrink: 0;
+}
+
+.sc-ref-sel-tool {
+    color: var(--guardian-tool-color);
 }
 
 // Constrain the expanded ref-schema panel so long schema names don't stretch it
@@ -3987,6 +4044,10 @@
 // The panel is appended to <body>, so this rule must be global (leading ::ng-deep).
 ::ng-deep .guardian-dropdown-panel.sc-ref-schema-panel {
     max-width: 480px;
+
+    .p-virtualscroller-content {
+        width: 100%;
+    }
 
     .sc-ref-sel-item {
         min-width: 0;

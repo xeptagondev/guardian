@@ -17,7 +17,7 @@ import { ArtifactService } from 'src/app/services/artifact.service';
 import { CsvService } from 'src/app/services/csv.service';
 import { GzipService } from 'src/app/services/gzip.service';
 import { IndexedDbRegistryService } from 'src/app/services/indexed-db-registry.service';
-import { hydrateDocumentTables } from './math-model/table-hydration';
+import { hydrateDocumentMapTables } from './math-model/table-hydration';
 
 class Tooltip {
     public visible: boolean;
@@ -255,6 +255,9 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
         for (const item of this.engine.variables.getItems()) {
             this._updateFieldWarning(item);
         }
+        for (const item of this.engine.outputs.getItems()) {
+            this._updateFieldWarning(item, 'output');
+        }
     }
 
     ngAfterContentInit() {
@@ -370,14 +373,14 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
         for (const schema of this.schemas) {
             const iri = String(schema.iri || '');
             const name = String(schema.name || '');
-            const fields = schema.getDeepFields();
+            const fields = this.getSchemaFields(schema);
             const map = this.createFieldMap(fields, new Map<string, IFieldNode>());
             this.schemaNames.set(iri, name);
             this.schemaFieldMap.set(iri, map);
         }
 
         if (this.inputSchema) {
-            const fields = this.inputSchema.getDeepFields();
+            const fields = this.getSchemaFields(this.inputSchema);
             this.inputSchemaFieldMap = this.createFieldMap(fields, new Map<string, IFieldNode>());
             this.inputSchemaName = String(this.inputSchema.name || '');
             this.codeMirrorOptions.inputLinks = this.createLinks(fields);
@@ -388,6 +391,43 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
             this.outputSchemaFieldMap = this.createFieldMap(fields, new Map<string, IFieldNode>());
             this.outputSchemaName = String(this.outputSchema.name || '');
             this.codeMirrorOptions.outputLinks = this.createLinks(fields);
+        }
+    }
+
+    private getSchemaFields(schema: Schema): IFieldNode[] {
+        const fields = schema.getDeepFields();
+        this.addTableColumnFields(fields);
+        return fields;
+    }
+
+    private addTableColumnFields(fields: IFieldNode[]): void {
+        for (const node of fields) {
+            this.addTableColumnFields(node.fields);
+            const columns = node.field.customType === 'table' && Array.isArray(node.field.tableColumns)
+                ? node.field.tableColumns
+                : [];
+            for (const column of columns) {
+                if (!column?.key || !column?.name) {
+                    continue;
+                }
+                node.fields.push({
+                    path: `${node.path}.${column.key}`,
+                    arrayLvl: node.arrayLvl + 1,
+                    type: 'string[]',
+                    field: {
+                        ...node.field,
+                        name: column.key,
+                        description: column.name,
+                        isArray: true,
+                        isRef: false,
+                        type: 'string',
+                        customType: '',
+                        fields: [],
+                        tableColumns: undefined
+                    },
+                    fields: []
+                });
+            }
         }
     }
 
@@ -441,8 +481,8 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
         }
     }
 
-    private createSchemaView(schema: Schema) {
-        const fields = schema.getDeepFields();
+    private createSchemaView(schema: Schema, includeTableColumns: boolean = true) {
+        const fields = includeTableColumns ? this.getSchemaFields(schema) : schema.getDeepFields();
 
         const list = TreeListData.fromObject<IFieldNode>({ fields }, 'fields', (item) => {
             const node: IFieldNode = item.data;
@@ -528,7 +568,7 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
             data: {
                 title: 'Select Field',
                 value: item.field,
-                view: this.createSchemaView(schema),
+                view: this.createSchemaView(schema, false),
             },
         })!;
         dialogRef.onClose.subscribe((result: any | null) => {
@@ -536,6 +576,7 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
                 item.field = result.value;
                 item.schema = schema?.iri || null;
                 item.update();
+                this._updateFieldWarning(item, 'output');
             }
         });
     }
@@ -557,14 +598,13 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
     }
 
     private getField(type: 'input' | 'output', schema: string | null, link: string) {
+        if (type === 'output') {
+            return this.outputSchemaFieldMap.get(link);
+        }
         if (schema) {
             return this.schemaFieldMap.get(schema)?.get(link);
         }
-        if (type === 'input') {
-            return this.inputSchemaFieldMap.get(link);
-        } else {
-            return this.outputSchemaFieldMap.get(link);
-        }
+        return this.inputSchemaFieldMap.get(link);
     }
 
     public getFieldName(type: 'input' | 'output', schema: string | null, link: string): string {
@@ -598,19 +638,11 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
         return String(value);
     }
 
-    public deleteLink(item: FieldLink, $event: any) {
-        $event.preventDefault();
-        $event.stopPropagation();
-        item.field = null;
-        item.update();
-        this._updateFieldWarning(item);
-    }
-
-    public onPathChange(item: FieldLink, value: string): void {
+    public onPathChange(item: FieldLink, value: string, type: 'input' | 'output' = 'input'): void {
         item.field = value;
         item.update();
-        this._computePathSuggestions(item);
-        this._updateFieldWarning(item);
+        this._computePathSuggestions(item, type);
+        this._updateFieldWarning(item, type);
     }
 
     public onPathKeyup(event: KeyboardEvent): void {
@@ -629,28 +661,28 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
         }, 200);
     }
 
-    public selectPathSuggestion(item: FieldLink, path: string): void {
+    public selectPathSuggestion(item: FieldLink, path: string, type: 'input' | 'output' = 'input'): void {
         item.field = path;
         item.update();
-        this._updateFieldWarning(item);
+        this._updateFieldWarning(item, type);
         this.activePathItem = null;
         this.pathSuggestions = [];
     }
 
-    private _updateFieldWarning(item: FieldLink): void {
-        this.fieldWarnings.set(item.id, !!(item.field && !this.getField('input', item.schema, item.field)));
+    private _updateFieldWarning(item: FieldLink, type: 'input' | 'output' = 'input'): void {
+        this.fieldWarnings.set(item.id, !!(item.field && !this.getField(type, item.schema, item.field)));
     }
 
-    private _computePathSuggestions(item: FieldLink): void {
+    private _computePathSuggestions(item: FieldLink, type: 'input' | 'output' = 'input'): void {
         const prefix = item.field || '';
         if (!prefix) {
             this.pathSuggestions = [];
             this.activePathItem = null;
             return;
         }
-        const map = item.schema
-            ? this.schemaFieldMap.get(item.schema)
-            : this.inputSchemaFieldMap;
+        const map = type === 'output'
+            ? this.outputSchemaFieldMap
+            : (item.schema ? this.schemaFieldMap.get(item.schema) : this.inputSchemaFieldMap);
         if (!map) {
             this.pathSuggestions = [];
             this.activePathItem = null;
@@ -1035,7 +1067,7 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
             const inputDocument = inputDocuments.getCurrent();
 
             try {
-                await hydrateDocumentTables(inputDocument, {
+                await hydrateDocumentMapTables(inputDocuments, {
                     artifactService: this.artifactService,
                     gzipService: this.gzipService,
                     csvService: this.csvService,
@@ -1095,8 +1127,26 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
                 return;
             }
 
-            this.context.setDocument(inputDocuments);
+            try {
+                this.context.setDocument(inputDocuments);
+            } catch (error) {
+                this.loading = false;
+                this.error = 'Invalid data';
+                this.result = {
+                    valid: true,
+                    error: String(error),
+                    variables: [],
+                    formulas: [],
+                    outputs: [],
+                    input: '',
+                    output: ''
+                };
+                this.resultStep = 'errors';
+                this.onStep('step_5');
+                return;
+            }
             const context = this.context.getContext();
+            const warnings = this.context.getWarnings();
 
             const variables = this.engine.variables.getItems();
             const formulas = this.engine.formulas.getItems();
@@ -1146,7 +1196,7 @@ export class MathEditorDialogComponent implements OnInit, AfterContentInit {
                 }
                 this.result = {
                     valid: true,
-                    error: '',
+                    error: warnings.join('\n'),
                     variables: variables,
                     formulas: formulas,
                     outputs: outputs,

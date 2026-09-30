@@ -1,7 +1,8 @@
 import { ChangeDetectorRef, Component, ElementRef, NgZone, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { HttpResponse } from '@angular/common/http';
-import { EMPTY, Observable, Subject, Subscription, forkJoin, of } from 'rxjs';
+import { EMPTY, Observable, Subject, Subscription, firstValueFrom, forkJoin, of } from 'rxjs';
+import { IPFSService } from 'src/app/services/ipfs.service';
 import { catchError, debounceTime, distinctUntilChanged, map, shareReplay, switchMap, takeUntil } from 'rxjs/operators';
 import { DefaultFieldDictionary, DocumentGenerator, isAncestorType, isGeoCustomType, ISchema, relationAncestors, ModuleStatus, ISchemaTemplate, Schema, SchemaCategory, SchemaCondition, SchemaConditionTarget, SchemaEntity, SchemaField, SchemaHelper, SchemaStatus, ISchemaArrayDependency, ISchemaArrayDependencyMapping, DEFAULT_IWA_VERSION, IwaVersion, resolveIwaVersion, IPropertySuggestionResult, } from '@guardian/interfaces';
 import { SchemaService } from 'src/app/services/schema.service';
@@ -196,7 +197,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public get showTopSaveActions(): boolean {
-        return !!this.selectedSchema || this.isTemplateConfigMode;
+        return !!this.selectedSchema || this.isTemplateConfigMode || this.isTemplatePreviewMode;
     }
 
     public get selectedSchemaId(): string | null {
@@ -236,7 +237,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public get isTemplateReadonly(): boolean {
-        return this.isTemplateMode && this.schemaTemplate?.status === ModuleStatus.PUBLISHED;
+        return this.isTemplateMode && !this.isTemplatePreviewMode && this.schemaTemplate?.status === ModuleStatus.PUBLISHED;
     }
 
     public get canCreateTemplateNewVersion(): boolean {
@@ -246,11 +247,15 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public get isTemplateMode(): boolean {
-        return this.type === 'template' || this.router.url.startsWith('/schema-template-configuration');
+        return this.type === 'template' || this.isTemplateConfigMode || this.isTemplatePreviewMode;
     }
 
     public get isTemplateConfigMode(): boolean {
         return this.router.url.startsWith('/schema-template-configuration');
+    }
+
+    public get isTemplatePreviewMode(): boolean {
+        return this.router.url.startsWith('/schema-template-preview');
     }
 
     public get breadcrumbRootLabel(): string {
@@ -270,7 +275,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     private get configurationRoute(): string {
-        return this.isTemplateConfigMode ? '/schema-template-configuration' : '/schema-configuration';
+        if (this.isTemplateConfigMode) { return '/schema-template-configuration'; }
+        if (this.isTemplatePreviewMode) { return '/schema-template-preview'; }
+        return '/schema-configuration';
     }
 
     private getSchemaConfigKey(schema: Schema | null | undefined): string {
@@ -323,6 +330,10 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return !this.selectedSchemaConfig?.schemaSettingsLocked;
     }
 
+    public get canChangeSelectedSchemaConditions(): boolean {
+        return !this.selectedSchemaConfig?.conditionsLocked;
+    }
+
     public get canAddFieldToSelectedSchema(): boolean {
         const schema = this.currentContextSchema;
         return !!schema &&
@@ -330,6 +341,15 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             !this.isTemplateConfigMode &&
             !this.isTemplateConfigPendingForSchema(schema) &&
             !this.isTemplateSchemaCustomFieldsLocked(schema);
+    }
+
+    public get canChangeConditionsForSelectedSchema(): boolean {
+        const schema = this.currentContextSchema;
+        return !!schema &&
+            !this.isTemplateReadonly &&
+            !this.isTemplateConfigMode &&
+            !this.isTemplateConfigPendingForSchema(schema) &&
+            !this.isTemplateSchemaConditionsLocked(schema);
     }
 
     public get canEditSelectedFieldInTemplate(): boolean {
@@ -389,11 +409,33 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return fieldConfig?.locked !== false;
     }
 
+    public conditionHasLockedField(condition?: SchemaCondition): boolean {
+        return [...(condition?.thenFields ?? []), ...(condition?.elseFields ?? [])]
+            .some((field) => this.isTemplateFieldLocked(field));
+    }
+
+    public getRemoveConditionTitle(condition: SchemaCondition): string {
+        if (this.conditionHasLockedField(condition)) {
+            return 'Cannot remove condition with locked template fields';
+        }
+        if (!this.canChangeConditionsForSelectedSchema) {
+            return 'Conditions are locked by the applied template';
+        }
+        return 'Remove condition';
+    }
+
     public isTemplateSchemaCustomFieldsLocked(schema: Schema): boolean {
         if (!this.isTemplateConfigMode && !this.hasAppliedTemplateConfig) {
             return false;
         }
         return this.getSchemaTemplateConfig(schema)?.customFieldsLocked === true;
+    }
+
+    public isTemplateSchemaConditionsLocked(schema: Schema): boolean {
+        if (!this.isTemplateConfigMode && !this.hasAppliedTemplateConfig) {
+            return false;
+        }
+        return this.getSchemaTemplateConfig(schema)?.conditionsLocked === true;
     }
 
     public isSchemaFeatured(schema: Schema): boolean {
@@ -405,6 +447,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
 
     public isTemplateSchemaDeleteLocked(schema: Schema): boolean {
         if (this.isTemplateReadonly) {
+            return true;
+        }
+        if (this.isTemplatePreviewMode) {
             return true;
         }
         if (!this.isTemplateConfigMode && !this.hasAppliedTemplateConfig) {
@@ -440,7 +485,8 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         const config = this.getSchemaTemplateConfig(schema);
         return !!(
             config?.schemaSettingsLocked ||
-            config?.customFieldsLocked
+            config?.customFieldsLocked ||
+            config?.conditionsLocked
         );
     }
 
@@ -455,11 +501,14 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (config?.customFieldsLocked) {
             return 'Custom fields are locked';
         }
+        if (config?.conditionsLocked) {
+            return 'Conditions are locked';
+        }
         return 'Schema is locked';
     }
 
     public get hasAppliedTemplateConfig(): boolean {
-        return !this.isTemplateMode && !!this.schemaTemplate?.config;
+        return (!this.isTemplateMode || this.isTemplatePreviewMode) && !!this.schemaTemplate?.config;
     }
 
     private isTemplateConfigPendingForSchema(schema: Schema | null | undefined): boolean {
@@ -489,7 +538,11 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (config) {
             return config;
         }
-        if ((this.isTemplateConfigMode && this.schemaTemplate) || (!this.isTemplateMode && schema?.templateId && this.schemaTemplate)) {
+        if (
+            (this.isTemplateConfigMode && this.schemaTemplate) ||
+            (!this.isTemplateMode && schema?.templateId && this.schemaTemplate) ||
+            (this.isTemplatePreviewMode && schema?.templateId && this.schemaTemplate)
+        ) {
             return {};
         }
         return null;
@@ -653,7 +706,17 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         private _zone: NgZone,
         private _cdr: ChangeDetectorRef,
         private toastService: ToastService,
+        private ipfs: IPFSService,
     ) {}
+
+    public uploadRichTextImage = async (file: File): Promise<string> => {
+        const cid = await firstValueFrom(this.ipfs.addFile(file));
+        return `ipfs://${cid}`;
+    };
+
+    public resolveRichTextImage = async (reference: string): Promise<string> => {
+        return await this.ipfs.getImageByLink(reference);
+    };
 
     /**
      * Surface a backend failure. Every error path in this component used to be a silent
@@ -689,6 +752,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
      * removed are cleared, so the author confirms before anything is written.
      */
     public onUpgradeToIwaV3(): void {
+        if (this.isTemplatePreviewMode) { return; }
         const schema = this.selectedSchema;
         const id = schema?.id || (schema as any)?._id;
         if (!id) { return; }
@@ -1084,10 +1148,15 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             errors.push('Key is required');
         } else if (/\s/.test(field.name)) {
             errors.push('Key must not contain spaces');
-        } else if (SchemasConfigurationComponent.SYSTEM_KEYS.has(field.name)) {
-            errors.push('Key is a reserved system name');
-        } else if (allFields.filter(f => f !== field && f.name === field.name).length > 0) {
-            errors.push('Key must be unique within the schema');
+        } else {
+            const reservedCharacter = ['.', ':'].find((character) => field.name.includes(character));
+            if (reservedCharacter) {
+                errors.push(`Key must not contain "${reservedCharacter}" because it is reserved`);
+            } else if (SchemasConfigurationComponent.SYSTEM_KEYS.has(field.name)) {
+                errors.push('Key is a reserved system name');
+            } else if (allFields.filter(f => f !== field && f.name === field.name).length > 0) {
+                errors.push('Key must be unique within the schema');
+            }
         }
 
         if ((field as any).customType === 'enum' && (!Array.isArray(field.enum) || field.enum.length === 0)) {
@@ -1260,6 +1329,20 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         });
     }
 
+    public onPreviewTemplate(): void {
+        if (!this.isTemplateConfigMode || !this.schemaTemplate?.id) {
+            return;
+        }
+        void this.router.navigate(['/schema-template-preview'], {
+            queryParams: {
+                type: 'template',
+                topic: this.topic || undefined,
+                templateId: this.templateId || undefined,
+                schemaId: this.selectedSchemaId || undefined,
+            },
+        });
+    }
+
     private loadSchemaTemplate(): void {
         if (!this.isTemplateMode || !this.templateId || this.templateId === this.loadedTemplateId) {
             return;
@@ -1379,6 +1462,18 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             return;
         }
         config.schemaSettingsLocked = !config.schemaSettingsLocked;
+        this.templateConfigDirty = true;
+    }
+
+    public toggleCanChangeSelectedSchemaConditions(): void {
+        if (this.isTemplateReadonly) {
+            return;
+        }
+        const config = this.ensureSelectedSchemaConfig();
+        if (!config) {
+            return;
+        }
+        config.conditionsLocked = !config.conditionsLocked;
         this.templateConfigDirty = true;
     }
 
@@ -1688,6 +1783,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public saveAll(): void {
+        if (this.isTemplatePreviewMode) {
+            return;
+        }
         if (this.isTemplateReadonly) {
             return;
         }
@@ -1728,6 +1826,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         const allSchemas = [...toCreate, ...toSave];
         // Phase 1: rebuild document from fields (system fields appended, then stripped back).
         allSchemas.forEach(s => {
+            this._resetStaleContainsComparators(s.conditions);
             const userFields = Array.isArray(s.fields) ? s.fields : [];
             const defaultFields = DefaultFieldDictionary.getDefaultFields(s.entity as SchemaEntity);
             s.update([...userFields, ...defaultFields], s.conditions);
@@ -1853,8 +1952,12 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return !!this.richTextPresetEditor?.showLinkDialog;
     }
 
+    public isRichTextPresetBusy(): boolean {
+        return this.isRichTextPresetLinkOpen() || !!this.richTextPresetEditor?.imageLoading;
+    }
+
     public closeRichTextPresetDialog(): void {
-        if (this.isRichTextPresetLinkOpen()) {
+        if (this.isRichTextPresetBusy()) {
             return;
         }
         this.richTextPresetEditor?.cancelLink();
@@ -2934,16 +3037,64 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return this.schemas.find(s => s.iri === iri) ?? this._subSchemasByIri.get(iri);
     }
 
+    private availableRefSchemasCache: {
+        schemas: Schema[];
+        subSchemas: Map<string, Schema>;
+        topic: string;
+        selectedSchema: Schema | null;
+        drillStack: DrillEntry[];
+        currentIri: string;
+        editVersion: number;
+        canAdd: boolean;
+        result: Schema[];
+    } | null = null;
+
     public get availableRefSchemas(): Schema[] {
-        const list = this.schemas.filter(s => this.canDragSchema(s));
+        const currentIri = this.selectedSubSchemaIri;
+        const canAdd = this.canAddFieldToSelectedSchema;
+        const cache = this.availableRefSchemasCache;
+        if (cache
+            && cache.schemas === this.schemas
+            && cache.subSchemas === this._subSchemasByIri
+            && cache.topic === this.topic
+            && cache.selectedSchema === this.selectedSchema
+            && cache.drillStack === this.drillStack
+            && cache.currentIri === currentIri
+            && cache.editVersion === this.schemaEditVersion
+            && cache.canAdd === canAdd) {
+            return cache.result;
+        }
+
+        const schemaMap = this.buildRefSchemaMap();
+        const list = [...schemaMap.values()]
+            .filter(s => this.canDragSchema(s, schemaMap));
         // Keep the currently-referenced schema selectable even when it isn't in the
         // draggable list, otherwise the dropdown value matches no option and shows blank.
-        const currentIri = this.selectedSubSchemaIri;
+        let result = list;
         if (currentIri && !list.some(s => s.iri === currentIri)) {
             const current = this.resolveRefSchema(currentIri);
-            if (current) { return [current, ...list]; }
+            if (current) { result = [current, ...list]; }
         }
-        return list;
+        this.availableRefSchemasCache = {
+            schemas: this.schemas,
+            subSchemas: this._subSchemasByIri,
+            topic: this.topic,
+            selectedSchema: this.selectedSchema,
+            drillStack: this.drillStack,
+            currentIri,
+            editVersion: this.schemaEditVersion,
+            canAdd,
+            result,
+        };
+        return result;
+    }
+
+    private buildRefSchemaMap(): Map<string, Schema> {
+        const schemaMap = new Map<string, Schema>(this._subSchemasByIri);
+        for (const schema of this.schemas) {
+            if (schema.iri) { schemaMap.set(schema.iri, schema); }
+        }
+        return schemaMap;
     }
 
     public enterSubSchema(field: SchemaField, event: Event): void {
@@ -3057,11 +3208,13 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.setDragGhost(event);
     }
 
-    public isCircularDependency(schema: Schema): boolean {
+    public isCircularDependency(schema: Schema, schemaMap?: Map<string, Schema>): boolean {
         // Use live field refs, not document.$defs — withDefs() bloats $defs and causes false positives.
-        const schemaMap = new Map<string, Schema>();
-        for (const s of this.schemas) {
-            if (s.iri) { schemaMap.set(s.iri, s); }
+        const refs = schemaMap ?? new Map<string, Schema>();
+        if (!schemaMap) {
+            for (const candidate of this.schemas) {
+                if (candidate.iri) { refs.set(candidate.iri, candidate); }
+            }
         }
 
         const ancestors = new Set<string>();
@@ -3077,7 +3230,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             visited.add(s.iri);
             for (const f of (s.fields || [])) {
                 if (f.isRef && f.type) {
-                    const ref = schemaMap.get(f.type);
+                    const ref = refs.get(f.type);
                     if (ref) { visit(ref); }
                 }
             }
@@ -3090,14 +3243,14 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return false;
     }
 
-    public canDragSchema(schema: Schema): boolean {
+    public canDragSchema(schema: Schema, schemaMap?: Map<string, Schema>): boolean {
         if (!this.canAddFieldToSelectedSchema) { return false; }
         const selId = this.selectedSchema?.id || (this.selectedSchema as any)?._id;
         const schId = schema.id || (schema as any)._id;
         if (selId && selId === schId) { return false; }
         const contextIri = this.currentDrilledSchemaIri;
         if (contextIri && schema.iri === contextIri) { return false; }
-        if (this.isCircularDependency(schema)) { return false; }
+        if (this.isCircularDependency(schema, schemaMap)) { return false; }
         return true;
     }
 
@@ -3421,6 +3574,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public onNewSchema(): void {
+        if (this.isTemplatePreviewMode) {
+            return;
+        }
         if (this.isTemplateReadonly) {
             return;
         }
@@ -3701,16 +3857,22 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public setConditionOperator(cond: SchemaCondition, op: 'SINGLE' | 'AND' | 'OR'): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const rows = this.getIfRows(cond);
         const firstEntry = this._firstConditionEntry;
         // getIfRows returns a placeholder row for a null ifCondition, so an existing row is
         // only usable when it actually carries a field; otherwise fall back to the first entry.
         const existing = rows[0]?.field ? rows[0] : null;
-        const first = existing ?? { field: firstEntry?.field, fieldValue: '', ...(firstEntry && firstEntry.fieldPath.length > 1 ? { fieldPath: firstEntry.fieldPath } : {}) };
+        const first = existing ?? {
+            field: firstEntry?.field,
+            fieldValue: '',
+            ...(firstEntry && firstEntry.fieldPath.length > 1 ? { fieldPath: firstEntry.fieldPath } : {}),
+        };
         const predicate = {
             field: first.field,
             fieldValue: first.fieldValue,
             ...(Array.isArray(first.fieldPath) && first.fieldPath.length > 1 ? { fieldPath: first.fieldPath } : {}),
+            ...(first.comparator ? { comparator: first.comparator } : {}),
         };
         if (op === 'SINGLE') {
             (cond as any).ifCondition = predicate;
@@ -3726,7 +3888,62 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     public isIfRowEnum(row: any): boolean { return !!(row?.field?.enum?.length); }
     public getIfRowOptions(row: any): string[] { return row?.field?.enum ?? []; }
 
+    /**
+     * `contains` only means anything against an array; the backend/eval/compile layers already
+     * self-correct a stale `contains` (from a field whose "Allow Multiple Answers" was since
+     * turned off) to plain equals rather than staying permanently unsatisfiable - see
+     * SchemaHelper.testPredicateValue. This does the same cleanup at the data level, on save,
+     * so the stored condition doesn't keep carrying a comparator that no longer matches its
+     * field's current type (and so it doesn't silently reactivate if the field is ever toggled
+     * back to an array with a value nobody re-checked).
+     */
+    private _resetStaleContainsComparators(conditions: SchemaCondition[] | undefined): void {
+        for (const cond of conditions ?? []) {
+            const ic = cond.ifCondition as any;
+            if (!ic) { continue; }
+            const predicates: any[] = 'AND' in ic ? ic.AND : ('OR' in ic ? ic.OR : [ic]);
+            for (const p of predicates ?? []) {
+                if (!p || p.comparator !== 'contains') { continue; }
+                const isArrayField = !!(p.field?.isArray && !p.field?.isRef);
+                if (!isArrayField) { delete p.comparator; }
+            }
+        }
+    }
+
+    // 'equals' (including absent, its default) is one universal comparator for every field -
+    // array or scalar alike. No legacy carve-out: an array-field '=' predicate saved before
+    // this feature existed means exactly the same "each element equals" as one authored today.
+    public getIfRowComparator(row: any): string {
+        return row?.comparator || 'equals';
+    }
+
+    public getIfRowComparatorOptions(row: any): { label: string; value: string }[] {
+        const isArrayField = !!(row?.field?.isArray && !row?.field?.isRef);
+        if (!isArrayField) {
+            return [{ label: '=', value: 'equals' }];
+        }
+        return [
+            { label: '= (each)', value: 'equals' },
+            { label: 'contains', value: 'contains' },
+        ];
+    }
+
+    public setIfRowComparator(cond: SchemaCondition, rowIdx: number, comparator: string): void {
+        const ic = cond.ifCondition as any;
+        if (!ic) { return; }
+        const apply = (row: any) => {
+            if (!row) { return; }
+            if (comparator === 'equals') { delete row.comparator; }
+            else { row.comparator = comparator; }
+        };
+        if ('AND' in ic) { apply(ic.AND[rowIdx]); }
+        else if ('OR' in ic) { apply(ic.OR[rowIdx]); }
+        else { apply(ic); }
+        this.markDirty();
+    }
+
     public setIfRowField(cond: SchemaCondition, rowIdx: number, pathStr: string): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const field = this._resolveConditionField(pathStr);
         if (!field) { return; }
         const fieldPath = pathStr.split('.');
@@ -3743,6 +3960,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public setIfRowValue(cond: SchemaCondition, rowIdx: number, value: any): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const ic = cond.ifCondition as any;
         if (!ic) { return; }
         if ('AND' in ic) { ic.AND[rowIdx].fieldValue = value; }
@@ -3752,6 +3970,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public addIfRow(cond: SchemaCondition): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const ic = cond.ifCondition as any;
         if (!ic) { return; }
         const firstEntry = this._firstConditionEntry;
@@ -3766,6 +3985,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeIfRow(cond: SchemaCondition, rowIdx: number): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const ic = cond.ifCondition as any;
         if (!ic) { return; }
         if ('AND' in ic && ic.AND.length > 1) { ic.AND.splice(rowIdx, 1); }
@@ -3776,6 +3996,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     // ── THEN / ELSE fields ───────────────────────────────────────────────────
 
     public addThenField(cond: SchemaCondition): void {
+        if (!this.canChangeConditionsForSelectedSchema || !this.canAddFieldToSelectedSchema) { return; }
         const schema = this.currentContextSchema;
         if (!schema) { return; }
         const newField = this.buildNewField(this.defaultFieldType, schema.fields);
@@ -3785,6 +4006,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public addElseField(cond: SchemaCondition): void {
+        if (!this.canChangeConditionsForSelectedSchema || !this.canAddFieldToSelectedSchema) { return; }
         const schema = this.currentContextSchema;
         if (!schema) { return; }
         const newField = this.buildNewField(this.defaultFieldType, schema.fields);
@@ -3794,6 +4016,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeThenField(cond: SchemaCondition, field: SchemaField): void {
+        if (!this.canChangeConditionsForSelectedSchema || this.isTemplateFieldLocked(field)) { return; }
         cond.thenFields = (cond.thenFields || []).filter(f => f !== field);
         const schema = this.currentContextSchema;
         if (schema) {
@@ -3805,6 +4028,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeElseField(cond: SchemaCondition, field: SchemaField): void {
+        if (!this.canChangeConditionsForSelectedSchema || this.isTemplateFieldLocked(field)) { return; }
         cond.elseFields = (cond.elseFields || []).filter(f => f !== field);
         const schema = this.currentContextSchema;
         if (schema) {
@@ -4000,17 +4224,20 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
 
     public onCondThenRefChange(cond: SchemaCondition, ci: number, pathStr: string): void {
         if (!pathStr) { return; }
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         this.addThenTarget(cond, pathStr);
         setTimeout(() => { this.condThenRefVal[ci] = null; });
     }
 
     public onCondElseRefChange(cond: SchemaCondition, ci: number, pathStr: string): void {
         if (!pathStr) { return; }
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         this.addElseTarget(cond, pathStr);
         setTimeout(() => { this.condElseRefVal[ci] = null; });
     }
 
     public addThenTarget(cond: SchemaCondition, pathStr: string): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         if (!pathStr) { return; }
         const path = pathStr.split('.');
         if (cond.thenTargets?.some(t => t.fieldPath.join('.') === pathStr)) { return; }
@@ -4021,6 +4248,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public addElseTarget(cond: SchemaCondition, pathStr: string): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         if (!pathStr) { return; }
         const path = pathStr.split('.');
         if (cond.elseTargets?.some(t => t.fieldPath.join('.') === pathStr)) { return; }
@@ -4031,11 +4259,13 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeThenTarget(cond: SchemaCondition, target: SchemaConditionTarget): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         cond.thenTargets = (cond.thenTargets || []).filter(t => t !== target);
         this.markDirty();
     }
 
     public removeElseTarget(cond: SchemaCondition, target: SchemaConditionTarget): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         cond.elseTargets = (cond.elseTargets || []).filter(t => t !== target);
         this.markDirty();
     }
@@ -4052,6 +4282,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     // ── Top-level condition management ────────────────────────────────────────
 
     public addNewCondition(): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const schema = this.currentContextSchema;
         const firstEntry = this._firstConditionEntry;
         if (!schema || !firstEntry) { return; }
@@ -4069,8 +4300,11 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeConditionAt(index: number): void {
+        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const schema = this.currentContextSchema;
         if (!schema) { return; }
+        const condToCheck = schema.conditions?.[index];
+        if (this.conditionHasLockedField(condToCheck)) { return; }
         // H1: rekey index-keyed dropdown state before the conditions array shrinks
         const rekey = (rec: Record<number, string | null>) => {
             const out: Record<number, string | null> = {};
@@ -4383,6 +4617,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public onPublish(): void {
+        if (this.isTemplatePreviewMode) { return; }
         if (this.type === 'tag') { this.onPublishTag(); return; }
         const id = this.selectedSchemaId;
         if (!id || !this.canPublish) { return; }
@@ -4417,6 +4652,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public onPublishTemplate(): void {
+        if (this.isTemplatePreviewMode) { return; }
         const id = this.schemaTemplate?.id;
         if (!id || !this.canPublishTemplate) { return; }
         const dialogRef = this.dialogService.open(PublishSchemaTemplateDialog, {
@@ -4442,6 +4678,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public onCreateTemplateNewVersion(): void {
+        if (this.isTemplatePreviewMode) { return; }
         const id = this.schemaTemplate?.id;
         if (!id || !this.canCreateTemplateNewVersion) { return; }
         this.schemaTemplatesService.pushNewVersion(id)
@@ -4469,6 +4706,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public onExport(): void {
+        if (this.isTemplatePreviewMode) { return; }
         const id = this.selectedSchema?.id || (this.selectedSchema as any)?._id;
         if (!id) { return; }
         this.schemaService.exportInMessage(id)
@@ -4484,6 +4722,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public onExportTemplate(): void {
+        if (this.isTemplatePreviewMode) { return; }
         const id = this.schemaTemplate?.id;
         if (!id || !this.canExportTemplate) { return; }
         this.schemaTemplatesService.exportInMessage(id)

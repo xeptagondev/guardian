@@ -4,9 +4,7 @@ import {
     BinaryMessageResponse,
     DataBaseHelper,
     DatabaseServer,
-    GenerateBlocks,
     IAuthUser,
-    JsonToXlsx,
     MessageError,
     MessageResponse,
     NewNotifier,
@@ -15,9 +13,9 @@ import {
     RunFunctionAsync,
     Schema as SchemaCollection,
     ImportExportUtils,
-    Users,
-    XlsxToJson
+    Users
 } from '@guardian/common';
+import { GenerateBlocks, JsonToXlsx, XlsxToJson } from '../xlsx/index.js';
 import {
     IOwner,
     GenerateUUIDv4,
@@ -52,9 +50,11 @@ import {
     previewToolByMessage,
     SchemaImportExportHelper,
     updateSchemaDefs,
-    updateToolConfig
+    updateToolConfig,
+    readSchemaTemplateXlsx
 } from '../helpers/import-helpers/index.js'
 import { validateSchemaDependencies } from '../helpers/import-helpers/schema/schema-dependency-validator.js';
+import { validateSchemaFieldKeys } from '../helpers/import-helpers/schema/schema-field-key-validator.js';
 import { getPageOptions } from './helpers/index.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -70,6 +70,38 @@ interface TemplateSchemaValidationContext {
 
 function getSchemaFields(schema: ISchema): SchemaField[] {
     return new Schema(schema, true).fields || [];
+}
+
+function getConditionFieldId(field: any): string {
+    return field?.templateFieldId || field?.name || '';
+}
+
+function getConditionPredicates(ifCondition: any): any[] {
+    return ifCondition?.AND ?? ifCondition?.OR ?? (ifCondition ? [ifCondition] : []);
+}
+
+function getParsedConditionTargetPaths(targets: any[]): string[][] {
+    return (targets || [])
+        .map((target: any) => target.fieldPath || [])
+        .filter((fieldPath: string[]) => fieldPath.length > 0);
+}
+
+function getConditionsHash(schema: ISchema): string {
+    const conditions = new Schema(schema, true).conditions || [];
+    return SchemaHelper.stableStringify(
+        conditions.map((condition: any) => ({
+            op: condition.ifCondition?.AND ? 'AND' : condition.ifCondition?.OR ? 'OR' : 'SINGLE',
+            if: getConditionPredicates(condition.ifCondition).map((predicate: any) => [
+                getConditionFieldId(predicate.field),
+                predicate.fieldPath || [],
+                SchemaHelper.cloneSchemaRuntimeValue(predicate.fieldValue)
+            ]),
+            then: (condition.thenFields || []).map(getConditionFieldId),
+            else: (condition.elseFields || []).map(getConditionFieldId),
+            thenTargets: getParsedConditionTargetPaths(condition.thenTargets),
+            elseTargets: getParsedConditionTargetPaths(condition.elseTargets)
+        }))
+    );
 }
 
 function flattenFields(fields: SchemaField[], result: SchemaField[] = []): SchemaField[] {
@@ -186,6 +218,10 @@ export function validateTemplateSchemaUpdateByConfig(
 ): void {
     if (schemaConfig.schemaSettingsLocked && getSchemaSettingsHash(previous) !== getSchemaSettingsHash(next)) {
         throw new Error(`Schema settings for "${previous.name}" are locked by schema template and cannot be edited.`);
+    }
+
+    if (schemaConfig.conditionsLocked && getConditionsHash(previous) !== getConditionsHash(next)) {
+        throw new Error(`Conditions for "${previous.name}" are locked by schema template and cannot be edited.`);
     }
 
     const previousFields = flattenFields(getSchemaFields(previous));
@@ -494,6 +530,7 @@ export async function schemaAPI(logger: PinoLogger): Promise<void> {
         }) => {
             try {
                 const { item, owner } = msg;
+                validateSchemaFieldKeys(item);
                 await resolveTemplateSchemaContext(item, owner);
                 prepareSchemaTemplateMetadata(item);
                 await createSchemaAndArtifacts(item.category, item, owner, NewNotifier.empty());
@@ -580,6 +617,7 @@ export async function schemaAPI(logger: PinoLogger): Promise<void> {
                     entity: item.entity,
                     document: item.document ? JSON.parse(JSON.stringify(item.document)) : item.document
                 } as ISchema;
+                validateSchemaFieldKeys(next);
                 validateSchemaDependencies(next);
                 await resolveTemplateSchemaContext(next, owner);
                 prepareSchemaTemplateMetadata(next, previous);
@@ -2768,7 +2806,8 @@ export async function schemaAPI(logger: PinoLogger): Promise<void> {
             try {
                 const { ids } = msg;
                 const schemas = await SchemaImportExportHelper.exportSchemas(ids);
-                const buffer = await JsonToXlsx.generate(schemas, [], []);
+                const template = await readSchemaTemplateXlsx();
+                const buffer = await JsonToXlsx.generate(schemas, [], [], { template });
                 return new BinaryMessageResponse(buffer);
             } catch (error) {
                 await logger.error(error, ['GUARDIAN_SERVICE'], msg?.owner?.id);

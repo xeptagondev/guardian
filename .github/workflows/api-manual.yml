@@ -33,8 +33,8 @@ concurrency:
 
 jobs:
   buildAndTest:
-    name: Build and test
-    runs-on: guardian-linux-medium
+    name: Build and Test
+    runs-on: hg-guard-lin-lg
     timeout-minutes: 120
     env:
       # .yarnrc.yml does not set enableGlobalCache and Yarn 4 defaults it to true,
@@ -101,8 +101,9 @@ jobs:
       # jobs.<id>.services.<id>, so ${{ env.KUBO_VERSION }} would silently expand to an
       # empty string.
       ipfs-node:
-        image: ipfs/kubo:v0.43.0
+        image: ipfs/kubo:v0.43.1
         env:
+          GOLOG_LOG_LEVEL: warn
           IPFS_TELEMETRY: "off"
         ports:
           - 127.0.0.1:4001:4001
