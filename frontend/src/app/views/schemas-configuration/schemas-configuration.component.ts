@@ -3,8 +3,9 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { HttpResponse } from '@angular/common/http';
 import { EMPTY, Observable, Subject, Subscription, firstValueFrom, forkJoin, of } from 'rxjs';
 import { IPFSService } from 'src/app/services/ipfs.service';
+import { SchemaFormPreferencesService } from 'src/app/services/schema-form-preferences.service';
 import { catchError, debounceTime, distinctUntilChanged, map, shareReplay, switchMap, takeUntil } from 'rxjs/operators';
-import { DefaultFieldDictionary, DocumentGenerator, isAncestorType, isGeoCustomType, ISchema, relationAncestors, ModuleStatus, ISchemaTemplate, Schema, SchemaCategory, SchemaCondition, SchemaConditionTarget, SchemaEntity, SchemaField, SchemaHelper, SchemaStatus, ISchemaArrayDependency, ISchemaArrayDependencyMapping, DEFAULT_IWA_VERSION, IwaVersion, resolveIwaVersion, IPropertySuggestionResult, IPropertySuggestionRequest, } from '@guardian/interfaces';
+import { DefaultFieldDictionary, DocumentGenerator, IFormulaLink, isAncestorType, isGeoCustomType, ISchema, relationAncestors, ModuleStatus, ISchemaTemplate, Schema, SchemaCategory, SchemaCondition, SchemaConditionTarget, SchemaEntity, SchemaField, SchemaHelper, SchemaStatus, ISchemaArrayDependency, ISchemaArrayDependencyMapping, DEFAULT_IWA_VERSION, IwaVersion, resolveIwaVersion, IPropertySuggestionResult, IPropertySuggestionRequest } from '@guardian/interfaces';
 import { SchemaService } from 'src/app/services/schema.service';
 import { TagsService } from 'src/app/services/tag.service';
 import { ProjectComparisonService } from 'src/app/services/project-comparison.service';
@@ -23,9 +24,19 @@ import { RichTextEditorComponent } from 'src/app/modules/schema-engine/rich-text
 import { markdownToHtml } from 'src/app/modules/schema-engine/rich-text-editor/markdown';
 import { SchemaTemplatesService } from 'src/app/services/schema-templates.service';
 import { ToastService } from 'src/app/services/toast.service';
+import { updateOverflowTitle } from 'src/app/utils/overflow-title';
+import { FormulasService } from 'src/app/services/formulas.service';
+import { PolicyEngineService } from 'src/app/services/policy-engine.service';
+import { ProfileService } from 'src/app/services/profile.service';
+import { FormulasTree } from 'src/app/modules/formulas/models/formula-tree';
+import { IFormulaLinkScope } from 'src/app/modules/formulas/models/form-formulas';
+import { IFieldFormulaRow, IFieldFormulasView, IFieldScope, SchemaFieldFormulas } from './schema-field-formulas';
 
 export interface DrillEntry {
     fieldLabel: string;
+    /** key of the sub-schema field drilled into; the drill path is the formula link path prefix */
+    fieldName: string;
+    field?: SchemaField;
     fields: SchemaField[];
     schemaIri: string;
 }
@@ -125,10 +136,24 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     public get selectedField(): SchemaField | null { return this._selectedField; }
     public set selectedField(field: SchemaField | null) {
         this._selectedField = field;
+        this.advisoryTextEnabled = !!field?.advisoryText?.trim();
         this.rightPanelSuggestionExpanded = false;
         this.rightPanelSuggestLoading = false;
         this.rightPanelSuggestUnavailable = false;
         this._rebuildRefPreset();
+    }
+
+    public advisoryTextEnabled = false;
+
+    public get selectedFieldSupportsAdvisoryText(): boolean {
+        return !!this.selectedField && SchemaHelper.supportsAdvisoryText(this.selectedField);
+    }
+
+    public toggleAdvisoryText(enabled: boolean): void {
+        if (!this.selectedField || !this.selectedFieldSupportsAdvisoryText) { return; }
+        this.advisoryTextEnabled = enabled;
+        if (!enabled) { delete this.selectedField.advisoryText; }
+        this.markDirty();
     }
 
     public refPresetFormFields: SchemaField[] | null = null;
@@ -138,10 +163,23 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     public previewPill: 'submitter' | 'readonly' = 'submitter';
     public previewPreset: any = null;
     public previewReadonlyFields: any = null;
+    public previewFormulas: FormulasTree | null = null;
+    /** where the links of the previewed sub-schema's fields are stored (root schema + drill path) */
+    public previewFormulaLinkScope: IFormulaLinkScope | null = null;
+    public previewMounted = false;
+    public previewKey = 0;
+    public previewSchemaRef: Schema | null = null;
+
+    /** Only the schema itself gets the section rail; a drilled-in sub-schema is shown as one page. */
+    public get previewLayout(): 'sections' | 'single' {
+        return this.isDrilling ? 'single' : 'sections';
+    }
+    private previewBuiltFor: { schema: Schema | null; version: number; path: string } = { schema: null, version: -1, path: '' };
     public richTextPresetTarget: 'default' | 'suggest' | 'test' | null = null;
     @ViewChild('richTextPresetEditor') public richTextPresetEditor?: RichTextEditorComponent;
 
     public drillStack: DrillEntry[] = [];
+    public drillEntering = false;
     public get isDrilling(): boolean { return this.drillStack.length > 0; }
     public get drillCurrentFields(): SchemaField[] { return this.drillStack[this.drillStack.length - 1]?.fields ?? []; }
     public get currentDrilledSchemaIri(): string { return this.drillStack[this.drillStack.length - 1]?.schemaIri || ''; }
@@ -161,6 +199,8 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     public newArrayDependencyMappingTarget: string | null = null;
     public newArrayDependencyValueMappings: ISchemaArrayDependencyMapping[] = [];
     public editingArrayDependency: ISchemaArrayDependency | null = null;
+    private arrayDependencyDataVersion = 0;
+    private arrayDependencyErrorCache: { key: unknown[]; result: string | null } | null = null;
     public templateConfigSaving: boolean = false;
     private templateConfigDirty: boolean = false;
 
@@ -192,7 +232,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (this.isTemplateConfigMode) {
             return this.templateConfigDirty;
         }
-        return this.dirtySchemaIds.size > 0;
+        return this.dirtySchemaIds.size > 0 || !!this.fieldFormulas?.hasPending;
     }
 
     public get showTopSaveActions(): boolean {
@@ -287,6 +327,13 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return (field as any)?.templateFieldId || field?.name || '';
     }
 
+    /** Same joined-signature string `SchemaHelper.findConditionIndexBySignature` matches on -
+     * null (wholly policy-authored trigger, unmatchable) becomes '', same convention as a
+     * field with no templateFieldId. */
+    private getConditionConfigKey(condition: SchemaCondition | null | undefined): string {
+        return SchemaHelper.getConditionTriggerSignature(condition as any)?.join(',') ?? '';
+    }
+
     public get selectedSchemaConfig(): any {
         const key = this.getSchemaConfigKey(this.selectedSchema);
         if (!key) {
@@ -317,20 +364,24 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return this.selectedFieldConfig?.guidelines || '';
     }
 
-    public get canAddCustomFieldsToSelectedSchema(): boolean {
-        return !this.selectedSchemaConfig?.customFieldsLocked;
+    public get selectedSchemaCustomFieldsConfigLocked(): boolean {
+        return !!this.selectedSchemaConfig?.customFieldsLocked;
     }
 
     public get isSelectedSchemaFeatured(): boolean {
         return !!this.selectedSchemaConfig?.featured;
     }
 
-    public get canChangeSelectedSchemaSettings(): boolean {
-        return !this.selectedSchemaConfig?.schemaSettingsLocked;
+    public get selectedSchemaSettingsConfigLocked(): boolean {
+        return !!this.selectedSchemaConfig?.schemaSettingsLocked;
     }
 
-    public get canChangeSelectedSchemaConditions(): boolean {
-        return !this.selectedSchemaConfig?.conditionsLocked;
+    public get selectedSchemaConditionsConfigLocked(): boolean {
+        return !!this.selectedSchemaConfig?.conditionsLocked;
+    }
+
+    public get selectedSchemaRepeatableLinksConfigLocked(): boolean {
+        return !!this.selectedSchemaConfig?.repeatableLinksLocked;
     }
 
     public get canAddFieldToSelectedSchema(): boolean {
@@ -342,7 +393,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             !this.isTemplateSchemaCustomFieldsLocked(schema);
     }
 
-    public get canChangeConditionsForSelectedSchema(): boolean {
+    /** Add-only, mirroring canAddFieldToSelectedSchema: gates only `addNewCondition`. Editing
+     * or removing an existing condition is governed solely by the per-condition lock. */
+    public get canAddConditionToSelectedSchema(): boolean {
         const schema = this.currentContextSchema;
         return !!schema &&
             !this.isTemplateReadonly &&
@@ -351,8 +404,20 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             !this.isTemplateSchemaConditionsLocked(schema);
     }
 
-    public get canEditSelectedFieldInTemplate(): boolean {
-        return this.selectedFieldConfig?.locked === false;
+    /** Add-only, mirroring canAddConditionToSelectedSchema: gates only genuinely-new
+     * repeatable links. Editing or removing an existing link is governed solely by the
+     * per-link lock. */
+    public get canAddLinkToSelectedSchema(): boolean {
+        const schema = this.currentContextSchema;
+        return !!schema &&
+            !this.isTemplateReadonly &&
+            !this.isTemplateConfigMode &&
+            !this.isTemplateConfigPendingForSchema(schema) &&
+            !this.isTemplateSchemaRepeatableLinksLocked(schema);
+    }
+
+    public get selectedFieldConfigLocked(): boolean {
+        return this.selectedFieldConfig?.locked !== false;
     }
 
     public get selectedFieldLocked(): boolean {
@@ -413,14 +478,79 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             .some((field) => this.isTemplateFieldLocked(field));
     }
 
+    /** Per-individual-condition lock - independent of `conditionsLocked` (the whole-tab,
+     * add-only toggle). Unlike a field, a condition with no config entry defaults to
+     * *unlocked*: this is an opt-in extra restriction, not a default-safe state every
+     * condition starts in. Scope is structure only (trigger/operator/rows/existence) - it
+     * does not reach the condition's then/else branch fields, which keep using their own
+     * independent per-field lock. */
+    public isConditionLocked(condition?: SchemaCondition): boolean {
+        if (this.isTemplateReadonly) {
+            return true;
+        }
+        if (!this.isTemplateConfigMode && !this.hasAppliedTemplateConfig) {
+            return false;
+        }
+        const key = this.getConditionConfigKey(condition);
+        if (!key) {
+            return false;
+        }
+        const schema = this.getSchemaForFieldLocks();
+        const schemaConfig = this.getSchemaTemplateConfig(schema);
+        return schemaConfig?.conditions?.[key]?.locked === true;
+    }
+
     public getRemoveConditionTitle(condition: SchemaCondition): string {
+        if (this.isConditionLocked(condition)) {
+            return 'Cannot remove a condition locked by the applied template';
+        }
         if (this.conditionHasLockedField(condition)) {
             return 'Cannot remove condition with locked template fields';
         }
-        if (!this.canChangeConditionsForSelectedSchema) {
-            return 'Conditions are locked by the applied template';
-        }
         return 'Remove condition';
+    }
+
+    /** Resolves a repeatable link's dependent field (the terminal segment of
+     * `dependency.field`) so it can be keyed by `templateFieldId`, same identity space as a
+     * regular field's own lock. */
+    private resolveLinkDependentField(dependency: ISchemaArrayDependency | null | undefined): SchemaField | null {
+        const path = dependency?.field;
+        if (!path?.length) {
+            return null;
+        }
+        const containerFields = path.length > 1
+            ? this.resolveArrayDependencyItemFields(path.slice(0, -1))
+            : (this.selectedSchema?.fields ?? []);
+        return containerFields.find(f => f.name === path[path.length - 1]) ?? null;
+    }
+
+    private getLinkConfigKey(dependency: ISchemaArrayDependency | null | undefined): string {
+        return this.getFieldConfigKey(this.resolveLinkDependentField(dependency));
+    }
+
+    /** Per-individual-repeatable-link lock, same opt-in-only semantics as `isConditionLocked`. */
+    public isLinkLocked(dependency?: ISchemaArrayDependency | null): boolean {
+        if (this.isTemplateReadonly) {
+            return true;
+        }
+        if (!this.isTemplateConfigMode && !this.hasAppliedTemplateConfig) {
+            return false;
+        }
+        const key = this.getLinkConfigKey(dependency);
+        if (!key) {
+            return false;
+        }
+        const schema = this.getSchemaForFieldLocks();
+        const schemaConfig = this.getSchemaTemplateConfig(schema);
+        return schemaConfig?.repeatableLinks?.[key]?.locked === true;
+    }
+
+    /** The add/edit link form is shared between creating a new link and editing an existing
+     * one - which gate applies depends on which mode it's currently in. */
+    public get isArrayDependencyFormLocked(): boolean {
+        return this.editingArrayDependency
+            ? this.isLinkLocked(this.editingArrayDependency)
+            : !this.canAddLinkToSelectedSchema;
     }
 
     public isTemplateSchemaCustomFieldsLocked(schema: Schema): boolean {
@@ -435,6 +565,13 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             return false;
         }
         return this.getSchemaTemplateConfig(schema)?.conditionsLocked === true;
+    }
+
+    public isTemplateSchemaRepeatableLinksLocked(schema: Schema): boolean {
+        if (!this.isTemplateConfigMode && !this.hasAppliedTemplateConfig) {
+            return false;
+        }
+        return this.getSchemaTemplateConfig(schema)?.repeatableLinksLocked === true;
     }
 
     public isSchemaFeatured(schema: Schema): boolean {
@@ -485,7 +622,8 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return !!(
             config?.schemaSettingsLocked ||
             config?.customFieldsLocked ||
-            config?.conditionsLocked
+            config?.conditionsLocked ||
+            config?.repeatableLinksLocked
         );
     }
 
@@ -502,6 +640,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         }
         if (config?.conditionsLocked) {
             return 'Conditions are locked';
+        }
+        if (config?.repeatableLinksLocked) {
+            return 'Repeatable links are locked';
         }
         return 'Schema is locked';
     }
@@ -601,6 +742,10 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
 
     private static readonly NON_UPDATABLE_TYPES = new Set(['helptext', 'prefix', 'postfix', 'sub-schema']);
     private static readonly NON_ARRAY_TYPES = new Set(['boolean', 'helptext']);
+    private static readonly NON_AUTOCALC_TYPES = new Set([
+        'enum', 'table', 'helptext', 'prefix', 'postfix', 'sub-schema', 'continent', 'country', 'state',
+        'image', 'file', 'hederaAccount'
+    ]);
 
     public readonly geoJsonOptions = ['Point', 'Polygon', 'LineString', 'MultiPoint', 'MultiPolygon', 'MultiLineString'];
 
@@ -744,7 +889,22 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         private _cdr: ChangeDetectorRef,
         private toastService: ToastService,
         private ipfs: IPFSService,
-    ) {}
+        formulasService: FormulasService,
+        policyEngineService: PolicyEngineService,
+        profileService: ProfileService,
+        public formPreferences: SchemaFormPreferencesService,
+    ) {
+        this.fieldFormulas = new SchemaFieldFormulas(
+            formulasService,
+            policyEngineService,
+            profileService,
+            (action, error) => this.reportError(action, error),
+            (link) => this.describeFormulaLink(link)
+        );
+    }
+
+    /** Formula items shown on the fields, kept on the formula side. */
+    public fieldFormulas: SchemaFieldFormulas;
 
     public uploadRichTextImage = async (file: File): Promise<string> => {
         const cid = await firstValueFrom(this.ipfs.addFile(file));
@@ -1031,22 +1191,8 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
                     map((data: any) => {
                         // Spread $defs into throw-away copies so parseFields resolves $ref links
                         // without mutating the originals — updateRefs() during save needs clean docs.
-                        const defs: Record<string, any> = {};
-                        for (const sub of (data.subSchemas || [])) {
-                            if (sub.iri && sub.document) {
-                                defs[sub.iri] = typeof sub.document === 'string'
-                                    ? JSON.parse(sub.document)
-                                    : sub.document;
-                            }
-                        }
-                        const hasDefs = Object.keys(defs).length > 0;
-                        const withDefs = (raw: any): any => {
-                            if (!hasDefs || !raw?.document) { return raw; }
-                            const doc = typeof raw.document === 'string'
-                                ? JSON.parse(raw.document)
-                                : raw.document;
-                            return { ...raw, document: { ...doc, $defs: defs } };
-                        };
+                        const defs = this.collectDefs(data.subSchemas);
+                        const withDefs = (raw: any) => this.withDefs(raw, defs);
                         const schema = data.schema ? new Schema(withDefs(data.schema)) : null;
                         return {
                             schema,
@@ -1079,6 +1225,11 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             if (!this.isTemplateMode) {
                 this.schemaTemplate = appliedTemplate;
             }
+            this.normalizeLegacyConditionFieldOrder(schema);
+            if (this.selectedField && !this.isDrilling) {
+                const name = this.selectedField.name;
+                this.selectedField = schema.fields?.find(f => f.name === name) ?? null;
+            }
             this.selectedSchema = schema;
             this.loadProperties(resolveIwaVersion(schema));
             this.resetArrayDependencyEditor();
@@ -1089,9 +1240,13 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
                 this.dirtySchemaIds.delete(schemaId);
                 // freshly loaded from the server, so this is the saved baseline
                 this.snapshotSchema(schema, schemaId);
+                this.fieldFormulas?.discard(schemaId);
             }
             if (!this.topic && schema.topicId) {
                 this.topic = schema.topicId;
+            }
+            if (!this.isTemplateMode && this.type !== 'system' && this.type !== 'tag') {
+                this.fieldFormulas?.load(schema.topicId || this.topic);
             }
             // Raw sub-schemas preserve the API's hierarchical $defs; filtered to exclude
             // the current schema so it never appears in its own $defs (mirrors old editor).
@@ -1106,6 +1261,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             }
             this.upsertInSidebar(schema);
             this.rebuildPreview();
+            this.loadPreviewFormulas();
             this.loadParentSchemas();
         });
 
@@ -1272,6 +1428,21 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             }
         }
 
+        if (field.autocalculate && field.isArray) {
+            errors.push('Auto Calculate cannot allow multiple answers');
+        }
+
+        if (field.required && this.getFieldCurrentType(field) === 'helptext') {
+            errors.push('Help Text cannot be required');
+        }
+
+        const autocalcBlocked = field.autocalculate ? this.autocalcBlockReason(field) : null;
+        if (field.autocalculate && autocalcBlocked) {
+            errors.push(autocalcBlocked);
+        } else if (field.autocalculate && !field.expression?.trim()) {
+            errors.push('Auto Calculate requires an expression');
+        }
+
         if ((field as any).customType === 'enum' && (!Array.isArray(field.enum) || field.enum.length === 0)) {
             errors.push('Enum must have at least one value');
         }
@@ -1404,13 +1575,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             return;
         }
         if (this.isTemplateMode) {
-            void this.router.navigate(['/schema-template-configuration'], {
-                queryParams: {
-                    type: 'template',
-                    topic: this.topic || undefined,
-                    templateId: this.templateId || undefined,
-                },
-            });
+            this.navigateToTemplateConfiguration();
             return;
         }
         const queryParams: Record<string, string> = {};
@@ -1433,11 +1598,16 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (!this.isTemplateMode || this.isTemplateConfigMode) {
             return;
         }
+        this.navigateToTemplateConfiguration();
+    }
+
+    private navigateToTemplateConfiguration(): void {
         void this.router.navigate(['/schema-template-configuration'], {
             queryParams: {
                 type: 'template',
                 topic: this.topic || undefined,
                 templateId: this.templateId || undefined,
+                schemaId: this.selectedSchemaId || undefined,
             },
         });
     }
@@ -1590,6 +1760,18 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.templateConfigDirty = true;
     }
 
+    public toggleCanChangeSelectedSchemaRepeatableLinks(): void {
+        if (this.isTemplateReadonly) {
+            return;
+        }
+        const config = this.ensureSelectedSchemaConfig();
+        if (!config) {
+            return;
+        }
+        config.repeatableLinksLocked = !config.repeatableLinksLocked;
+        this.templateConfigDirty = true;
+    }
+
     public toggleCanEditSelectedFieldInTemplate(): void {
         if (this.isTemplateReadonly) {
             return;
@@ -1598,7 +1780,33 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (!config) {
             return;
         }
-        config.locked = this.canEditSelectedFieldInTemplate;
+        config.locked = !this.selectedFieldConfigLocked;
+        this.templateConfigDirty = true;
+    }
+
+    /** Toggles directly from the condition block's own header - unlike the per-field lock,
+     * there is no select-then-toggle-in-side-panel step. */
+    public toggleConditionLocked(condition: SchemaCondition): void {
+        if (this.isTemplateReadonly) {
+            return;
+        }
+        const config = this.ensureConditionConfig(condition);
+        if (!config) {
+            return;
+        }
+        config.locked = !this.isConditionLocked(condition);
+        this.templateConfigDirty = true;
+    }
+
+    public toggleLinkLocked(dependency: ISchemaArrayDependency): void {
+        if (this.isTemplateReadonly) {
+            return;
+        }
+        const config = this.ensureLinkConfig(dependency);
+        if (!config) {
+            return;
+        }
+        config.locked = !this.isLinkLocked(dependency);
         this.templateConfigDirty = true;
     }
 
@@ -1730,6 +1938,28 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return schemaConfig.fields[fieldKey];
     }
 
+    private ensureConditionConfig(condition: SchemaCondition | null | undefined): any | null {
+        const schemaConfig = this.ensureSelectedSchemaConfig();
+        const key = this.getConditionConfigKey(condition);
+        if (!schemaConfig || !key) {
+            return null;
+        }
+        schemaConfig.conditions = schemaConfig.conditions || {};
+        schemaConfig.conditions[key] = schemaConfig.conditions[key] || {};
+        return schemaConfig.conditions[key];
+    }
+
+    private ensureLinkConfig(dependency: ISchemaArrayDependency | null | undefined): any | null {
+        const schemaConfig = this.ensureSelectedSchemaConfig();
+        const key = this.getLinkConfigKey(dependency);
+        if (!schemaConfig || !key) {
+            return null;
+        }
+        schemaConfig.repeatableLinks = schemaConfig.repeatableLinks || {};
+        schemaConfig.repeatableLinks[key] = schemaConfig.repeatableLinks[key] || {};
+        return schemaConfig.repeatableLinks[key];
+    }
+
     /*
      * Counts every object and array level, not just field nesting. A field one level
      * deeper costs two (its parent's `fields` array, then the field object), so this is
@@ -1840,6 +2070,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (!id) {
             return;
         }
+        if (schema && schema.fields === undefined) {
+            return;
+        }
         const signature = this.schemaSignature(schema);
         if (signature === null) {
             this.savedSignatures.delete(id);
@@ -1926,7 +2159,41 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
                 if (s) { toSave.push(s); }
             }
         }
-        if (!toSave.length && !toCreate.length) { return; }
+        const hasFormulaChanges = !!this.fieldFormulas?.hasPending;
+        if (!toSave.length && !toCreate.length) {
+            if (hasFormulaChanges) {
+                this.saveFieldFormulas();
+            }
+            return;
+        }
+        if (hasFormulaChanges && toSave.some(s => s.status === SchemaStatus.PUBLISHED)) {
+            // A new version is created by a background task with a new iri that is not
+            // known here, so the formula links can't be pointed at it in the same save.
+            this.reportError('Save all', {
+                message: 'Formula assignments can\'t be saved together with a new schema version. ' +
+                    'Remove the unsaved assignments, save the new version, then assign the formulas.'
+            });
+            return;
+        }
+        const changedSchemas = [...toCreate, ...toSave];
+        const affectedSchemas = [...changedSchemas, ...this.schemas.filter(schema =>
+            !changedSchemas.some(changed => schema === changed || (schema.iri && schema.iri === changed.iri))
+            && changedSchemas.some(changed => this.arrayDependencySchemaPaths(schema, changed).length > 0))];
+        for (const schema of affectedSchemas) {
+            const missing = this.arrayDependencyMissingSchema(schema);
+            if (missing) {
+                this.reportError('Save all', {
+                    message: `Relationships for schema "${missing.name}" have not loaded. Wait for loading to finish before saving.`
+                });
+                return;
+            }
+            if (this.arrayDependencyConflict(this.arrayDependencyTree(schema))) {
+                this.reportError('Save all', {
+                    message: `Schema "${schema.name}" has different relationships for the same dependent array. Remove the conflicting relationship before saving.`
+                });
+                return;
+            }
+        }
         this.isSaving = true;
         // Sync any in-flight drill edits to the schema object in case this.schemas was refreshed
         // after enterSubSchema stored its fields reference in drillStack.
@@ -1956,6 +2223,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
                     if (savedId) {
                         s.id = savedId;
                         (s as any)._id = savedId;
+                        if (saved?.iri) { s.iri = saved.iri; }
                         const dirtyKey = `new:${s.uuid}`;
                         this.newSchemaKeys.delete(dirtyKey);
                         this.dirtySchemaIds.delete(dirtyKey);
@@ -2022,9 +2290,143 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
                     this.newSchemaKeys.clear();
                     // what was just saved becomes the new baseline
                     allSchemas.forEach(schema => this.snapshotSchema(schema));
+                    if (hasFormulaChanges) {
+                        this.saveFieldFormulas();
+                    }
                 },
                 error: (error) => { this.isSaving = false; this.reportError('Save all', error); }
             });
+    }
+
+    /**
+     * Writes the formula assignments made in the field panel. Runs after the schemas are
+     * saved, so the links use the saved schema iri. Failed changes stay pending for a retry.
+     */
+    private saveFieldFormulas(): void {
+        this.isSaving = true;
+        this.fieldFormulas.save()
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+                next: () => { this.isSaving = false; },
+                error: (error) => { this.isSaving = false; this.reportError('Save formula assignments', error); }
+            });
+    }
+
+    /** names of the sub-schema fields drilled into, the path prefix of the fields shown */
+    private get fieldFormulaPrefix(): string[] {
+        return this.isDrilling ? this.drillStack.map(e => e.fieldName) : [];
+    }
+
+    private get fieldFormulaAncestors(): SchemaField[] | undefined {
+        return this.drillStack.every(e => e.field) ? this.drillStack.map(e => e.field!) : undefined;
+    }
+
+    /**
+     * The selected field as formulas see it: the open (root) schema and the path from it.
+     * When drilling, the drilled-into field names prefix the path. Null when there is no
+     * field or it is not in the fields shown.
+     */
+    private get selectedFieldScope(): IFieldScope | null {
+        const schema = this.selectedSchema;
+        const field = this.selectedField;
+        if (!schema || !field) {
+            return null;
+        }
+        const fields = this.isDrilling ? this.drillCurrentFields : schema.fields;
+        if (!Array.isArray(fields) || !fields.includes(field)) {
+            return null;
+        }
+        return { schema, field, prefix: this.fieldFormulaPrefix, ancestors: this.fieldFormulaAncestors, fields };
+    }
+
+    private formulaScopeOf(field: SchemaField): IFieldScope | null {
+        const schema = this.selectedSchema;
+        if (!this.fieldFormulas || !schema || this.isTemplateMode || schema.entity === SchemaEntity.NONE) {
+            return null;
+        }
+        const fields = this.isDrilling ? this.drillCurrentFields : schema.fields;
+        return { schema, field, prefix: this.fieldFormulaPrefix, ancestors: this.fieldFormulaAncestors, fields };
+    }
+
+    private releaseFieldFormulas(field: SchemaField): void {
+        const scope = this.formulaScopeOf(field);
+        if (scope) {
+            this.fieldFormulas.release(scope);
+        }
+    }
+
+    /** the selected field scope when its formulas can be changed, else null */
+    private get editableFieldScope(): IFieldScope | null {
+        const scope = this.selectedFieldScope;
+        return scope && !this.selectedFieldLocked && scope.schema.entity !== SchemaEntity.NONE ? scope : null;
+    }
+
+    /**
+     * State of the Formulas section of the selected field. Help text has no section; a
+     * sub-schema (entity NONE) opened directly only gets a hint, because formulas link to
+     * a document schema and the path from it.
+     */
+    public get selectedFieldFormulasView(): IFieldFormulasView | null {
+        if (!this.fieldFormulas) {
+            return null;
+        }
+        const scope = this.selectedFieldScope;
+        const eligible = !!scope && !this.isTemplateMode && !this.selectedFieldIsHelpText;
+        return this.fieldFormulas.view(scope, eligible, this.selectedSchema?.entity === SchemaEntity.NONE);
+    }
+
+    public assignFieldFormula(value: string | null): void {
+        const scope = this.editableFieldScope;
+        if (scope) {
+            this.fieldFormulas.assign(scope, value);
+        }
+    }
+
+    public unbindFieldFormula(row: IFieldFormulaRow): void {
+        const scope = this.editableFieldScope;
+        if (scope) {
+            this.fieldFormulas.unbind(scope, row);
+        }
+    }
+
+    /**
+     * Number of formula items on a field card of the schema shown. Sub-schemas opened
+     * directly and templates have none, because formulas link to a document schema.
+     */
+    public getFieldFormulaCount(field: SchemaField): number {
+        const schema = this.selectedSchema;
+        if (!this.fieldFormulas || !schema || this.isTemplateMode || schema.entity === SchemaEntity.NONE) {
+            return 0;
+        }
+        return this.fieldFormulas.count(schema, this.fieldFormulaPrefix, field.name);
+    }
+
+    public createFieldFormula(): void {
+        const scope = this.editableFieldScope;
+        if (scope) {
+            this.fieldFormulas.create(scope);
+        }
+    }
+
+    /**
+     * "Schema: field" label of a formula link, for the move confirmation.
+     */
+    private describeFormulaLink(link: IFormulaLink): string {
+        if (link.type !== 'schema') {
+            return 'another formula item';
+        }
+        const schema = (this.selectedSchema?.iri === link.entityId ? this.selectedSchema : null)
+            || this.schemas.find(s => s.iri === link.entityId)
+            || this._subSchemasByIri.get(link.entityId)
+            || null;
+        let field: SchemaField | null = null;
+        try {
+            field = schema?.getField?.(link.item) || null;
+        } catch {
+            field = null;
+        }
+        const fieldName = field?.description || field?.title || field?.name || link.item;
+        return `${schema?.name || link.entityId}: ${fieldName}`;
     }
 
     public addField(ft: FieldTypeUI): void {
@@ -2045,8 +2447,28 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.markDirty();
     }
 
+    private richTextPresetInitial: any = undefined;
+
     public openRichTextPresetDialog(target: 'default' | 'suggest' | 'test'): void {
         this.richTextPresetTarget = target;
+        this.richTextPresetInitial = target === 'test'
+            ? (this.selectedField as any)?.examples
+            : (this.selectedField as any)?.[target];
+    }
+
+    public cancelRichTextPresetDialog(): void {
+        const target = this.richTextPresetTarget;
+        if (target === null || this.isRichTextPresetBusy()) {
+            return;
+        }
+        if (this.selectedField) {
+            if (target === 'test') {
+                (this.selectedField as any).examples = this.richTextPresetInitial;
+            } else {
+                (this.selectedField as any)[target] = this.richTextPresetInitial;
+            }
+        }
+        this.closeRichTextPresetDialog();
     }
 
     public isFormattedPresetField(): boolean {
@@ -2117,6 +2539,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         const idx = this.selectedSchema.fields.indexOf(field);
         if (idx !== -1) {
             this.removeGeoDependenciesByField(field, this.selectedSchema.fields);
+            this.releaseFieldFormulas(field);
             this.selectedSchema.fields.splice(idx, 1);
             if (this.selectedField === field) {
                 this.selectedField = null;
@@ -2198,9 +2621,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             return;
         }
         this.refPresetFormFields = [
-            { ...f, name: 'default', description: 'Default Value', required: false, hidden: false, default: null, suggest: null, examples: undefined },
-            { ...f, name: 'suggest', description: 'Suggested Value', required: false, hidden: false, default: null, suggest: null, examples: undefined },
-            { ...f, name: 'example', description: 'Test Value',      required: false, hidden: false, default: null, suggest: null, examples: undefined },
+            { ...f, name: 'default', description: 'Default Value', required: false, hidden: false, default: null, suggest: null, examples: undefined, advisoryText: undefined },
+            { ...f, name: 'suggest', description: 'Suggested Value', required: false, hidden: false, default: null, suggest: null, examples: undefined, advisoryText: undefined },
+            { ...f, name: 'example', description: 'Test Value',      required: false, hidden: false, default: null, suggest: null, examples: undefined, advisoryText: undefined },
         ] as SchemaField[];
         this.refPresetValues = {
             default: f.default ?? null,
@@ -2277,7 +2700,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.markDirty();
     }
 
-    public toggleBehaviour(key: 'isArray' | 'isUpdatable' | 'readOnly'): void {
+    public toggleBehaviour(key: 'isArray' | 'isUpdatable' | 'isPrivate' | 'readOnly'): void {
         if (!this.selectedField) { return; }
         (this.selectedField as any)[key] = !(this.selectedField as any)[key];
         this.markDirty();
@@ -2291,13 +2714,45 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return 'none';
     }
 
+    private autocalcBlockReason(field: SchemaField): string | null {
+        if (SchemasConfigurationComponent.NON_AUTOCALC_TYPES.has(this.getFieldCurrentType(field))) {
+            return 'Auto Calculate is not available for this type';
+        }
+        if (field.pattern) {
+            return 'Auto Calculate cannot be used with a pattern';
+        }
+        return null;
+    }
+
+    private fieldSupportsAutocalc(field: SchemaField): boolean {
+        return !this.autocalcBlockReason(field);
+    }
+
+    /** Help Text is display only: it has no Required / Visibility choice unless it was saved with a wrong one. */
+    public get selectedFieldShowsRequiredModes(): boolean {
+        const field = this.selectedField as any;
+        return !!field && (!this.selectedFieldIsHelpText || !!field.required || !!field.autocalculate);
+    }
+
+    /** Required / Visibility options of the selected field, without Auto Calculate where it is not supported. */
+    public get selectedFieldRequiredModes(): { label: string; value: string }[] {
+        const supported = !this.selectedField || this.fieldSupportsAutocalc(this.selectedField);
+        return this.requiredModeOptions.filter(opt =>
+            (supported || opt.value !== 'autocalculate')
+            && !(this.selectedFieldIsHelpText && opt.value === 'required'));
+    }
+
     public setFieldRequiredMode(mode: string): void {
         if (!this.selectedField) { return; }
         const f = this.selectedField as any;
         f.required      = mode === 'required';
         f.hidden        = mode === 'hidden';
         f.autocalculate = mode === 'autocalculate';
-        if (mode !== 'autocalculate') { f.expression = ''; }
+        if (mode !== 'autocalculate') { f.expression = ''; } else { f.isArray = false; }
+        if (mode === 'autocalculate') {
+            delete f.advisoryText;
+            this.advisoryTextEnabled = false;
+        }
         this.markDirty();
     }
 
@@ -2350,6 +2805,47 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
                 this.markDirty();
             }
         });
+    }
+
+    /** Private exists only on Encrypted VC schemas, so leaving that type clears the flag of its top-level fields. */
+    public onSchemaEntityChange(schema: Schema | null): void {
+        if (schema && schema.entity !== SchemaEntity.EVC) {
+            this.clearPrivateFlags(schema.fields);
+            for (const condition of schema.conditions ?? []) {
+                this.clearPrivateFlags(condition.thenFields);
+                this.clearPrivateFlags(condition.elseFields);
+            }
+        }
+        this.markDirty();
+    }
+
+    private clearPrivateFlags(fields?: SchemaField[]): void {
+        for (const field of fields ?? []) {
+            field.isPrivate = undefined;
+        }
+    }
+
+    /** Private applies to top-level fields of an Encrypted VC schema, not to sub-schema fields. */
+    public get selectedFieldCanBePrivate(): boolean {
+        return !!this.selectedField && !this.isDrilling && this.selectedSchema?.entity === SchemaEntity.EVC;
+    }
+
+    /**
+     * True when the field type has no Parameter value at all. Otherwise the control that edits it
+     * carries the label "Parameter: <name>".
+     */
+    public get selectedFieldParameterUnused(): boolean {
+        const field = this.selectedField as any;
+        if (!field) { return false; }
+        return !(this.selectedFieldIsString
+            || this.selectedFieldIsEnum
+            || this.selectedFieldIsUnit
+            || this.selectedFieldIsTable
+            || this.selectedFieldIsHelpText
+            || field.autocalculate
+            || field.dependency
+            || this.selectedFieldHasGeoAncestors
+            || this.getFieldCurrentType(field) === 'sub-schema');
     }
 
     public get selectedFieldIsEnum(): boolean {
@@ -2709,7 +3205,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (!field || this.getFieldCurrentType(field) !== 'sub-schema') {
             return false;
         }
-        return this.schemas.some(schema => !!schema.iri && schema.iri === field.type);
+        return !!this.resolveRefSchema(field.type);
     }
 
     private get currentFieldScope(): SchemaField[] {
@@ -2753,6 +3249,10 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         }
         const oldName = this.selectedField.name;
         this.invalidateFieldSuggestion(oldName);
+        const scope = this.formulaScopeOf(this.selectedField);
+        if (scope) {
+            this.fieldFormulas.rename(scope);
+        }
         this.selectedField.name = name;
         for (const candidate of this.currentFieldScope) {
             if (candidate.dependency?.kind === 'geo' && candidate.dependency.on === oldName) {
@@ -2783,6 +3283,8 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             sub.default = null;
             sub.suggest = null;
             sub.examples = undefined;
+            delete sub.advisoryText;
+            this.advisoryTextEnabled = false;
             this._rebuildRefPreset();
             this.markDirty();
             return;
@@ -2800,6 +3302,16 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (ft.key === 'enum') { f.enum = []; }
         if (ft.key === 'table') { f.tableColumns = [{ name: '', key: '' }]; }
         if (SchemasConfigurationComponent.NON_UPDATABLE_TYPES.has(ft.key)) { f.isUpdatable = false; }
+        if (SchemasConfigurationComponent.NON_AUTOCALC_TYPES.has(ft.key)) {
+            f.autocalculate = false;
+            f.expression = '';
+        }
+        if (ft.key === 'helptext') {
+            delete f.advisoryText;
+            this.advisoryTextEnabled = false;
+            f.required = false;
+            f.hidden = false;
+        }
         f.default = null;
         f.suggest = null;
         f.examples = undefined;
@@ -2814,6 +3326,8 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         f.isRef = true;
         f.type = schema.iri || '';
         f.customType = 'subSchema';
+        delete f.advisoryText;
+        this.advisoryTextEnabled = false;
         f.format = '';
         f.pattern = '';
         f.unitSystem = '';
@@ -2823,6 +3337,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
             this.drillStack = [];
         }
         this.markDirty();
+        if (!schema.document) { this.hydrateSubSchemaFields(schema); }
     }
 
     private resetArrayDependencyEditor(): void {
@@ -2954,34 +3469,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public updateOverflowTitle(event: MouseEvent, text: string): void {
-        const element = event.currentTarget;
-        if (!(element instanceof HTMLElement)) { return; }
-        if (element.scrollWidth > element.clientWidth || this.overflowsAncestor(element)) {
-            element.setAttribute('title', text);
-        } else {
-            element.removeAttribute('title');
-        }
-    }
-
-    private overflowsAncestor(element: HTMLElement): boolean {
-        const elementRect = element.getBoundingClientRect();
-        let parent = element.parentElement;
-        while (parent) {
-            const style = getComputedStyle(parent);
-            const clipsContent = style.overflowX === 'hidden' ||
-                style.overflowX === 'clip' ||
-                style.overflow === 'hidden' ||
-                style.overflow === 'clip';
-            if (clipsContent) {
-                const parentRect = parent.getBoundingClientRect();
-                if (elementRect.right > parentRect.right + 1 ||
-                    elementRect.left < parentRect.left - 1) {
-                    return true;
-                }
-            }
-            parent = parent.parentElement;
-        }
-        return false;
+        updateOverflowTitle(event, text);
     }
 
     public updateArrayLinkPanelWidth(event: MouseEvent): void {
@@ -3027,11 +3515,147 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return false;
     }
 
+    private arrayDependencyTree(
+        schema: Schema,
+        replacement?: ISchemaArrayDependency[],
+        path: string[] = [],
+        ancestors: Set<string> = new Set()
+    ): ISchemaArrayDependency[] {
+        const own = (schema === this.selectedSchema || schema.iri === this.selectedSchema?.iri) && replacement
+            ? replacement : schema.arrayDependencies || [];
+        const result = own.map(item => ({
+            ...item, on: [...path, ...item.on], field: [...path, ...item.field]
+        }));
+        for (const field of schema.fields || []) {
+            if (!field.isRef || field.isArray || ancestors.has(field.type)) { continue; }
+            const child = this.resolveArrayDependencySchema(field.type);
+            if (child) {
+                result.push(...this.arrayDependencyTree(child, replacement, [...path, field.name],
+                    new Set([...ancestors, field.type])));
+            } else {
+                const definitions = schema.document?.$defs;
+                const document = definitions?.[field.type];
+                if (document) {
+                    result.push(...SchemaHelper.collectArrayDependencies({
+                        ...document, $defs: definitions
+                    }).map(item => ({
+                        ...item, on: [...path, field.name, ...item.on],
+                        field: [...path, field.name, ...item.field]
+                    })));
+                }
+            }
+        }
+        return result;
+    }
+
+    private arrayDependencySchemaPaths(
+        schema: Schema,
+        target: Schema,
+        path: string[] = [],
+        ancestors: Set<Schema> = new Set()
+    ): string[][] {
+        if (ancestors.has(schema)) { return []; }
+        const paths = schema === target || (schema.iri && schema.iri === target.iri) ? [path] : [];
+        for (const field of schema.fields || []) {
+            if (!field.isRef || field.isArray) { continue; }
+            const child = this.resolveArrayDependencySchema(field.type);
+            if (child) {
+                paths.push(...this.arrayDependencySchemaPaths(child, target, [...path, field.name],
+                    new Set([...ancestors, schema])));
+            }
+        }
+        return paths;
+    }
+
+    private arrayDependencyMissingSchema(schema: Schema, ancestors: Set<Schema> = new Set()): Schema | undefined {
+        if (ancestors.has(schema)) { return undefined; }
+        for (const field of schema.fields || []) {
+            if (!field.isRef || field.isArray) { continue; }
+            const child = this.resolveArrayDependencySchema(field.type);
+            if (!child) { continue; }
+            if (child.id && !child.document) { return child; }
+            const missing = this.arrayDependencyMissingSchema(child, new Set([...ancestors, schema]));
+            if (missing) { return missing; }
+        }
+        return undefined;
+    }
+
+    private resolveArrayDependencySchema(iri: string): Schema | undefined {
+        const schema = this.resolveRefSchema(iri);
+        const full = this._subSchemasByIri.get(iri);
+        return schema?.document ? schema : full?.document ? full : schema;
+    }
+
+    private arrayDependencyConflict(links: ISchemaArrayDependency[]): ISchemaArrayDependency | undefined {
+        return links.find((link, index) => links.some((other, otherIndex) =>
+            index !== otherIndex && link.field.join('.') === other.field.join('.')
+            && !SchemaHelper.equalArrayDependencies(link, other)));
+    }
+
+    public get arrayDependencyError(): string | null {
+        const key = [
+            this.selectedSchema, this.schemas, this._subSchemasByIri, this.drillStack,
+            this.newArrayDependencyField, this.newArrayDependencyOn,
+            this.newArrayDependencyTitle, this.newArrayDependencyValueMappings, this.editingArrayDependency,
+            this.schemaEditVersion, this.arrayDependencyDataVersion
+        ];
+        const cache = this.arrayDependencyErrorCache;
+        if (cache && cache.key.every((value, index) => value === key[index])) {
+            return cache.result;
+        }
+        const result = this.computeArrayDependencyError();
+        this.arrayDependencyErrorCache = { key, result };
+        return result;
+    }
+
+    private computeArrayDependencyError(): string | null {
+        const schema = this.selectedSchema;
+        const field = this.newArrayDependencyField;
+        const on = this.newArrayDependencyOn;
+        if (!schema) { return null; }
+        const missing = this.arrayDependencyMissingSchema(schema);
+        if (missing) {
+            return `Relationships for schema "${missing.name}" have not loaded. Wait for loading to finish before adding a relationship or saving.`;
+        }
+        if (!field || !on) {
+            const conflict = this.arrayDependencyConflict(this.arrayDependencyTree(schema));
+            return conflict
+                ? `Array "${conflict.field.join('.')}" has different relationships. Remove the conflicting relationship before saving.`
+                : null;
+        }
+        const candidate: ISchemaArrayDependency = {
+            on: on.split('.'), field: field.split('.'), kind: 'array',
+            title: this.newArrayDependencyTitle?.split('.') || [],
+            valueMappings: this.newArrayDependencyValueMappings || []
+        };
+        const own = (schema.arrayDependencies || []).filter(item => item !== this.editingArrayDependency);
+        const links = this.arrayDependencyTree(schema, own);
+        const existing = links.find(item => item.field.join('.') === field
+            && (!this.editingArrayDependency || !SchemaHelper.equalArrayDependencies(item, candidate)));
+        if (existing) {
+            return `Array "${field}" is already linked to "${existing.on.join('.')}". Remove that relationship before adding another one.`;
+        }
+        for (const parent of this.schemas) {
+            const paths = this.arrayDependencySchemaPaths(parent, schema);
+            if (!paths.length) { continue; }
+            const declarations = this.arrayDependencyTree(parent, [...own, candidate]);
+            for (const path of paths) {
+                const prefixed = { ...candidate, on: [...path, ...candidate.on], field: [...path, ...candidate.field] };
+                const conflict = declarations.find(item => item.field.join('.') === prefixed.field.join('.')
+                    && !SchemaHelper.equalArrayDependencies(item, prefixed));
+                if (conflict) {
+                    return `Array "${conflict.field.join('.')}" already has a different relationship in "${parent.name}". Remove it before adding another one.`;
+                }
+            }
+        }
+        return null;
+    }
+
     public canApplyArrayDependency(): boolean {
         const field = this.newArrayDependencyField;
         const on = this.newArrayDependencyOn;
         const ignore = this.editingArrayDependency;
-        if (!field || !on || field === on) { return false; }
+        if (!field || !on || field === on || this.arrayDependencyError) { return false; }
         const availablePaths = new Set(
             this.arrayDependencyFieldGroups.flatMap(group => group.items.map(item => item.pathStr))
         );
@@ -3047,6 +3671,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public startEditArrayDependency(dependency: ISchemaArrayDependency): void {
+        if (this.isLinkLocked(dependency)) { return; }
         this.editingArrayDependency = dependency;
         this.newArrayDependencyOn = dependency.on.join('.');
         this.newArrayDependencyField = dependency.field.join('.');
@@ -3076,6 +3701,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         const field = this.newArrayDependencyField;
         const on = this.newArrayDependencyOn;
         const editing = this.editingArrayDependency;
+        if (this.isArrayDependencyFormLocked) { return; }
         if (!schema || !field || !on || !this.canApplyArrayDependency()) { return; }
         const dependency: ISchemaArrayDependency = {
             field: field.split('.'),
@@ -3103,6 +3729,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeArrayDependency(dependency: ISchemaArrayDependency): void {
+        if (this.isLinkLocked(dependency)) { return; }
         const schema = this.selectedSchema;
         if (!schema) { return; }
         if (this.editingArrayDependency === dependency) {
@@ -3131,6 +3758,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public addArrayDependencyMapping(): void {
+        if (this.isArrayDependencyFormLocked) { return; }
         const source = this.newArrayDependencyMappingSource;
         const target = this.newArrayDependencyMappingTarget;
         if (!source || !target || !this.canAddArrayDependencyMapping()) { return; }
@@ -3143,6 +3771,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeArrayDependencyMapping(mapping: ISchemaArrayDependencyMapping): void {
+        if (this.isArrayDependencyFormLocked) { return; }
         this.newArrayDependencyValueMappings = this.newArrayDependencyValueMappings
             .filter(item => item !== mapping);
     }
@@ -3229,6 +3858,72 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         return aId < bId ? 1 : -1;
     }
 
+    private collectDefs(subSchemas: any[] | undefined): Record<string, any> {
+        const defs: Record<string, any> = {};
+        for (const sub of (subSchemas || [])) {
+            if (sub.iri && sub.document) {
+                defs[sub.iri] = typeof sub.document === 'string' ? JSON.parse(sub.document) : sub.document;
+            }
+        }
+        return defs;
+    }
+
+    private withDefs(raw: any, defs: Record<string, any>): any {
+        if (!Object.keys(defs).length || !raw?.document) { return raw; }
+        const doc = typeof raw.document === 'string' ? JSON.parse(raw.document) : raw.document;
+        return { ...raw, document: { ...doc, $defs: defs } };
+    }
+
+    private rebaselineLazyLoadedSchema(schema: Schema, replaceExisting: boolean = false): void {
+        const id = schema.id || (schema as any)._id;
+        if (id && !this.dirtySchemaIds.has(id) && (replaceExisting || !this.savedSignatures.has(id))) {
+            this.snapshotSchema(schema, id);
+        }
+    }
+
+    private hydrateSubSchemaFields(subSchema: Schema): void {
+        const id = subSchema.id || (subSchema as any)._id;
+        if (!id) { return; }
+        this.schemaService.getSchemaWithSubSchemas(this.getCategory(), id, this.topic)
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+                next: (data: any) => {
+                    if (!data?.schema) { return; }
+                    const defs = this.collectDefs(data.subSchemas);
+                    const loaded = new Schema(this.withDefs(data.schema, defs));
+                    if (!subSchema.document) {
+                        subSchema.document = typeof data.schema.document === 'string'
+                            ? JSON.parse(data.schema.document) : data.schema.document;
+                        subSchema.arrayDependencies = loaded.arrayDependencies;
+                    }
+                    if (!subSchema.fields?.length) {
+                        subSchema.fields = loaded.fields;
+                        subSchema.conditions = loaded.conditions;
+                    }
+                    if (subSchema.iri) { this._subSchemasByIri.set(subSchema.iri, subSchema); }
+                    const referencedSchemas = new Set(Object.keys(subSchema.document?.$defs || {}));
+                    for (const raw of data.subSchemas || []) {
+                        if (!referencedSchemas.has(raw.iri)) { continue; }
+                        const child = new Schema(this.withDefs(raw, defs));
+                        child.document = typeof raw.document === 'string' ? JSON.parse(raw.document) : raw.document;
+                        if (child.iri && !this._subSchemasByIri.has(child.iri)) {
+                            this._subSchemasByIri.set(child.iri, child);
+                        }
+                    }
+                    this.arrayDependencyDataVersion++;
+                    const selectedField = this.selectedField;
+                    if (selectedField && selectedField.type === subSchema.iri) {
+                        selectedField.fields = subSchema.fields;
+                    }
+                    this.rebaselineLazyLoadedSchema(subSchema, true);
+                    const entry = this.drillStack.find(e => e.schemaIri === subSchema.iri);
+                    if (entry) { entry.fields = subSchema.fields; }
+                    if (this.previewSchemaRef === subSchema) { this.rebuildPreview(); }
+                },
+                error: (error) => this.reportError('Failed to load sub-schema fields', error),
+            });
+    }
+
     public enterSubSchema(field: SchemaField, event: Event): void {
         event.stopPropagation();
         if (!this.canEnterSubSchema(field)) { return; }
@@ -3242,11 +3937,16 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         // and subSchema.fields remain the same reference and saveAll can find the edits.
         if (subSchema && !subSchema.fields?.length && field.fields?.length) {
             subSchema.fields = [...field.fields];
+            this.rebaselineLazyLoadedSchema(subSchema);
         }
         const fields = subSchema?.fields ?? field.fields ?? [];
+        if (subSchema && (!fields.length || !subSchema.document)) { this.hydrateSubSchemaFields(subSchema); }
+        this.drillEntering = true;
+        this.resetCanvasScroll();
+        this.activeDrillTab = 'fields';
         this.drillStack = [
             ...this.drillStack,
-            { fieldLabel: field.title || field.name, fields, schemaIri: field.type || '' }
+            { fieldLabel: field.title || field.name, fieldName: field.name, field, fields, schemaIri: field.type || '' }
         ];
         this.persistSuggestionsForContext(previousContext);
         this.restoreOrClearSuggestionsForContext();
@@ -3259,10 +3959,15 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     public enterTemplateSubSchema(field: SchemaField, event: Event): void {
         event.stopPropagation();
         if (!this.canEnterSubSchema(field)) { return; }
-        const subSchema = this.schemas.find(s => s.iri === field.type);
+        const subSchema = this.resolveRefSchema(field.type);
         if (subSchema) {
             this.switchSchema(subSchema);
         }
+    }
+
+    private resetCanvasScroll(): void {
+        const body = this._elRef.nativeElement.querySelector('.sc-canvas-body');
+        if (body) { body.scrollTop = 0; }
     }
 
     public drillTo(index: number): void {
@@ -3278,6 +3983,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public drillBack(): void {
+        this.resetCanvasScroll();
         const previousContext = this.currentContextSchema;
         this.drillStack = this.drillStack.slice(0, -1);
         this.persistSuggestionsForContext(previousContext);
@@ -3291,6 +3997,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public drillClose(): void {
+        this.resetCanvasScroll();
         const previousContext = this.currentContextSchema;
         this.drillStack = [];
         this.persistSuggestionsForContext(previousContext);
@@ -3322,6 +4029,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         const idx = this.drillCurrentFields.indexOf(field);
         if (idx !== -1) {
             this.removeGeoDependenciesByField(field, this.drillCurrentFields);
+            this.releaseFieldFormulas(field);
             this.drillCurrentFields.splice(idx, 1);
             if (this.selectedField === field) { this.selectedField = null; }
             this.markDirty();
@@ -3341,7 +4049,6 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public isCircularDependency(schema: Schema, schemaMap?: Map<string, Schema>): boolean {
-        // Use live field refs, not document.$defs — withDefs() bloats $defs and causes false positives.
         const refs = schemaMap ?? new Map<string, Schema>();
         if (!schemaMap) {
             for (const candidate of this.schemas) {
@@ -3357,22 +4064,23 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (!ancestors.size) { return false; }
 
         const visited = new Set<string>();
-        const visit = (s: Schema): void => {
-            if (!s.iri || visited.has(s.iri)) { return; }
+        // defs is never pruned (stale refs persist on the backend), so only check
+        // against loaded fields; the backend rejects real cycles on save.
+        const getSchemaReferences = (s: Schema): string[] =>
+            (s.fields || [])
+                .filter(f => f.isRef && f.type)
+                .map(f => f.type);
+        const visit = (s: Schema): boolean => {
+            if (!s.iri || visited.has(s.iri)) { return false; }
             visited.add(s.iri);
-            for (const f of (s.fields || [])) {
-                if (f.isRef && f.type) {
-                    const ref = refs.get(f.type);
-                    if (ref) { visit(ref); }
-                }
+            for (const refIri of getSchemaReferences(s)) {
+                if (ancestors.has(refIri)) { return true; }
+                const ref = refs.get(refIri);
+                if (ref && visit(ref)) { return true; }
             }
+            return false;
         };
-        visit(schema);
-
-        for (const iri of ancestors) {
-            if (visited.has(iri)) { return true; }
-        }
-        return false;
+        return visit(schema);
     }
 
     public canDragSchema(schema: Schema, schemaMap?: Map<string, Schema>): boolean {
@@ -3380,6 +4088,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         const selId = this.selectedSchema?.id || (this.selectedSchema as any)?._id;
         const schId = schema.id || (schema as any)._id;
         if (selId && selId === schId) { return false; }
+        if (this.selectedSchema?.iri && schema.iri === this.selectedSchema.iri) { return false; }
         const contextIri = this.currentDrilledSchemaIri;
         if (contextIri && schema.iri === contextIri) { return false; }
         if (this.isCircularDependency(schema, schemaMap)) { return false; }
@@ -3428,8 +4137,8 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
 
     public onCardMouseDown(event: MouseEvent, field: SchemaField, fields: SchemaField[]): void {
         if ((event.target as HTMLElement).closest('button')) { return; }
-        if (this.isTemplateFieldLocked(field)) { return; }
         event.preventDefault();
+        if (this.isTemplateFieldLocked(field)) { return; }
         if (this._mouseMoveListener) { this.clearReorder(); }
         const card = event.currentTarget as HTMLElement;
         const rect = card.getBoundingClientRect();
@@ -3492,11 +4201,9 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     private updateDropIndicator(clientX: number, clientY: number): void {
         if (!this._dragFields || !this.reorderField) { return; }
         const isDrill = this._dragFields === this.drillCurrentFields;
-        const cardSelector = isDrill
-            ? '.sc-drill-card'
-            : '.sc-field-card:not(.sc-field-card--system)';
         const root = this._elRef.nativeElement as HTMLElement;
-        const cards = Array.from(root.querySelectorAll<HTMLElement>(cardSelector));
+        const scope = isDrill ? root.querySelector<HTMLElement>('.sc-drill-content') : root;
+        const cards = Array.from(scope?.querySelectorAll<HTMLElement>('.sc-field-card:not(.sc-field-card--system)') ?? []);
         const srcIdx = this._dragFields.indexOf(this.reorderField);
 
         this.reorderOverIndex = -1;
@@ -3577,11 +4284,10 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
 
     private updateSidebarDropIndicator(clientY: number): void {
         // Midpoint boundaries so gaps between cards map unambiguously to an insertion slot.
-        const cardSelector = this.isDrilling
-            ? '.sc-drill-card'
-            : '.sc-field-card:not(.sc-field-card--system)';
+        const root = this._elRef.nativeElement as HTMLElement;
+        const scope = this.isDrilling ? root.querySelector<HTMLElement>('.sc-drill-content') : root;
         const cards = Array.from(
-            (this._elRef.nativeElement as HTMLElement).querySelectorAll<HTMLElement>(cardSelector)
+            scope?.querySelectorAll<HTMLElement>('.sc-field-card:not(.sc-field-card--system)') ?? []
         );
         if (cards.length === 0) { this.sidebarDropIndex = -1; return; }
 
@@ -3665,6 +4371,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         }
         this.selectedField = field;
         this.markDirty();
+        if (!schema.document) { this.hydrateSubSchemaFields(schema); }
     }
 
     private addSchemaField(schema: Schema): void {
@@ -3703,6 +4410,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         }
         this.selectedField = field;
         this.markDirty();
+        if (!schema.document) { this.hydrateSubSchemaFields(schema); }
     }
 
     public onNewSchema(): void {
@@ -3798,22 +4506,28 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public get canvasFields(): SchemaField[] {
-        const all = this.isDrilling ? this.drillCurrentFields : (this.selectedSchema?.fields ?? []);
-        const owned = this.conditionOwnedFieldNames;
-        return all.filter(f => !owned.has(f.name));
+        return this.isDrilling ? this.drillCurrentFields : (this.selectedSchema?.fields ?? []);
+    }
+
+    public isFieldConditionOwned(field: SchemaField): boolean {
+        return this.conditionOwnedFieldNames.has(field.name);
     }
 
     // Rebuilt only when the schema list itself changes; these getters run on every
     // change-detection pass, so the map must not be reconstructed each time.
     private _schemaByIriSource: Schema[] | null = null;
+    private _schemaByIriSubSource: Map<string, Schema> | null = null;
     private _schemaByIriCache = new Map<string, Schema>();
 
+    // Includes sub-schemas that exist only in _subSchemasByIri; top-level schemas win.
     private get _schemaByIri(): Map<string, Schema> {
-        if (this._schemaByIriSource !== this.schemas) {
+        if (this._schemaByIriSource !== this.schemas || this._schemaByIriSubSource !== this._subSchemasByIri) {
             this._schemaByIriSource = this.schemas;
-            this._schemaByIriCache = new Map(
-                (this.schemas ?? []).filter(s => s.iri).map(s => [s.iri as string, s])
-            );
+            this._schemaByIriSubSource = this._subSchemasByIri;
+            this._schemaByIriCache = new Map(this._subSchemasByIri);
+            for (const s of this.schemas ?? []) {
+                if (s.iri) { this._schemaByIriCache.set(s.iri, s); }
+            }
         }
         return this._schemaByIriCache;
     }
@@ -3885,7 +4599,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         if (!field) { return ''; }
         const schema = this.currentContextSchema;
         if (!schema) { return field.name ?? ''; }
-        const schemaByIri = new Map(this.schemas.filter(s => s.iri).map(s => [s.iri as string, s]));
+        const schemaByIri = this._schemaByIri;
 
         // Direct field match
         if (schema.fields?.some(f => f.name === field.name && !f.isRef)) { return field.name; }
@@ -3924,7 +4638,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         const parts = pathStr.split('.');
         const schema = this.currentContextSchema;
         if (!schema) { return null; }
-        const schemaByIri = new Map(this.schemas.filter(s => s.iri).map(s => [s.iri as string, s]));
+        const schemaByIri = this._schemaByIri;
 
         if (parts.length === 1) { return schema.fields?.find(f => f.name === parts[0]) ?? null; }
 
@@ -3937,6 +4651,11 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         }
         return fields.find(f => f.name === parts[parts.length - 1]) ?? null;
     }
+
+    // Callbacks handed to the shared IF-condition editor.
+    public readonly condResolveField = (pathStr: string): SchemaField | null => this._resolveConditionField(pathStr);
+    public readonly condResolveFieldPath = (row: any): string => this.getIfRowFieldPath(row);
+    public readonly condFirstEntry = (): { field: SchemaField; fieldPath: string[] } | null => this._firstConditionEntry;
 
     private get _firstConditionEntry(): { field: SchemaField; fieldPath: string[] } | null {
         for (const group of this.getConditionFieldGroups()) {
@@ -3972,54 +4691,6 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
 
     // ── IF operator / rows ───────────────────────────────────────────────────
 
-    public getIfOperator(cond: SchemaCondition): 'SINGLE' | 'AND' | 'OR' {
-        const ic = cond.ifCondition as any;
-        if (!ic) { return 'SINGLE'; }
-        if ('AND' in ic) { return 'AND'; }
-        if ('OR' in ic) { return 'OR'; }
-        return 'SINGLE';
-    }
-
-    public getIfRows(cond: SchemaCondition): any[] {
-        const ic = cond.ifCondition as any;
-        if (!ic) { return [{ field: null, fieldValue: '' }]; }
-        if ('AND' in ic) { return ic.AND || []; }
-        if ('OR' in ic) { return ic.OR || []; }
-        return [ic];
-    }
-
-    public setConditionOperator(cond: SchemaCondition, op: 'SINGLE' | 'AND' | 'OR'): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
-        const rows = this.getIfRows(cond);
-        const firstEntry = this._firstConditionEntry;
-        // getIfRows returns a placeholder row for a null ifCondition, so an existing row is
-        // only usable when it actually carries a field; otherwise fall back to the first entry.
-        const existing = rows[0]?.field ? rows[0] : null;
-        const first = existing ?? {
-            field: firstEntry?.field,
-            fieldValue: '',
-            ...(firstEntry && firstEntry.fieldPath.length > 1 ? { fieldPath: firstEntry.fieldPath } : {}),
-        };
-        const predicate = {
-            field: first.field,
-            fieldValue: first.fieldValue,
-            ...(Array.isArray(first.fieldPath) && first.fieldPath.length > 1 ? { fieldPath: first.fieldPath } : {}),
-            ...(first.comparator ? { comparator: first.comparator } : {}),
-        };
-        if (op === 'SINGLE') {
-            (cond as any).ifCondition = predicate;
-        } else if (op === 'AND') {
-            (cond as any).ifCondition = { AND: [predicate] };
-        } else {
-            (cond as any).ifCondition = { OR: [predicate] };
-        }
-        this.markDirty();
-    }
-
-    public getIfRowValue(row: any): any { return row?.fieldValue ?? ''; }
-    public isIfRowEnum(row: any): boolean { return !!(row?.field?.enum?.length); }
-    public getIfRowOptions(row: any): string[] { return row?.field?.enum ?? []; }
-
     /**
      * `contains` only means anything against an array; the backend/eval/compile layers already
      * self-correct a stale `contains` (from a field whose "Allow Multiple Answers" was since
@@ -4042,146 +4713,132 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         }
     }
 
-    // 'equals' (including absent, its default) is one universal comparator for every field -
-    // array or scalar alike. No legacy carve-out: an array-field '=' predicate saved before
-    // this feature existed means exactly the same "each element equals" as one authored today.
-    public getIfRowComparator(row: any): string {
-        return row?.comparator || 'equals';
-    }
-
-    public getIfRowComparatorOptions(row: any): { label: string; value: string }[] {
-        const isArrayField = !!(row?.field?.isArray && !row?.field?.isRef);
-        if (!isArrayField) {
-            return [{ label: '=', value: 'equals' }];
-        }
-        return [
-            { label: '= (each)', value: 'equals' },
-            { label: 'contains', value: 'contains' },
-        ];
-    }
-
-    public setIfRowComparator(cond: SchemaCondition, rowIdx: number, comparator: string): void {
-        const ic = cond.ifCondition as any;
-        if (!ic) { return; }
-        const apply = (row: any) => {
-            if (!row) { return; }
-            if (comparator === 'equals') { delete row.comparator; }
-            else { row.comparator = comparator; }
-        };
-        if ('AND' in ic) { apply(ic.AND[rowIdx]); }
-        else if ('OR' in ic) { apply(ic.OR[rowIdx]); }
-        else { apply(ic); }
-        this.markDirty();
-    }
-
-    public setIfRowField(cond: SchemaCondition, rowIdx: number, pathStr: string): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
-        const field = this._resolveConditionField(pathStr);
-        if (!field) { return; }
-        const fieldPath = pathStr.split('.');
-        const predicate = {
-            field,
-            fieldValue: '',
-            ...(fieldPath.length > 1 ? { fieldPath } : {}),
-        };
-        const ic = cond.ifCondition as any;
-        if (ic && 'AND' in ic) { ic.AND[rowIdx] = predicate; }
-        else if (ic && 'OR' in ic) { ic.OR[rowIdx] = predicate; }
-        else { (cond as any).ifCondition = predicate; }
-        this.markDirty();
-    }
-
-    public setIfRowValue(cond: SchemaCondition, rowIdx: number, value: any): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
-        const ic = cond.ifCondition as any;
-        if (!ic) { return; }
-        if ('AND' in ic) { ic.AND[rowIdx].fieldValue = value; }
-        else if ('OR' in ic) { ic.OR[rowIdx].fieldValue = value; }
-        else { ic.fieldValue = value; }
-        this.markDirty();
-    }
-
-    public addIfRow(cond: SchemaCondition): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
-        const ic = cond.ifCondition as any;
-        if (!ic) { return; }
-        const firstEntry = this._firstConditionEntry;
-        const newRow = {
-            field: firstEntry?.field ?? null,
-            fieldValue: '',
-            ...(firstEntry && firstEntry.fieldPath.length > 1 ? { fieldPath: firstEntry.fieldPath } : {}),
-        };
-        if ('AND' in ic) { ic.AND.push(newRow); }
-        else if ('OR' in ic) { ic.OR.push(newRow); }
-        this.markDirty();
-    }
-
-    public removeIfRow(cond: SchemaCondition, rowIdx: number): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
-        const ic = cond.ifCondition as any;
-        if (!ic) { return; }
-        if ('AND' in ic && ic.AND.length > 1) { ic.AND.splice(rowIdx, 1); }
-        else if ('OR' in ic && ic.OR.length > 1) { ic.OR.splice(rowIdx, 1); }
-        this.markDirty();
-    }
-
     // ── THEN / ELSE fields ───────────────────────────────────────────────────
 
-    public addThenField(cond: SchemaCondition): void {
-        if (!this.canChangeConditionsForSelectedSchema || !this.canAddFieldToSelectedSchema) { return; }
-        const schema = this.currentContextSchema;
-        if (!schema) { return; }
-        const newField = this.buildNewField(this.defaultFieldType, schema.fields);
-        (schema.fields ??= []).push(newField);
-        (cond.thenFields ??= []).push(newField);
-        this.markDirty();
+    // Repositions legacy (unflagged) condition fields next to their trigger and flags them.
+    private normalizeLegacyConditionFieldOrder(schema: Schema | null | undefined): void {
+        const fields = schema?.fields;
+        if (!fields?.length || !schema?.conditions?.length) { return; }
+
+        for (const cond of schema.conditions) {
+            const triggerNames = this._conditionTriggerRootNames(cond);
+            if (!triggerNames.length) { continue; }
+            let triggerIdx = -1;
+            for (const name of triggerNames) {
+                const idx = fields.findIndex(f => f.name === name);
+                if (idx > triggerIdx) { triggerIdx = idx; }
+            }
+            if (triggerIdx === -1) { continue; }
+
+            const legacy = [...(cond.thenFields ?? []), ...(cond.elseFields ?? [])]
+                .filter((f, i, arr) => arr.indexOf(f) === i && !f.conditionUserOrdered);
+            if (!legacy.length) { continue; }
+
+            let insertAt = triggerIdx + 1;
+            for (const field of legacy) {
+                const curIdx = fields.findIndex(f => f.name === field.name);
+                if (curIdx === -1) { continue; }
+                fields.splice(curIdx, 1);
+                if (curIdx < insertAt) { insertAt--; }
+                fields.splice(insertAt, 0, field);
+                field.conditionUserOrdered = true;
+                insertAt++;
+            }
+        }
     }
 
-    public addElseField(cond: SchemaCondition): void {
-        if (!this.canChangeConditionsForSelectedSchema || !this.canAddFieldToSelectedSchema) { return; }
+    // Unlike _triggerFieldPaths, doesn't rely on this.currentContextSchema - needed since
+    // this runs on schemas that aren't necessarily the open one.
+    private _conditionTriggerRootNames(cond: SchemaCondition): string[] {
+        const ic = cond.ifCondition as any;
+        if (!ic) { return []; }
+        const rows = 'AND' in ic ? (ic.AND || []) : ('OR' in ic ? (ic.OR || []) : [ic]);
+        const names: string[] = [];
+        for (const row of rows) {
+            const path = row?.fieldPath;
+            if (Array.isArray(path) && path.length > 1) { continue; }
+            const name = (Array.isArray(path) && path.length === 1) ? path[0] : row?.field?.name;
+            if (name) { names.push(name); }
+        }
+        return names;
+    }
+
+    // Trigger field names/paths for a condition's own IF rows - excluded from its then/else
+    // picker so a field can't be made conditional on itself.
+    private _triggerFieldPaths(cond: SchemaCondition): Set<string> {
+        const paths = new Set<string>();
+        const ic = cond.ifCondition as any;
+        const rows: any[] = !ic ? [] : ('AND' in ic ? ic.AND : ('OR' in ic ? ic.OR : [ic])) ?? [];
+        for (const row of rows) {
+            const path = this.getIfRowFieldPath(row);
+            if (path) { paths.add(path); }
+        }
+        return paths;
+    }
+
+    // Root-level fields selectable as a then/else member of this condition: not
+    // read-only, not the condition's own trigger, not already a member of this condition.
+    // A field already owned by a DIFFERENT condition is still listed, but disabled with a
+    // tooltip - a field can only belong to one condition's then/else at a time.
+    public getSelectableThenElseFields(cond: SchemaCondition): { pathStr: string; label: string; disabled: boolean }[] {
         const schema = this.currentContextSchema;
-        if (!schema) { return; }
-        const newField = this.buildNewField(this.defaultFieldType, schema.fields);
-        (schema.fields ??= []).push(newField);
-        (cond.elseFields ??= []).push(newField);
+        if (!schema?.fields) { return []; }
+        const ownedByThis = new Set([...(cond.thenFields || []), ...(cond.elseFields || [])].map(f => f.name));
+        const owned = this.conditionOwnedFieldNames;
+        const triggers = this._triggerFieldPaths(cond);
+        return schema.fields
+            .filter(f => !f.readOnly && !ownedByThis.has(f.name) && !triggers.has(f.name))
+            .map(f => ({
+                pathStr: f.name,
+                label: f.description || f.title || f.name,
+                disabled: owned.has(f.name),
+            }));
+    }
+
+    public selectThenField(cond: SchemaCondition, ci: number, fieldName: string): void {
+        if (!fieldName || this.isConditionLocked(cond)) { return; }
+        const field = this.currentContextSchema?.fields?.find(f => f.name === fieldName);
+        if (!field || this.conditionOwnedFieldNames.has(field.name)) { return; }
+        field.conditionUserOrdered = true;
+        (cond.thenFields ??= []).push(field);
         this.markDirty();
+        setTimeout(() => { this.condThenRefVal[ci] = null; });
+    }
+
+    public selectElseField(cond: SchemaCondition, ci: number, fieldName: string): void {
+        if (!fieldName || this.isConditionLocked(cond)) { return; }
+        const field = this.currentContextSchema?.fields?.find(f => f.name === fieldName);
+        if (!field || this.conditionOwnedFieldNames.has(field.name)) { return; }
+        field.conditionUserOrdered = true;
+        (cond.elseFields ??= []).push(field);
+        this.markDirty();
+        setTimeout(() => { this.condElseRefVal[ci] = null; });
     }
 
     public removeThenField(cond: SchemaCondition, field: SchemaField): void {
-        if (!this.canChangeConditionsForSelectedSchema || this.isTemplateFieldLocked(field)) { return; }
+        if (this.isTemplateFieldLocked(field)) { return; }
         cond.thenFields = (cond.thenFields || []).filter(f => f !== field);
-        const schema = this.currentContextSchema;
-        if (schema) {
-            const idx = schema.fields.indexOf(field);
-            if (idx !== -1) { schema.fields.splice(idx, 1); }
-        }
-        if (this.selectedField === field) { this.selectedField = null; }
+        if (!this.conditionOwnedFieldNames.has(field.name)) { field.conditionUserOrdered = false; }
         this.markDirty();
     }
 
     public removeElseField(cond: SchemaCondition, field: SchemaField): void {
-        if (!this.canChangeConditionsForSelectedSchema || this.isTemplateFieldLocked(field)) { return; }
+        if (this.isTemplateFieldLocked(field)) { return; }
         cond.elseFields = (cond.elseFields || []).filter(f => f !== field);
-        const schema = this.currentContextSchema;
-        if (schema) {
-            const idx = schema.fields.indexOf(field);
-            if (idx !== -1) { schema.fields.splice(idx, 1); }
-        }
-        if (this.selectedField === field) { this.selectedField = null; }
+        if (!this.conditionOwnedFieldNames.has(field.name)) { field.conditionUserOrdered = false; }
         this.markDirty();
     }
 
     // ── Cross-schema targets ─────────────────────────────────────────────────
 
     private _resolveFieldByPath(path: string[]): SchemaField | null {
-        const schemaByIri = new Map(this.schemas.map(s => [s.iri, s]));
         let fields = this.currentContextSchema?.fields ?? [];
         let field: SchemaField | null = null;
         for (let i = 0; i < path.length; i++) {
             field = fields.find(f => f.name === path[i]) ?? null;
             if (!field) { return null; }
             if (i < path.length - 1) {
-                const ref = schemaByIri.get(field.type);
+                const ref = this.resolveRefSchema(field.type);
                 fields = ref?.fields
                     ?? (Array.isArray((field as any).fields) && (field as any).fields.length ? (field as any).fields : []);
             }
@@ -4192,16 +4849,15 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     public getCrossTargetPaths(): { pathStr: string; label: string }[] {
         const schema = this.currentContextSchema;
         if (!schema?.fields) { return []; }
-        const schemaByIri = new Map(this.schemas.map(s => [s.iri, s]));
         const result: { pathStr: string; label: string }[] = [];
 
         const traverse = (fields: SchemaField[], pathParts: string[], labelParts: string[]) => {
             for (const f of fields) {
                 if (f.isRef && f.type) {
-                    const ref = schemaByIri.get(f.type);
+                    const ref = this.resolveRefSchema(f.type);
                     const refFields = ref?.fields ?? (Array.isArray((f as any).fields) && (f as any).fields.length ? (f as any).fields : []);
                     if (refFields.length) {
-                        traverse(refFields, [...pathParts, f.name], [...labelParts, ref?.name || f.name]);
+                        traverse(refFields, [...pathParts, f.name], [...labelParts, this.refGroupName(ref, f)]);
                     }
                 } else if (!f.readOnly) {
                     result.push({
@@ -4214,26 +4870,28 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
 
         for (const f of schema.fields) {
             if (f.isRef && f.type) {
-                const ref = schemaByIri.get(f.type);
+                const ref = this.resolveRefSchema(f.type);
                 const refFields = ref?.fields ?? (Array.isArray((f as any).fields) && (f as any).fields.length ? (f as any).fields : []);
                 if (refFields.length) {
-                    traverse(refFields, [f.name], [ref?.name || f.name]);
+                    traverse(refFields, [f.name], [this.refGroupName(ref, f)]);
                 }
             }
         }
         return result;
     }
 
-    private conditionFieldGroupsCache: { label: string; items: { pathStr: string; label: string }[] }[] | null = null;
+    private conditionFieldGroupsCache: { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string }[] }[] | null = null;
     private conditionFieldGroupsCacheSchema: Schema | null = null;
     private conditionFieldGroupsCacheSchemas: Schema[] | null = null;
+    private conditionFieldGroupsCacheSubSchemas: Map<string, Schema> | null = null;
     private conditionFieldGroupsCacheVersion = -1;
 
-    public getConditionFieldPSelectGroups(): { label: string; items: { pathStr: string; label: string }[] }[] {
+    public getConditionFieldPSelectGroups(): { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string }[] }[] {
         const schema = this.currentContextSchema;
         if (this.conditionFieldGroupsCache
             && this.conditionFieldGroupsCacheSchema === schema
             && this.conditionFieldGroupsCacheSchemas === this.schemas
+            && this.conditionFieldGroupsCacheSubSchemas === this._subSchemasByIri
             && this.conditionFieldGroupsCacheVersion === this.schemaEditVersion) {
             return this.conditionFieldGroupsCache;
         }
@@ -4241,56 +4899,80 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.conditionFieldGroupsCache = groups;
         this.conditionFieldGroupsCacheSchema = schema;
         this.conditionFieldGroupsCacheSchemas = this.schemas;
+        this.conditionFieldGroupsCacheSubSchemas = this._subSchemasByIri;
         this.conditionFieldGroupsCacheVersion = this.schemaEditVersion;
         return groups;
     }
 
-    private buildConditionFieldPSelectGroups(): { label: string; items: { pathStr: string; label: string }[] }[] {
+    private buildConditionFieldPSelectGroups(): { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string }[] }[] {
         const schema = this.currentContextSchema;
         if (!schema) { return []; }
-        const schemaByIri = new Map(this.schemas.filter(s => s.iri).map(s => [s.iri as string, s]));
-        const result: { label: string; items: { pathStr: string; label: string }[] }[] = [];
+        const result: { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string }[] }[] = [];
 
-        const nestLabel = (name: string, depth: number) =>
-            depth <= 1 ? name : ' '.repeat((depth - 1) * 3) + '› ' + name;
 
-        const addGroups = (fields: SchemaField[], pathParts: string[], groupName: string, depth: number) => {
-            const items: { pathStr: string; label: string }[] = [];
+        const addGroups = (fields: SchemaField[], pathParts: string[], trail: string[]) => {
+            const items: { pathStr: string; label: string; fullLabel: string }[] = [];
             for (const f of fields) {
                 if (f.readOnly || (f.isRef && f.type)) { continue; }
-                items.push({ pathStr: [...pathParts, f.name].join('.'), label: f.description || f.title || f.name });
+                items.push({ pathStr: [...pathParts, f.name].join('.'), label: this.selectorFieldLabel(f), fullLabel: this.fieldPathLabel(trail, this.selectorFieldLabel(f)) });
             }
             if (items.length) {
-                result.push({ label: nestLabel(groupName, depth), items });
+                result.push({ label: this.groupPathLabel(trail, 'This schema'), name: trail[trail.length - 1] ?? 'This schema', parents: this.groupParentsHint(trail), items });
             }
             for (const f of fields) {
                 if (f.readOnly || !f.isRef || !f.type) { continue; }
-                const ref = schemaByIri.get(f.type);
+                const ref = this.resolveRefSchema(f.type);
                 const refFields = ref?.fields
                     ?? (Array.isArray((f as any).fields) && (f as any).fields.length ? (f as any).fields : []);
                 if (refFields.length) {
-                    addGroups(refFields, [...pathParts, f.name], ref?.name || f.name, depth + 1);
+                    addGroups(refFields, [...pathParts, f.name], [...trail, this.refGroupName(ref, f)]);
                 }
             }
         };
 
-        addGroups(schema.fields ?? [], [], 'This schema', 0);
+        addGroups(schema.fields ?? [], [], []);
         return result;
+    }
+
+    private selectorFieldLabel(field: SchemaField): string {
+        return field.description || field.name;
+    }
+
+    // Schema name for a group header; unresolved refs fall back to the field's own label.
+    private refGroupName(ref: Schema | undefined, field: SchemaField): string {
+        return ref?.name || this.selectorFieldLabel(field);
+    }
+
+    private groupPathLabel(trail: string[], rootLabel: string): string {
+        return trail.length ? trail.join(' › ') : rootLabel;
+    }
+
+    private fieldPathLabel(trail: string[], label: string): string {
+        return trail.length ? `${trail.join(' › ')} › ${label}` : label;
+    }
+
+    // Parent chain of a group, shown as a muted hint next to the group name. Built from the trail
+    // itself so a schema name containing the separator cannot corrupt it.
+    private groupParentsHint(trail: string[]): string {
+        const parents = trail.slice(0, -1);
+        return parents.length > 2 ? `${parents[0]} › … › ${parents[parents.length - 1]}` : parents.join(' › ');
     }
 
     public condThenRefVal: Record<number, string | null> = {};
     public condElseRefVal: Record<number, string | null> = {};
 
-    private crossTargetGroupsCache: { label: string; items: { pathStr: string; label: string; isBlock?: boolean }[] }[] | null = null;
+    private crossTargetGroupsCache: { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string; isBlock?: boolean }[] }[] | null = null;
     private crossTargetGroupsCacheSchema: Schema | null = null;
     private crossTargetGroupsCacheSchemas: Schema[] | null = null;
+    private crossTargetGroupsCacheSubSchemas: Map<string, Schema> | null = null;
     private crossTargetGroupsCacheVersion = -1;
 
-    public getCrossTargetPSelectGroups(): { label: string; items: { pathStr: string; label: string; isBlock?: boolean }[] }[] {
+    public getCrossTargetPSelectGroups(): { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string; isBlock?: boolean }[] }[] {
         const schema = this.currentContextSchema;
         if (this.crossTargetGroupsCache
             && this.crossTargetGroupsCacheSchema === schema
             && this.crossTargetGroupsCacheSchemas === this.schemas
+            && this.crossTargetGroupsCacheSubSchemas === this._subSchemasByIri
             && this.crossTargetGroupsCacheVersion === this.schemaEditVersion) {
             return this.crossTargetGroupsCache;
         }
@@ -4298,78 +4980,119 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.crossTargetGroupsCache = groups;
         this.crossTargetGroupsCacheSchema = schema;
         this.crossTargetGroupsCacheSchemas = this.schemas;
+        this.crossTargetGroupsCacheSubSchemas = this._subSchemasByIri;
         this.crossTargetGroupsCacheVersion = this.schemaEditVersion;
         return groups;
     }
 
-    private buildCrossTargetPSelectGroups(): { label: string; items: { pathStr: string; label: string; isBlock?: boolean }[] }[] {
+    private buildCrossTargetPSelectGroups(): { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string; isBlock?: boolean }[] }[] {
         const schema = this.currentContextSchema;
         if (!schema?.fields) { return []; }
-        const schemaByIri = new Map(this.schemas.map(s => [s.iri, s]));
-        const result: { label: string; items: { pathStr: string; label: string; isBlock?: boolean }[] }[] = [];
+        const result: { label: string; name: string; parents: string; items: { pathStr: string; label: string; fullLabel: string; isBlock?: boolean }[] }[] = [];
 
-        const nestLabel = (name: string, depth: number) =>
-            depth <= 1 ? name : ' '.repeat((depth - 1) * 3) + '› ' + name;
 
-        const traverse = (fields: SchemaField[], pathParts: string[], groupName: string, depth: number) => {
-            const items: { pathStr: string; label: string; isBlock?: boolean }[] = [];
+        const traverse = (fields: SchemaField[], pathParts: string[], trail: string[]) => {
+            const items: { pathStr: string; label: string; fullLabel: string; isBlock?: boolean }[] = [];
             for (const f of fields) {
                 if (f.readOnly) { continue; }
                 if (f.isRef && f.type) {
-                    const ref = schemaByIri.get(f.type);
+                    const ref = this.resolveRefSchema(f.type);
                     const refFields = ref?.fields ?? (Array.isArray((f as any).fields) && (f as any).fields.length ? (f as any).fields : []);
                     if (refFields.length) {
                         items.push({
                             pathStr: [...pathParts, f.name].join('.'),
-                            label: f.description || f.title || f.name,
+                            label: this.selectorFieldLabel(f),
+                            fullLabel: this.fieldPathLabel(trail, this.selectorFieldLabel(f)),
                             isBlock: true
                         });
                     }
                     continue;
                 }
-                items.push({ pathStr: [...pathParts, f.name].join('.'), label: f.description || f.title || f.name });
+                items.push({ pathStr: [...pathParts, f.name].join('.'), label: this.selectorFieldLabel(f), fullLabel: this.fieldPathLabel(trail, this.selectorFieldLabel(f)) });
             }
             if (items.length) {
-                result.push({ label: nestLabel(groupName, depth), items });
+                result.push({ label: this.groupPathLabel(trail, ''), name: trail[trail.length - 1], parents: this.groupParentsHint(trail), items });
             }
             for (const f of fields) {
                 if (f.readOnly || !f.isRef || !f.type) { continue; }
-                const ref = schemaByIri.get(f.type);
+                const ref = this.resolveRefSchema(f.type);
                 const refFields = ref?.fields ?? (Array.isArray((f as any).fields) && (f as any).fields.length ? (f as any).fields : []);
                 if (refFields.length) {
-                    traverse(refFields, [...pathParts, f.name], ref?.name || f.name, depth + 1);
+                    traverse(refFields, [...pathParts, f.name], [...trail, this.refGroupName(ref, f)]);
                 }
             }
         };
 
         for (const f of schema.fields) {
             if (f.readOnly || !f.isRef || !f.type) { continue; }
-            const ref = schemaByIri.get(f.type);
+            const ref = this.resolveRefSchema(f.type);
             const refFields = ref?.fields ?? (Array.isArray((f as any).fields) && (f as any).fields.length ? (f as any).fields : []);
             if (refFields.length) {
-                traverse(refFields, [f.name], ref?.name || f.name, 1);
+                traverse(refFields, [f.name], [this.refGroupName(ref, f)]);
             }
         }
 
         return result;
     }
 
+    // Cached per condition: the template reads the picker several times per change-detection pass.
+    private condPickerCache = new WeakMap<SchemaCondition, {
+        schema: Schema | null;
+        schemas: Schema[];
+        fields: SchemaField[] | undefined;
+        fieldCount: number;
+        version: number;
+        cross: unknown;
+        result: { label: string; items: { pathStr: string; label: string; isBlock?: boolean; disabled?: boolean }[] }[];
+    }>();
+
+    // Combined picker: root-level fields of this schema (selected as plain then/else members)
+    // plus the existing nested sub-schema field groups (selected as cross-schema targets).
+    public getCondFieldPickerOptions(cond: SchemaCondition): { label: string; items: { pathStr: string; label: string; isBlock?: boolean; disabled?: boolean }[] }[] {
+        const schema = this.currentContextSchema;
+        const cross = this.getCrossTargetPSelectGroups();
+        const hit = this.condPickerCache.get(cond);
+        if (hit
+            && hit.schema === schema
+            && hit.schemas === this.schemas
+            && hit.fields === schema?.fields
+            && hit.fieldCount === (schema?.fields?.length ?? 0)
+            && hit.version === this.schemaEditVersion
+            && hit.cross === cross) {
+            return hit.result;
+        }
+        const rootItems = this.getSelectableThenElseFields(cond);
+        const groups = rootItems.length ? [{ label: 'This schema', items: rootItems }] : [];
+        const result = [...groups, ...cross];
+        this.condPickerCache.set(cond, {
+            schema, schemas: this.schemas, fields: schema?.fields, fieldCount: schema?.fields?.length ?? 0,
+            version: this.schemaEditVersion, cross, result,
+        });
+        return result;
+    }
+
     public onCondThenRefChange(cond: SchemaCondition, ci: number, pathStr: string): void {
         if (!pathStr) { return; }
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
-        this.addThenTarget(cond, pathStr);
-        setTimeout(() => { this.condThenRefVal[ci] = null; });
+        if (pathStr.includes('.')) {
+            this.addThenTarget(cond, pathStr);
+            setTimeout(() => { this.condThenRefVal[ci] = null; });
+        } else {
+            this.selectThenField(cond, ci, pathStr);
+        }
     }
 
     public onCondElseRefChange(cond: SchemaCondition, ci: number, pathStr: string): void {
         if (!pathStr) { return; }
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
-        this.addElseTarget(cond, pathStr);
-        setTimeout(() => { this.condElseRefVal[ci] = null; });
+        if (pathStr.includes('.')) {
+            this.addElseTarget(cond, pathStr);
+            setTimeout(() => { this.condElseRefVal[ci] = null; });
+        } else {
+            this.selectElseField(cond, ci, pathStr);
+        }
     }
 
     public addThenTarget(cond: SchemaCondition, pathStr: string): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
+        if (this.isConditionLocked(cond)) { return; }
         if (!pathStr) { return; }
         const path = pathStr.split('.');
         if (cond.thenTargets?.some(t => t.fieldPath.join('.') === pathStr)) { return; }
@@ -4380,7 +5103,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public addElseTarget(cond: SchemaCondition, pathStr: string): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
+        if (this.isConditionLocked(cond)) { return; }
         if (!pathStr) { return; }
         const path = pathStr.split('.');
         if (cond.elseTargets?.some(t => t.fieldPath.join('.') === pathStr)) { return; }
@@ -4391,13 +5114,13 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeThenTarget(cond: SchemaCondition, target: SchemaConditionTarget): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
+        if (this.isConditionLocked(cond)) { return; }
         cond.thenTargets = (cond.thenTargets || []).filter(t => t !== target);
         this.markDirty();
     }
 
     public removeElseTarget(cond: SchemaCondition, target: SchemaConditionTarget): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
+        if (this.isConditionLocked(cond)) { return; }
         cond.elseTargets = (cond.elseTargets || []).filter(t => t !== target);
         this.markDirty();
     }
@@ -4414,7 +5137,7 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     // ── Top-level condition management ────────────────────────────────────────
 
     public addNewCondition(): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
+        if (!this.canAddConditionToSelectedSchema) { return; }
         const schema = this.currentContextSchema;
         const firstEntry = this._firstConditionEntry;
         if (!schema || !firstEntry) { return; }
@@ -4432,11 +5155,10 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
     }
 
     public removeConditionAt(index: number): void {
-        if (!this.canChangeConditionsForSelectedSchema) { return; }
         const schema = this.currentContextSchema;
         if (!schema) { return; }
         const condToCheck = schema.conditions?.[index];
-        if (this.conditionHasLockedField(condToCheck)) { return; }
+        if (this.conditionHasLockedField(condToCheck) || this.isConditionLocked(condToCheck)) { return; }
         // H1: rekey index-keyed dropdown state before the conditions array shrinks
         const rekey = (rec: Record<number, string | null>) => {
             const out: Record<number, string | null> = {};
@@ -4450,20 +5172,11 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.condThenRefVal = rekey(this.condThenRefVal);
         this.condElseRefVal = rekey(this.condElseRefVal);
         const cond = schema.conditions?.[index];
-        if (cond) {
-            const toRemove = new Set([
-                ...(cond.thenFields ?? []).map(f => f.name),
-                ...(cond.elseFields ?? []).map(f => f.name),
-            ]);
-            if (toRemove.size) {
-                // H2: splice in-place to preserve drillStack reference
-                for (let i = schema.fields.length - 1; i >= 0; i--) {
-                    if (toRemove.has(schema.fields[i].name)) { schema.fields.splice(i, 1); }
-                }
-                if (toRemove.has(this.selectedField?.name ?? '')) { this.selectedField = null; }
-            }
-        }
         schema.conditions = (schema.conditions ?? []).filter((_, i) => i !== index);
+        const owned = this.conditionOwnedFieldNames;
+        for (const f of [...(cond?.thenFields ?? []), ...(cond?.elseFields ?? [])]) {
+            if (!owned.has(f.name)) { f.conditionUserOrdered = false; }
+        }
         this.markDirty();
     }
 
@@ -4589,7 +5302,14 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
                     this.schemasFetched = true;
                     // server copies are the saved baseline; a locally edited
                     // selectedSchema still differs from its signature and stays dirty
-                    items.forEach(schema => this.snapshotSchema(schema));
+                    items.forEach(schema => this.normalizeLegacyConditionFieldOrder(schema));
+                    items.forEach(schema => {
+                        const id = schema.id || (schema as any)._id;
+                        if (id && id === this.loadedSchemaId && this.savedSignatures.has(id)) {
+                            return;
+                        }
+                        this.snapshotSchema(schema);
+                    });
                     this.loadAppliedSchemaTemplate();
                     if (this.selectedSchema) { this.upsertInSidebar(this.selectedSchema); }
                     this.pruneDirtySchemaIds();
@@ -4827,14 +5547,59 @@ export class SchemasConfigurationComponent implements OnInit, OnDestroy {
         this.rebuildPreview();
     }
 
+    public setActiveTab(tab: 'builder' | 'preview'): void {
+        this.activeTab = tab;
+        if (tab === 'preview') {
+            this.previewMounted = true;
+            if (this.isPreviewStale()) {
+                this.rebuildPreview();
+            }
+            this.loadPreviewFormulas();
+        }
+    }
+
+    private isPreviewStale(): boolean {
+        return this.previewBuiltFor.schema !== this.currentContextSchema
+            || this.previewBuiltFor.version !== this.schemaEditVersion
+            || this.previewBuiltFor.path !== this.fieldFormulaPrefix.join('.');
+    }
+
+    /** the formulas of the policy, so the preview shows them like the request form */
+    private loadPreviewFormulas(): void {
+        if (this.activeTab !== 'preview' || !this.fieldFormulas || this.isTemplateMode) {
+            return;
+        }
+        this.previewFormulas = this.fieldFormulas.previewTree(this.schemas);
+    }
+
     private rebuildPreview(): void {
-        if (!this.selectedSchema || this.previewPill === 'submitter') {
+        const schema = this.currentContextSchema;
+        this.previewBuiltFor = { schema, version: this.schemaEditVersion, path: this.fieldFormulaPrefix.join('.') };
+        this.previewSchemaRef = schema;
+        this.previewFormulaLinkScope = this.isDrilling && this.selectedSchema?.iri
+            ? { schema: this.selectedSchema.iri, prefix: this.fieldFormulaPrefix }
+            : null;
+        this.previewKey++;
+        if (schema) {
+            this.refreshFieldPaths(schema.fields, '', `${schema.iri}/`);
+        }
+        if (!schema || this.previewPill === 'submitter') {
             this.previewPreset = null;
             this.previewReadonlyFields = null;
             return;
         }
-        this.previewPreset = DocumentGenerator.generateDocument(this.selectedSchema);
-        this.previewReadonlyFields = this.selectedSchema.fields;
+        this.previewPreset = DocumentGenerator.generateDocument(schema);
+        this.previewReadonlyFields = schema.fields;
+    }
+
+    private refreshFieldPaths(fields: SchemaField[] | undefined, path: string, fullPath: string): void {
+        for (const field of fields ?? []) {
+            field.path = path + field.name;
+            field.fullPath = fullPath + field.name;
+            if (Array.isArray(field.fields)) {
+                this.refreshFieldPaths(field.fields, `${field.path}.`, `${field.fullPath}.`);
+            }
+        }
     }
 
     public onExport(): void {

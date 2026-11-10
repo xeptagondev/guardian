@@ -11,7 +11,6 @@ import {DB_NAME, STORES_NAME} from "../constants";
 @Injectable({ providedIn: 'root' })
 export class TablePersistenceService {
     private draftMode = false;
-    private pendingIpfsCids = new Set<string>();
     private pendingGridFsFiles: { fileId: string; idbKey: string }[] = [];
 
     constructor(
@@ -23,9 +22,58 @@ export class TablePersistenceService {
 
     public async persistTablesInDocument(root: unknown, isDryRun: boolean, policyId: string = '', blockId: string = '', draft: boolean = false): Promise<void> {
         this.draftMode = draft;
-        this.pendingIpfsCids.clear();
         this.pendingGridFsFiles = [];
         await this.visitNode(root, isDryRun);
+    }
+
+    public async inlineTablesForPreview(root: unknown): Promise<void> {
+        await this.visitPreviewNode(root);
+    }
+
+    private async visitPreviewNode(node: unknown): Promise<void> {
+        if (Array.isArray(node)) {
+            for (let index = 0; index < node.length; index += 1) {
+                const element = node[index];
+                if (typeof element === 'string') {
+                    node[index] = await this.inlineTableString(element);
+                } else {
+                    await this.visitPreviewNode(element);
+                }
+            }
+            return;
+        }
+
+        if (node && typeof node === 'object') {
+            for (const key of Object.keys(node)) {
+                const value = Reflect.get(node, key);
+                if (typeof value === 'string') {
+                    Reflect.set(node, key, await this.inlineTableString(value));
+                } else {
+                    await this.visitPreviewNode(value);
+                }
+            }
+        }
+    }
+
+    private async inlineTableString(input: string): Promise<string> {
+        const parsed = this.tryParseTable(input);
+        const idbKey = parsed?.idbKey?.trim();
+        if (!parsed || !idbKey) {
+            return input;
+        }
+        const file = await this.readFileFromIndexedDb(idbKey);
+        if (!file) {
+            return input;
+        }
+        const csv = await this.gzip.gunzipToText(file);
+        const inline: Record<string, unknown> = { type: 'table', fileId: `preview-${idbKey}`, csv };
+        if (Array.isArray(parsed.columnNames) && parsed.columnNames.length) {
+            inline['columnNames'] = parsed.columnNames;
+            if (Array.isArray(parsed.columnKeys) && parsed.columnKeys.length) {
+                inline['columnKeys'] = parsed.columnKeys;
+            }
+        }
+        return JSON.stringify(inline);
     }
 
     private async copyToDraftStore(idbKey: string): Promise<boolean> {
@@ -188,11 +236,7 @@ export class TablePersistenceService {
         const cid = await firstValueFrom(this.ipfsService.addFileDirect(file));
 
         if (typeof cid === 'string' && cid.trim()) {
-            const normalizedCid = cid.trim();
-
-            this.pendingIpfsCids.add(normalizedCid);
-
-            return normalizedCid;
+            return cid.trim();
         }
 
         return null;
@@ -295,15 +339,6 @@ export class TablePersistenceService {
     }
 
     public async rollbackIpfsUploads(): Promise<void> {
-        const cids = Array.from(this.pendingIpfsCids);
-        this.pendingIpfsCids.clear();
-
-        for (const cid of cids) {
-            try {
-                await firstValueFrom(this.ipfsService.deleteCid(cid));
-            } catch {}
-        }
-
         const gridFiles = [...this.pendingGridFsFiles];
         this.pendingGridFsFiles = [];
 

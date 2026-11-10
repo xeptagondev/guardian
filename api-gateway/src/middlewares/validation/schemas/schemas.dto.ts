@@ -247,6 +247,18 @@ export class SchemaDTO {
         example: 1
     })
     topicCount?: number;
+
+    @ApiProperty({
+        type: 'array',
+        items: {
+            type: 'string'
+        },
+        required: false,
+        example: ['#f3b2a9c1e4d5678901234567']
+    })
+    @IsOptional()
+    @IsArray()
+    defs?: string[];
 }
 
 export class SchemaParentDTO {
@@ -451,6 +463,18 @@ export class SchemaImportDuplicatesRequestDTO {
     })
     @IsArray()
     schemaNames: string[];
+
+    @ApiProperty({
+        type: 'array',
+        items: {
+            type: 'object'
+        },
+        required: false,
+        description: 'Schemas from the imported package. When set, the response also lists formula links that replacing the existing schemas would break.'
+    })
+    @IsOptional()
+    @IsArray()
+    schemas?: any[];
 }
 
 export class SystemSchemaDTO {

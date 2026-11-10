@@ -25,16 +25,22 @@ tags:
     The editor lets the user change the template name and description, create schemas for the template, and open template settings.
 4.  Create template schemas.
 
-    Schemas created inside the template are saved with `category = TEMPLATE`, `templateId`, stable `templateSchemaId`, and field-level `templateFieldId` values.
+    Schemas created inside the template are saved with `category = TEMPLATE`, `templateId`, stable `templateSchemaId`, and field-level `templateFieldId` values.<br>
+
+    <div data-gb-custom-block data-tag="hint" data-style="warning" class="hint hint-warning"><p><strong>Important:</strong> Set the <strong>Entity type</strong> of the main (root) template schema to <strong>VC</strong> or <strong>EVC</strong>, not <strong>Default</strong>. A root schema left as <strong>Default</strong> cannot be used as the schema of a verifiable credential in a policy.</p></div>
 5.  Configure template restrictions.
 
     \
     The supported settings are:
 
-* **Change schema settings** (`schemaSettingsLocked`): locks schema name, description, and entity type.
-* **Can add custom fields** (`customFieldsLocked`): prevents adding custom fields to the schema.
-* **Can edit selected field** (`fields[fieldId].locked`): prevents editing and removing an individual template field.
+* **Lock schema settings** (`schemaSettingsLocked`): locks schema name, description, and entity type.
+* **Lock custom fields** (`customFieldsLocked`): prevents adding custom fields to the schema.
+* **Lock custom conditions** (`conditionsLocked`): prevents adding new conditions. Add-only - it does not block editing or removing an existing condition.
+* **Lock custom repeatable links** (`repeatableLinksLocked`): prevents adding new repeatable field links. Add-only - it does not block editing or removing an existing link.
+* **Lock field editing** (`fields[fieldId].locked`): prevents editing and removing an individual template field.
   * Template-owned fields are locked by default; set `locked: false` explicitly to allow policy users to edit or remove the field.
+* **Lock this condition** (`conditions[signature].locked`): prevents editing and removing an individual condition. Conditions are unlocked by default; set `locked: true` to lock one.
+* **Lock this repeatable link** (`repeatableLinks[fieldId].locked`): prevents editing and removing an individual repeatable field link. Links are unlocked by default; set `locked: true` to lock one.
 * **Guidelines** (`guidelines`): adds schema-level or field-level notes that are shown in the policy schema editor after the template is applied.
 
 ### Result

@@ -80,6 +80,13 @@ describe('JsonToXlsx.generate README worksheet', function () {
         assert.equal(readme.getValue(1, 1), 'README from template');
         assert.notInclude(workbook.sheetNames, 'Schema name');
     });
+
+    it('round-trips schema version metadata', async function () {
+        const buffer = await JsonToXlsx.generate([makeSchema({ version: '1.0.1' })], [], []);
+        const result = await XlsxToJson.parse(Buffer.from(buffer));
+
+        assert.equal(result.xlsxSchemas[0].schema.version, '1.0.1');
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -352,7 +359,7 @@ describe('JsonToXlsx.writeField — old vs new sub-schema rendering', function (
 
         JsonToXlsx.writeField(ws, table, field, schemaCache, new Map(), new Map(), DATA_ROW);
 
-        const link = ws.getCell(table.getCol('Field Type'), DATA_ROW).getLink();
+        const link = ws.getCell(table.getCol('Type'), DATA_ROW).getLink();
         assert.isNotNull(link);
         assert.equal(link.worksheet, 'TargetSheet');
     });
@@ -363,7 +370,7 @@ describe('JsonToXlsx.writeField — old vs new sub-schema rendering', function (
 
         JsonToXlsx.writeField(ws, table, field, new Map(), new Map(), new Map(), DATA_ROW);
 
-        const cellValue = ws.getValue(table.getCol('Field Type'), DATA_ROW);
+        const cellValue = ws.getValue(table.getCol('Type'), DATA_ROW);
         assert.equal(cellValue, 'Sub-Schema');
     });
 

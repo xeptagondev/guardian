@@ -108,14 +108,14 @@ describe('Schema template artifact', () => {
     it('uses IWA V3 with a V3-only version dropdown', async () => {
         assert.equal(result.xlsxSchemas[0].iwaVersion, '3.0.0');
         const sheet = workbook.getWorksheet('Schema name');
-        assert.equal(sheet.getValue(1, 4), 'IWA Version');
-        assert.equal(sheet.getValue(2, 4), 'V3');
-        assert.deepEqual(sheet.getCell(2, 4).getList(), ['V3']);
+        assert.equal(sheet.getValue(1, 5), 'IWA Version');
+        assert.equal(sheet.getValue(2, 5), 'V3');
+        assert.deepEqual(sheet.getCell(2, 5).getList(), ['V3']);
     });
 
     it('has an IWA Property column fed by the hidden IWA Properties sheet', async () => {
         const sheet = workbook.getWorksheet('Schema name');
-        assert.equal(sheet.getValue(11, 5), 'IWA Property');
+        assert.equal(sheet.getValue(13, 6), 'IWA Property');
 
         const raw = new ExcelJS.Workbook();
         await raw.xlsx.load(await readFile(TEMPLATE));
@@ -124,12 +124,18 @@ describe('Schema template artifact', () => {
         assert.equal(iwa.state, 'hidden');
         assert.deepEqual(iwa.getRow(1).values.slice(1), ['Path', 'Name', 'Description', 'Version']);
         const versions = new Set();
-        iwa.eachRow((row, r) => { if (r > 1) { versions.add(row.getCell(4).value); } });
+        let lastDataRow = 1;
+        iwa.eachRow((row, r) => {
+            if (r > 1 && row.getCell(1).value) {
+                versions.add(row.getCell(4).value);
+                lastDataRow = r;
+            }
+        });
         assert.deepEqual([...versions], ['V3']);
 
-        const validation = raw.getWorksheet('Schema name').getCell('K6').dataValidation;
+        const validation = raw.getWorksheet('Schema name').getCell('M7').dataValidation;
         assert.equal(validation.type, 'list');
-        assert.equal(validation.formulae[0], `'IWA Properties'!$A$2:$A$${iwa.rowCount}`);
+        assert.equal(validation.formulae[0], `'IWA Properties'!$A$2:$A$${lastDataRow}`);
     });
 
     it('lists the IWA warnings right after the other common errors', () => {
@@ -142,5 +148,76 @@ describe('Schema template artifact', () => {
         assert.equal(readme.getValue(1, row), '⚠');
         assert.equal(readme.getValue(1, row - 1), '⚠', 'a gap sits before the IWA warnings');
         assert.ok(String(readme.getValue(2, row + 1)).startsWith('An "IWA Property" path'));
+    });
+});
+
+describe('Schema template artifact column layout', () => {
+    it('matches the export layout, which follows the schema editor order', async () => {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(TEMPLATE);
+        const sheet = workbook.getWorksheet('Schema name');
+        const headers = [];
+        sheet.getRow(6).eachCell((cell) => headers.push(String(cell.value)));
+        assert.deepEqual(headers, [
+            'Key', 'Description', 'Type', 'Required Field', 'Visibility', 'Parameter',
+            'Allow Multiple Answers', 'Updatable Field', 'Private Field',
+            'Default Value', 'Suggest Value', 'Test Value', 'IWA Property',
+            'Repeatable Links', 'Advisory Text'
+        ]);
+        assert.deepEqual(sheet.getCell('N6').style, sheet.getCell('M6').style);
+        assert.deepEqual(sheet.getCell('O6').style, sheet.getCell('M6').style);
+        for (let row = 7; row <= 46; row++) {
+            assert.deepEqual(sheet.getCell(row, 14).style, sheet.getCell(row, 13).style);
+            assert.deepEqual(sheet.getCell(row, 15).style, sheet.getCell(row, 13).style);
+            assert.equal(sheet.getCell(row, 14).value, null);
+            assert.equal(sheet.getCell(row, 15).value, null);
+        }
+        assert.ok(sheet.model.merges.includes('A1:O1'));
+    });
+
+    it('documents every field column in the README, in the same order', async () => {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(TEMPLATE);
+        const readme = workbook.getWorksheet('README');
+        const names = [];
+        for (let row = 21; row <= 35; row++) {
+            names.push(String(readme.getCell(row, 1).value));
+        }
+        assert.deepEqual(names, [
+            'Key', 'Description', 'Type', 'Required Field', 'Visibility', 'Parameter',
+            'Allow Multiple Answers', 'Updatable Field', 'Private Field',
+            'Default Value', 'Suggest Value', 'Test Value', 'IWA Property',
+            'Repeatable Links', 'Advisory Text'
+        ]);
+    });
+
+    it('marks Repeatable Links and Advisory Text as optional in the README', async () => {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(TEMPLATE);
+        const readme = workbook.getWorksheet('README');
+        for (const row of [34, 35]) {
+            const cell = readme.getCell(row, 3);
+            assert.equal(cell.value, 'Optional', `Required column, row ${row}`);
+            assert.deepEqual(cell.style, readme.getCell('C33').style, `Required column style, row ${row}`);
+        }
+    });
+
+    it('shows No in the Updatable and Private example cells, like Allow Multiple Answers', async () => {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(TEMPLATE);
+        const sheet = workbook.getWorksheet('Schema name');
+        for (let row = 7; row <= 46; row++) {
+            assert.equal(sheet.getCell(row, 8).value, 'No', `Updatable Field, row ${row}`);
+            assert.equal(sheet.getCell(row, 9).value, 'No', `Private Field, row ${row}`);
+        }
+    });
+
+    it('adds two numeric rows in the Auto-Calculate example', async () => {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(TEMPLATE);
+        const sheet = workbook.getWorksheet('Schema name');
+        assert.equal(sheet.getCell('F34').value, 'L8 + L9');
+        assert.equal(typeof sheet.getCell('L8').value, 'number');
+        assert.equal(typeof sheet.getCell('L9').value, 'number');
     });
 });

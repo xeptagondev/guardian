@@ -1,7 +1,7 @@
 {
     "author": "Hashgraph <guardian@hashgraph.com>",
     "name": "indexer-frontend",
-    "version": "3.7.1-rc",
+    "version": "3.7.1",
     "scripts": {
         "ng": "ng",
         "start": "ng serve --proxy-config ./proxy.conf.json",
@@ -30,7 +30,7 @@
         "chart.js": "^4.4.3",
         "cids": "^1.1.9",
         "echarts": "^5.5.0",
-        "mathlive": "^0.103.0",
+        "mathlive": "^0.111.1",
         "ngx-echarts": "^17.1.0",
         "ol": "^9.2.2",
         "papaparse": "5.5.3",
@@ -45,7 +45,6 @@
         "@angular/cli": "^17.3.2",
         "@angular/compiler-cli": "^17.3.0",
         "@types/jasmine": "~5.1.0",
-        "@types/mapbox-gl": "^3.1.0",
         "@types/papaparse": "5.3.16",
         "@types/glob": "^8.1.0",
         "jasmine-core": "~5.1.0",

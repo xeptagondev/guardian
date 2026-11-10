@@ -1,4 +1,5 @@
 import { of, Subject, throwError } from 'rxjs';
+import { Schema, SchemaField } from '@guardian/interfaces';
 import { SchemasConfigurationComponent } from './schemas-configuration.component';
 import { FIELD_TYPES_UI } from 'src/app/modules/schema-engine/field-type-ui';
 
@@ -34,6 +35,17 @@ describe('SchemasConfigurationComponent', () => {
             dependency: undefined,
             ...overrides,
         };
+    }
+
+    /** enterSubSchema pulls in view and suggestion plumbing that is irrelevant to dirty tracking */
+    function stubDrillPlumbing(component: any): void {
+        component._elRef = { nativeElement: { querySelector: () => null } };
+        component.fieldTypes = [];
+        component.activeCanvasTab = 'fields';
+        for (const name of ['persistSuggestionsForContext', 'restoreOrClearSuggestionsForContext',
+            'autoLoadSuggestionsFor', 'resetArrayDependencyEditor', 'loadParentSchemas']) {
+            component[name] = () => {};
+        }
     }
 
     function createComponent(state: any = {}): any {
@@ -100,6 +112,159 @@ describe('SchemasConfigurationComponent', () => {
         return component;
     }
 
+    describe('field advisory text', () => {
+        it('starts off, opens for typing, and deletes text when turned off', () => {
+            const component = createComponent();
+            component.markDirty = jasmine.createSpy('markDirty');
+            const field = makeField();
+            component.selectedField = field;
+            expect(component.advisoryTextEnabled).toBeFalse();
+            component.toggleAdvisoryText(true);
+            expect(component.advisoryTextEnabled).toBeTrue();
+            expect(field.advisoryText).toBeUndefined();
+            field.advisoryText = 'Guidance';
+            component.toggleAdvisoryText(false);
+            expect(component.advisoryTextEnabled).toBeFalse();
+            expect(Object.hasOwn(field, 'advisoryText')).toBeFalse();
+            expect(component.markDirty).toHaveBeenCalledTimes(2);
+        });
+
+        it('restores the toggle from stored text when selecting another field', () => {
+            const component = createComponent();
+            component.selectedField = makeField({ advisoryText: 'Guidance' });
+            expect(component.advisoryTextEnabled).toBeTrue();
+            component.selectedField = makeField({ advisoryText: '   ' });
+            expect(component.advisoryTextEnabled).toBeFalse();
+            component.selectedField = null;
+            expect(component.advisoryTextEnabled).toBeFalse();
+        });
+
+        it('offers guidance for input types and geographic references', () => {
+            const component = createComponent();
+            for (const type of FIELD_TYPES_UI.filter(type => !['helptext', 'sub-schema', 'autocalculate'].includes(type.key))) {
+                component.selectedField = makeField({
+                    type: type.schemaType || 'string', isRef: !!type.isRef, customType: type.customType || '',
+                });
+                expect(component.selectedFieldSupportsAdvisoryText).withContext(type.key).toBeTrue();
+            }
+        });
+
+        it('hides guidance on excluded fields and ignores attempts to enable it', () => {
+            const component = createComponent();
+            component.markDirty = jasmine.createSpy('markDirty');
+            for (const extra of [{ type: 'null' }, { readOnly: true }, { autocalculate: true },
+                { isRef: true, customType: 'subSchema' }, { name: 'policyId' }, { name: 'ref' }, { name: 'guardianVersion' }]) {
+                component.selectedField = makeField(extra);
+                expect(component.selectedFieldSupportsAdvisoryText).toBeFalse();
+                component.toggleAdvisoryText(true);
+                expect(component.advisoryTextEnabled).toBeFalse();
+            }
+            expect(component.markDirty).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('advisory text when field support changes', () => {
+        for (const key of ['helptext', 'sub-schema']) {
+            it(`clears guidance when switching to ${key} and never restores it on String`, () => {
+                const component = createComponent();
+                component.markDirty = jasmine.createSpy('markDirty');
+                component.fieldTypes = FIELD_TYPES_UI;
+                const field = makeField({ advisoryText: 'Use Project Hub' });
+                component.selectedField = field;
+                component.changeFieldType(FIELD_TYPES_UI.find(type => type.key === key)!);
+                expect(Object.hasOwn(field, 'advisoryText')).toBeFalse();
+                expect(component.advisoryTextEnabled).toBeFalse();
+                expect(component.selectedFieldSupportsAdvisoryText).toBeFalse();
+                component.changeFieldType(FIELD_TYPES_UI.find(type => type.key === 'string')!);
+                expect(field.advisoryText).toBeUndefined();
+                expect(component.advisoryTextEnabled).toBeFalse();
+            });
+        }
+
+        it('clears guidance when choosing a referenced sub-schema', () => {
+            const component = createComponent();
+            component.markDirty = jasmine.createSpy('markDirty');
+            const field = makeField({ advisoryText: 'Use Project Hub' });
+            component.selectedField = field;
+            component.changeSubSchemaRef(makeSchema({ id: 'child', fields: [makeField()] }));
+            expect(Object.hasOwn(field, 'advisoryText')).toBeFalse();
+            expect(component.advisoryTextEnabled).toBeFalse();
+            expect(component.selectedFieldSupportsAdvisoryText).toBeFalse();
+            expect(component.markDirty).toHaveBeenCalled();
+        });
+
+        it('clears guidance on Auto-Calculate and keeps it absent when returning to Required', () => {
+            const component = createComponent();
+            component.markDirty = jasmine.createSpy('markDirty');
+            const field = makeField({ type: 'number', advisoryText: 'Use Project Hub' });
+            component.selectedField = field;
+            component.setFieldRequiredMode('autocalculate');
+            expect(Object.hasOwn(field, 'advisoryText')).toBeFalse();
+            expect(component.advisoryTextEnabled).toBeFalse();
+            expect(component.selectedFieldSupportsAdvisoryText).toBeFalse();
+            component.setFieldRequiredMode('required');
+            expect(field.advisoryText).toBeUndefined();
+            expect(component.advisoryTextEnabled).toBeFalse();
+        });
+
+        it('keeps guidance when changing between supported types and visibility modes', () => {
+            const component = createComponent();
+            component.markDirty = jasmine.createSpy('markDirty');
+            const field = makeField({ advisoryText: 'Use Project Hub' });
+            component.selectedField = field;
+            component.changeFieldType(FIELD_TYPES_UI.find(type => type.key === 'number')!);
+            component.setFieldRequiredMode('hidden');
+            expect(field.advisoryText).toBe('Use Project Hub');
+            expect(component.advisoryTextEnabled).toBeTrue();
+        });
+
+        for (const customType of ['geo', 'sentinel']) {
+            it(`omits ${customType} guidance from all value-editor presets without changing the original`, () => {
+                const component = createComponent();
+                const field = makeField({ type: '#spatial', isRef: true, customType, advisoryText: 'Use Project Hub' });
+                component.selectedField = field;
+                expect(component.refPresetFormFields.map((preset: SchemaField) => preset.name)).toEqual(['default', 'suggest', 'example']);
+                expect(component.refPresetFormFields.every((preset: SchemaField) => preset.advisoryText === undefined)).toBeTrue();
+                expect(field.advisoryText).toBe('Use Project Hub');
+                expect(component.advisoryTextEnabled).toBeTrue();
+            });
+        }
+    });
+
+    describe('removing a condition', () => {
+        it('keeps the branch fields in the schema as ordinary fields', () => {
+            const a: any = { name: 'a', conditionUserOrdered: true };
+            const b: any = { name: 'b', conditionUserOrdered: true };
+            const schema: any = {
+                fields: [a, b],
+                conditions: [{ thenFields: [a], elseFields: [b] }],
+            };
+            const component = createComponent({ selectedSchema: schema });
+            component.markDirty = () => {};
+            component.condThenRefVal = {};
+            component.condElseRefVal = {};
+            component.removeConditionAt(0);
+            expect(schema.conditions).toEqual([]);
+            expect(schema.fields).toEqual([a, b]);
+            expect(a.conditionUserOrdered).toBeFalse();
+            expect(b.conditionUserOrdered).toBeFalse();
+        });
+
+        it('keeps the ordering flag of a field still owned by another condition', () => {
+            const a: any = { name: 'a', conditionUserOrdered: true };
+            const schema: any = {
+                fields: [a],
+                conditions: [{ thenFields: [a] }, { elseFields: [a] }],
+            };
+            const component = createComponent({ selectedSchema: schema });
+            component.markDirty = () => {};
+            component.condThenRefVal = {};
+            component.condElseRefVal = {};
+            component.removeConditionAt(0);
+            expect(a.conditionUserOrdered).toBeTrue();
+        });
+    });
+
     describe('Rich Text preset dialog', () => {
         it('opens the requested preset and routes its value back to the selected field', () => {
             const component = createComponent();
@@ -114,6 +279,45 @@ describe('SchemasConfigurationComponent', () => {
             expect(component.getRichTextPresetValue()).toBe('<p>Changed</p>');
             expect(component.selectedField.default).toBe('<p>Changed</p>');
             expect(component.markDirty).toHaveBeenCalled();
+        });
+
+        it('restores the previous preset value when the dialog is cancelled', () => {
+            const component = createComponent();
+            component.selectedField = makeField({ default: '<p>Default</p>' });
+            component.markDirty = jasmine.createSpy('markDirty');
+
+            component.openRichTextPresetDialog('default');
+            component.setRichTextPresetValue('<p>Changed</p>');
+            component.cancelRichTextPresetDialog();
+
+            expect(component.selectedField.default).toBe('<p>Default</p>');
+            expect(component.richTextPresetTarget).toBeNull();
+        });
+
+        it('restores an absent test value when the dialog is cancelled', () => {
+            const component = createComponent();
+            component.selectedField = makeField();
+            component.markDirty = jasmine.createSpy('markDirty');
+            const before = component.selectedField.examples;
+
+            component.openRichTextPresetDialog('test');
+            component.setRichTextPresetValue('<p>Example</p>');
+            component.cancelRichTextPresetDialog();
+
+            expect(component.selectedField.examples).toEqual(before);
+        });
+
+        it('keeps the preset value on Done and ignores the hide event that follows', () => {
+            const component = createComponent();
+            component.selectedField = makeField({ default: '<p>Default</p>' });
+            component.markDirty = jasmine.createSpy('markDirty');
+
+            component.openRichTextPresetDialog('default');
+            component.setRichTextPresetValue('<p>Changed</p>');
+            component.closeRichTextPresetDialog();
+            component.cancelRichTextPresetDialog();
+
+            expect(component.selectedField.default).toBe('<p>Changed</p>');
         });
 
         it('writes a Rich Text test value through the existing example value flow', () => {
@@ -313,6 +517,103 @@ describe('SchemasConfigurationComponent', () => {
             component.saveAll();
             expect(component.updated.length).toBe(1);
             expect(component.updated[0].fields).toBe(component.drillCurrentFields);
+        });
+
+        it('keeps a drilled sub-schema dirty after deleting every field when the list copy had no fields', () => {
+            const ev = { stopPropagation: () => {} };
+            // the sidebar list carries the sub-schema without its fields
+            const sub: any = makeSchema({ id: 'sub', iri: '#sub' });
+            sub.fields = undefined;
+            const refField = makeField({
+                name: 'ref', type: '#sub', isRef: true,
+                fields: [makeField({ name: 'a' }), makeField({ name: 'b' })],
+            });
+            const root: any = makeSchema({ id: 'root', iri: '#root', fields: [refField] });
+            const component = createComponent({ schemas: [root, sub], selectedSchema: root });
+            stubDrillPlumbing(component);
+            component.snapshotSchema(sub); // list load: baseline of a schema without fields
+
+            component.enterSubSchema(refField, ev);
+            expect(component.drillCurrentFields.length).toBe(2);
+            expect(component.hasUnsavedChanges).toBeFalse();
+
+            component.deleteDrillField(component.drillCurrentFields[0], ev);
+            component.deleteDrillField(component.drillCurrentFields[0], ev);
+            expect(component.drillCurrentFields.length).toBe(0);
+
+            expect(component.hasUnsavedChanges).toBeTrue();
+            component.saveAll();
+            expect(component.updated.length).toBe(1);
+            expect(component.updated[0].id).toBe('sub');
+            expect(component.updated[0].fields.length).toBe(0);
+        });
+
+        it('keeps the drilled edit dirty when the list reloads field-less copies after drill-in', () => {
+            const ev = { stopPropagation: () => {} };
+            const sub: any = makeSchema({ id: 'sub', iri: '#sub' });
+            sub.fields = undefined;
+            const refField = makeField({
+                name: 'ref', type: '#sub', isRef: true,
+                fields: [makeField({ name: 'a' }), makeField({ name: 'b' })],
+            });
+            const root: any = makeSchema({ id: 'root', iri: '#root', fields: [refField] });
+            const component = createComponent({ schemas: [root, sub], selectedSchema: root });
+            stubDrillPlumbing(component);
+            component.snapshotSchema(sub);
+            component.enterSubSchema(refField, ev);
+            component.deleteDrillField(component.drillCurrentFields[0], ev);
+
+            const fresh: any = makeSchema({ id: 'sub', iri: '#sub' });
+            fresh.fields = undefined;
+            component.schemas = [root, fresh];
+            component.snapshotSchema(fresh); // what loadSchemas does for list items
+
+            component.deleteDrillField(component.drillCurrentFields[0], ev);
+            expect(component.drillCurrentFields.length).toBe(0);
+            expect(component.hasUnsavedChanges).toBeTrue();
+        });
+
+        it('keeps removing the last array dependency of a drilled sub-schema detectable after hydration', () => {
+            const ev = { stopPropagation: () => {} };
+            const sub: any = makeSchema({ id: 'sub', iri: '#sub' });
+            sub.fields = undefined;
+            sub.document = undefined;
+            const refField = makeField({
+                name: 'ref', type: '#sub', isRef: true, fields: [makeField({ name: 'a' })],
+            });
+            const root: any = makeSchema({ id: 'root', iri: '#root', fields: [refField] });
+            const component = createComponent({ schemas: [root, sub], selectedSchema: root });
+            stubDrillPlumbing(component);
+            component.arrayDependencyDataVersion = 0;
+            component.getCategory = () => 'policy';
+            const link = { field: ['a'], on: ['b'], kind: 'array' };
+            component.schemaService.getSchemaWithSubSchemas = () => of({
+                schema: {
+                    id: 'sub', _id: 'sub', uuid: 'u-sub', status: 'DRAFT', topicId: 'topic-1', name: 'Sub',
+                    document: {
+                        $id: '#u-sub', title: 'Sub', description: '', type: 'object',
+                        $comment: JSON.stringify({ arrayDependencies: [link] }),
+                        properties: {
+                            a: {
+                                title: 'a', description: 'd', readOnly: false, type: 'string',
+                                $comment: '{"term":"a","@id":"https://www.schema.org/text","orderPosition":0}'
+                            }
+                        },
+                        required: [], additionalProperties: false, $defs: {}
+                    }
+                },
+                subSchemas: [],
+            });
+
+            // the clone baselines at drill-in, then the fetch brings the array dependency
+            component.enterSubSchema(refField, ev);
+            expect(sub.arrayDependencies.length).toBe(1);
+            expect(component.hasUnsavedChanges).toBeFalse();
+
+            sub.arrayDependencies = [];
+            component.markDirty();
+
+            expect(component.hasUnsavedChanges).toBeTrue();
         });
 
         it('drops the sub-schema key when the search does not return it', () => {
@@ -1701,6 +2002,367 @@ describe('SchemasConfigurationComponent', () => {
             return component;
         }
 
+        it('blocks a nested competing declaration and explains the dependent', () => {
+            const component = createLinkComponent([]);
+            const child = makeSchema({ id: 'section', fields: [arrayField('one'), arrayField('two')] });
+            child.arrayDependencies = [link('one', 'two')];
+            component.selectedSchema.fields.push(makeField({
+                name: 'section', type: child.iri, isRef: true, fields: child.fields
+            }));
+            component.schemas.push(child);
+            component.resolveRefSchema = (iri: string) => iri === child.iri ? child : undefined;
+            component.newArrayDependencyOn = 'one';
+            component.newArrayDependencyField = 'section.two';
+            expect(component.canApplyArrayDependency()).toBeFalse();
+            expect(component.arrayDependencyError).toContain('section.two');
+            component.applyArrayDependency();
+            expect(component.arrayDependencies).toEqual([]);
+            component.newArrayDependencyOn = 'section.one';
+            expect(component.canApplyArrayDependency()).toBeFalse();
+        });
+
+        it('computes the relationship error once per state and again after a change', () => {
+            const component = createLinkComponent([]);
+            const child = makeSchema({ id: 'section', fields: [arrayField('one'), arrayField('two')] });
+            child.arrayDependencies = [link('one', 'two')];
+            component.selectedSchema.fields.push(makeField({
+                name: 'section', type: child.iri, isRef: true, fields: child.fields
+            }));
+            component.schemas.push(child);
+            component.resolveRefSchema = (iri: string) => iri === child.iri ? child : undefined;
+            component.newArrayDependencyOn = 'one';
+            component.newArrayDependencyField = 'section.two';
+            const tree = spyOn(component, 'arrayDependencyTree').and.callThrough();
+            expect(component.arrayDependencyError).toContain('section.two');
+            const calls = tree.calls.count();
+            expect(calls).toBeGreaterThan(0);
+            expect(component.arrayDependencyError).toContain('section.two');
+            expect(component.canApplyArrayDependency()).toBeFalse();
+            expect(tree.calls.count()).toBe(calls);
+            component.newArrayDependencyField = 'three';
+            expect(component.arrayDependencyError).toBeNull();
+            expect(tree.calls.count()).toBeGreaterThan(calls);
+            const afterChange = tree.calls.count();
+            component.selectedSchema.arrayDependencies = [link('two', 'three')];
+            expect(component.arrayDependencyError).toBeNull();
+            expect(tree.calls.count()).toBe(afterChange);
+            component.schemaEditVersion++;
+            expect(component.arrayDependencyError).toContain('already linked to "two"');
+        });
+
+        it('allows an unchanged Excel copy but rejects changes to its title', () => {
+            const copy = { on: ['section', 'one'], field: ['section', 'two'], kind: 'array' };
+            const component = createLinkComponent([copy]);
+            const child = makeSchema({ id: 'section', fields: [arrayField('one'), arrayField('two')] });
+            child.arrayDependencies = [link('one', 'two')];
+            component.selectedSchema.fields.push(makeField({
+                name: 'section', type: child.iri, isRef: true, fields: child.fields
+            }));
+            component.schemas.push(child);
+            component.resolveRefSchema = (iri: string) => iri === child.iri ? child : undefined;
+            component.startEditArrayDependency(copy);
+            expect(component.canApplyArrayDependency()).toBeTrue();
+            component.newArrayDependencyTitle = 'a';
+            expect(component.canApplyArrayDependency()).toBeFalse();
+            expect(component.arrayDependencyError).toContain('section.two');
+        });
+
+        it('allows adding and saving in an unrelated schema when another schema has a conflict', () => {
+            const component = createLinkComponent([]);
+            const unrelated = makeSchema({ id: 'legacy' });
+            unrelated.arrayDependencies = [link('oldSource', 'oldTarget'), link('otherSource', 'oldTarget')];
+            component.schemas.push(unrelated);
+            component.newArrayDependencyOn = 'one';
+            component.newArrayDependencyField = 'two';
+            expect(component.arrayDependencyError).toBeNull();
+            expect(component.canApplyArrayDependency()).toBeTrue();
+            component.applyArrayDependency();
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(1);
+            expect(component.updated[0].id).toBe('a');
+        });
+
+        it('blocks a candidate that conflicts with its loaded Parent after prefixing', () => {
+            const component = createLinkComponent([]);
+            const child = component.selectedSchema;
+            const parent = makeSchema({ id: 'parent', fields: [makeField({
+                name: 'section', type: child.iri, isRef: true
+            })] });
+            parent.arrayDependencies = [link('regions', 'section.two')];
+            component.schemas.push(parent);
+            component.resolveRefSchema = (iri: string) => iri === child.iri ? child : undefined;
+            component.newArrayDependencyOn = 'one';
+            component.newArrayDependencyField = 'two';
+            expect(component.canApplyArrayDependency()).toBeFalse();
+            expect(component.arrayDependencyError).toContain('section.two');
+        });
+
+        it('explains a dirty schema conflict once when Save all is clicked from Fields', () => {
+            const component = createLinkComponent([link('one', 'two'), link('three', 'two')]);
+            component.activeCanvasTab = 'fields';
+            component.schemas = [];
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.created.length).toBe(0);
+            expect(component.toasts.length).toBe(1);
+            expect(component.toasts[0].action).toBe('Save all');
+            expect(component.toasts[0].detail).toContain(`"${component.selectedSchema.name}"`);
+            expect(component.toasts[0].detail).toContain('different relationships');
+        });
+
+        it('checks the edited schema instead of its stale sidebar copy when saving', () => {
+            const component = createLinkComponent([]);
+            const stale = makeSchema({ id: 'a' });
+            stale.arrayDependencies = [link('one', 'two'), link('three', 'two')];
+            component.schemas = [stale];
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(1);
+            expect(component.updated[0]).toBe(component.selectedSchema);
+            expect(component.toasts.length).toBe(0);
+        });
+
+        it('still blocks saving a changed child that conflicts with its loaded Parent', () => {
+            const component = createLinkComponent([link('one', 'two')]);
+            const child = component.selectedSchema;
+            const parent = makeSchema({ id: 'parent', fields: [makeField({
+                name: 'section', type: child.iri, isRef: true
+            })] });
+            parent.arrayDependencies = [link('regions', 'section.two')];
+            component.schemas.push(parent);
+            component.resolveRefSchema = (iri: string) => iri === child.iri ? child : undefined;
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.toasts.length).toBe(1);
+            expect(component.toasts[0].detail).toContain(`"${parent.name}"`);
+        });
+
+        it('ignores an unrelated conflict within a loaded Parent when checking a candidate', () => {
+            const component = createLinkComponent([]);
+            const child = component.selectedSchema;
+            const parent = makeSchema({ id: 'parent', fields: [makeField({
+                name: 'section', type: child.iri, isRef: true
+            })] });
+            parent.arrayDependencies = [link('oldSource', 'oldTarget'), link('otherSource', 'oldTarget')];
+            component.schemas.push(parent);
+            component.resolveRefSchema = (iri: string) => iri === child.iri ? child : undefined;
+            component.newArrayDependencyOn = 'one';
+            component.newArrayDependencyField = 'two';
+            expect(component.arrayDependencyError).toBeNull();
+            expect(component.canApplyArrayDependency()).toBeTrue();
+        });
+
+        function sparseReferenceFixture(links: any[] = [link('one', 'two')]): any {
+            const component = createLinkComponent([]);
+            delete component.resolveRefSchema;
+            const document = {
+                $id: '#section', type: 'object', required: [],
+                $comment: JSON.stringify({ arrayDependencies: links }),
+                properties: {
+                    one: { title: 'one', description: 'one', type: 'array', items: { $ref: '#entry' } },
+                    two: { title: 'two', description: 'two', type: 'array', items: { $ref: '#entry' } }
+                },
+                $defs: { '#entry': { $id: '#entry', type: 'object', required: [],
+                    properties: { a: { type: 'string', title: 'a', description: 'a' } } } }
+            };
+            const raw: any = { id: 'section', iri: '#section', name: 'Full Section', document };
+            const full = new Schema(raw);
+            const sidebar = makeSchema({ id: 'section', iri: '#section', fields: full.fields });
+            sidebar.document = undefined;
+            sidebar.arrayDependencies = [];
+            const field = makeField({ name: 'section', type: '#section', isRef: true, fields: full.fields });
+            component.selectedSchema.fields.push(field);
+            component.schemas.push(sidebar);
+            component.selectedField = field;
+            return { component, sidebar, full, raw };
+        }
+
+        it('reads cached full relationships despite a sparse sidebar entry for Add and Save', () => {
+            const { component, sidebar, full } = sparseReferenceFixture();
+            component._subSchemasByIri.set(full.iri, full);
+            expect(component.resolveRefSchema(full.iri)).toBe(sidebar);
+            component.newArrayDependencyOn = 'one';
+            component.newArrayDependencyField = 'section.two';
+            expect(component.canApplyArrayDependency()).toBeFalse();
+            component.selectedSchema.arrayDependencies = [link('one', 'section.two')];
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.arrayDependencyError).toContain('section.two');
+        });
+
+        it('loads relationships for a replaced reference even when its fields already exist', () => {
+            const { component, sidebar, raw } = sparseReferenceFixture();
+            const response = new Subject<any>();
+            component.schemaService.getSchemaWithSubSchemas = () => response;
+            component.selectedSchema.arrayDependencies = [link('one', 'section.two')];
+            component.changeSubSchemaRef(sidebar);
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.arrayDependencyError).toContain('have not loaded');
+            expect(component.toasts.length).toBe(1);
+            expect(component.toasts[0].detail).toContain(`"${sidebar.name}"`);
+            expect(component.toasts[0].detail).toContain('have not loaded');
+            response.next({ schema: raw, subSchemas: [] });
+            expect(sidebar.arrayDependencies).toEqual([link('one', 'two')]);
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.arrayDependencyError).toContain('section.two');
+            response.complete();
+        });
+
+        function droppedSidebarFixture(links: any[]): any {
+            const fixture = sparseReferenceFixture(links);
+            const { component, sidebar } = fixture;
+            component.selectedSchema.fields.pop();
+            component.selectedField = null;
+            sidebar.fields = [];
+            component.sidebarDropIndex = -1;
+            const response = new Subject<any>();
+            let requests = 0;
+            component.schemaService.getSchemaWithSubSchemas = () => { requests++; return response; };
+            return { ...fixture, response, requests: () => requests };
+        }
+
+        it('loads a schema dropped from the sidebar so a schema without links saves after loading', () => {
+            const { component, sidebar, raw, response, requests } = droppedSidebarFixture([]);
+            component.addSchemaField(sidebar);
+            expect(requests()).toBe(1);
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.toasts[0].detail).toContain('have not loaded');
+            response.next({ schema: raw, subSchemas: [] });
+            expect(sidebar.document).toEqual(raw.document);
+            expect(component.selectedSchema.fields[component.selectedSchema.fields.length - 1].fields.length).toBeGreaterThan(0);
+            component.saveAll();
+            expect(component.updated.length).toBe(1);
+            response.complete();
+        });
+
+        it('checks the links of a dropped schema once it has loaded', () => {
+            const { component, sidebar, raw, response } = droppedSidebarFixture([link('one', 'two')]);
+            component.addSchemaField(sidebar);
+            const name = component.selectedSchema.fields[component.selectedSchema.fields.length - 1].name;
+            component.selectedSchema.arrayDependencies = [link('one', `${name}.two`)];
+            response.next({ schema: raw, subSchemas: [] });
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.toasts[component.toasts.length - 1].detail).toContain('different relationships');
+            response.complete();
+        });
+
+        it('loads a schema dropped inside an entered sub-schema', () => {
+            const { component, sidebar, raw, response, requests } = droppedSidebarFixture([link('one', 'two')]);
+            component.drillStack = [{ schemaIri: '#host', fields: [] }];
+            component.addDrillSchemaField(sidebar);
+            expect(requests()).toBe(1);
+            response.next({ schema: raw, subSchemas: [] });
+            expect(sidebar.arrayDependencies).toEqual([link('one', 'two')]);
+            expect(component.drillCurrentFields[0].fields.length).toBeGreaterThan(0);
+            response.complete();
+        });
+
+        it('does not load again when a dropped schema already has its document', () => {
+            const { component, sidebar, raw, requests } = droppedSidebarFixture([]);
+            sidebar.document = raw.document;
+            component.addSchemaField(sidebar);
+            expect(requests()).toBe(0);
+        });
+
+        it('allows a valid replacement after full loading and preserves its existing field edits', () => {
+            const { component, sidebar, raw } = sparseReferenceFixture([]);
+            const fields = sidebar.fields;
+            fields[0].description = 'Unsaved field description';
+            component.schemaService.getSchemaWithSubSchemas = () => of({ schema: raw, subSchemas: [] });
+            component.changeSubSchemaRef(sidebar);
+            expect(sidebar.fields).toBe(fields);
+            expect(sidebar.fields[0].description).toBe('Unsaved field description');
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(1);
+        });
+
+        for (const serialized of [false, true]) {
+            it(`keeps only stored definitions when hydrating from a whole-topic response (serialized: ${serialized})`, () => {
+                const { component, sidebar, raw } = sparseReferenceFixture([]);
+                const stored = JSON.parse(JSON.stringify(raw.document));
+                const unrelated = Array.from({ length: 5 }, (_, index) => ({
+                    id: `other-${index}`, iri: `#other-${index}`, name: 'QA Section',
+                    document: { $id: `#other-${index}`, type: 'object', properties: {},
+                        $defs: { '#unused': { type: 'object', properties: {} } } }
+                }));
+                const data = { schema: { ...raw, document: serialized ? JSON.stringify(stored) : raw.document },
+                    subSchemas: [{ id: 'entry', iri: '#entry', name: 'Entry', document: stored.$defs['#entry'] },
+                        ...unrelated] };
+                component.schemaService.getSchemaWithSubSchemas = () => of(data);
+                component.changeSubSchemaRef(sidebar);
+                expect(sidebar.document).toEqual(stored);
+                expect(Object.keys(sidebar.document.$defs)).toEqual(['#entry']);
+                for (const item of unrelated) {
+                    expect(component._subSchemasByIri.has(item.iri)).toBeFalse();
+                    expect(component.resolveRefSchema(item.iri)).toBeUndefined();
+                }
+                expect(component._subSchemasByIri.get('#entry').document).toEqual(stored.$defs['#entry']);
+                delete component._buildRefs;
+                const definitions = component._buildRefs(component.selectedSchema);
+                expect(Object.keys(definitions).sort()).toEqual(['#entry', '#section']);
+                expect(definitions['#section'].$defs).toBeUndefined();
+                expect(raw.document).toEqual(stored);
+            });
+        }
+
+        it('caches nested stored definitions without replacing previously loaded schemas', () => {
+            const { component, sidebar, raw } = sparseReferenceFixture([]);
+            const leaf = { $id: '#leaf', type: 'object', required: [],
+                properties: { value: { type: 'string', title: 'value', description: 'value' } } };
+            raw.document.$defs['#entry'].properties.nested = { $ref: '#leaf' };
+            raw.document.$defs['#leaf'] = leaf;
+            const existing = makeSchema({ id: 'existing', iri: '#existing', document: leaf });
+            component._subSchemasByIri.set('#existing', existing);
+            component.schemaService.getSchemaWithSubSchemas = () => of({ schema: raw, subSchemas: [
+                { id: 'entry', iri: '#entry', document: raw.document.$defs['#entry'] },
+                { id: 'leaf', iri: '#leaf', document: leaf },
+                { id: 'existing', iri: '#existing', document: raw.document },
+                { id: 'unrelated', iri: '#unrelated', document: leaf }
+            ] });
+            component.changeSubSchemaRef(sidebar);
+            expect(Array.from(component._subSchemasByIri.keys()).sort())
+                .toEqual(['#entry', '#existing', '#leaf', '#section']);
+            expect(component._subSchemasByIri.get('#existing')).toBe(existing);
+            expect(component._subSchemasByIri.get('#leaf').document).toEqual(leaf);
+            expect(component._subSchemasByIri.get('#entry').fields.find((field: SchemaField) => field.name === 'nested')
+                .fields.some((field: SchemaField) => field.name === 'value')).toBeTrue();
+        });
+
+        it('keeps Save blocked if replacement loading fails', () => {
+            const { component, sidebar } = sparseReferenceFixture();
+            component.schemaService.getSchemaWithSubSchemas = () => throwError(() => new Error('load failed'));
+            component.changeSubSchemaRef(sidebar);
+            expect(component.toasts.length).toBe(1);
+            component.dirtySchemaIds.add('a');
+            component.saveAll();
+            expect(component.updated.length).toBe(0);
+            expect(component.arrayDependencyError).toContain('have not loaded');
+            expect(component.toasts.length).toBe(2);
+            expect(component.toasts[1].detail).toContain('have not loaded');
+        });
+
+        it('prefers loaded sidebar relationship edits over the full cache', () => {
+            const { component, sidebar, full } = sparseReferenceFixture();
+            component._subSchemasByIri.set(full.iri, full);
+            sidebar.document = full.document;
+            sidebar.arrayDependencies = [];
+            component.newArrayDependencyOn = 'one';
+            component.newArrayDependencyField = 'section.two';
+            expect(component.canApplyArrayDependency()).toBeTrue();
+        });
+
         it('fills the form from the saved link and copies its pairs by value', () => {
             const saved = link('one', 'two', {
                 title: ['a'],
@@ -2055,6 +2717,485 @@ describe('SchemasConfigurationComponent', () => {
             component.selectedField = refField('#id-1');
 
             expect(optionIris(component)).toEqual(['#id-1', '#id-2']);
+        });
+    });
+
+    describe('field formulas', () => {
+        function withFormulas(component: any, pending: boolean): any[] {
+            const calls: any[] = [];
+            component.fieldFormulas = {
+                hasPending: pending,
+                save: () => { calls.push(component.updated.length); return of(true); },
+            };
+            return calls;
+        }
+
+        it('counts pending formula assignments as unsaved changes', () => {
+            const schema: any = makeSchema({ id: 'a' });
+            const component = createComponent({ schemas: [schema], selectedSchema: schema });
+            withFormulas(component, true);
+
+            expect(component.hasUnsavedChanges).toBeTrue();
+        });
+
+        it('saves the formula assignments alone when no schema is dirty', () => {
+            const schema: any = makeSchema({ id: 'a' });
+            const component = createComponent({ schemas: [schema], selectedSchema: schema });
+            const calls = withFormulas(component, true);
+
+            component.saveAll();
+
+            expect(calls).toEqual([0]);
+            expect(component.isSaving).toBeFalse();
+        });
+
+        it('saves the formula assignments after the schemas', () => {
+            const schema: any = makeSchema({ id: 'a', fields: [makeField()] });
+            const component = createComponent({ schemas: [schema], selectedSchema: schema, dirtyIds: ['a'] });
+            const calls = withFormulas(component, true);
+
+            component.saveAll();
+
+            expect(calls).toEqual([1]);
+        });
+
+        it('keeps the formula assignments when the schema save fails', () => {
+            const schema: any = makeSchema({ id: 'a', fields: [makeField()] });
+            const component = createComponent({ schemas: [schema], selectedSchema: schema, dirtyIds: ['a'] });
+            component.schemaService.update = () => throwError(() => ({ error: { message: 'rejected' } }));
+            const calls = withFormulas(component, true);
+
+            component.saveAll();
+
+            expect(calls).toEqual([]);
+        });
+
+        it('does not combine formula assignments with a new schema version', () => {
+            const schema: any = makeSchema({ id: 'a', status: 'PUBLISHED', fields: [makeField()] });
+            const component = createComponent({ schemas: [schema], selectedSchema: schema, dirtyIds: ['a'] });
+            component.schemaService.newVersion = () => { throw new Error('should not be called'); };
+            const calls = withFormulas(component, true);
+
+            component.saveAll();
+
+            expect(calls).toEqual([]);
+            expect(component.toasts.length).toBe(1);
+        });
+    });
+
+    describe('a sidebar list copy arriving after the full schema load', () => {
+
+        function makeFullSchema(id: string): any {
+            return new Schema({
+                id, _id: id, uuid: `u-${id}`, status: 'DRAFT', topicId: 'topic-1', name: `Schema ${id}`,
+                document: {
+                    $id: `#u-${id}`, title: `Schema ${id}`, description: '', type: 'object',
+                    properties: {
+                        field_1: {
+                            title: 'field_1', description: 'd', readOnly: false, type: 'string',
+                            $comment: '{"term":"field_1","@id":"https://www.schema.org/text","orderPosition":0}'
+                        }
+                    },
+                    required: [], additionalProperties: false, $defs: {}
+                }
+            } as any);
+        }
+
+        function listItem(id: string): any {
+            return { id, _id: id, uuid: `u-${id}`, status: 'DRAFT', topicId: 'topic-1', name: `Schema ${id}` };
+        }
+
+        function loadList(component: any, ids: string[]): void {
+            component.schemaService.getSchemasByPage = () => of({
+                body: ids.map(listItem),
+                headers: { get: () => String(ids.length) }
+            });
+            component.loadSchemas('topic-1');
+        }
+
+        it('does not replace the saved baseline of the open schema', () => {
+            const full = makeFullSchema('a');
+            const component = createComponent({ schemas: [full], selectedSchema: full });
+            component.loadedSchemaId = 'a';
+            component.snapshotSchema(full);
+            const baseline = component.savedSignatures.get('a');
+
+            loadList(component, ['a']);
+
+            expect(component.savedSignatures.get('a')).toBe(baseline);
+            component.deleteField(full.fields[0], { stopPropagation: () => {} });
+            expect(full.fields.length).toBe(0);
+            expect(component.hasUnsavedChanges).toBeTrue();
+        });
+
+        it('records no baseline for list copies that carry no fields, and keeps an existing one', () => {
+            const full = makeFullSchema('a');
+            const component = createComponent({ schemas: [full], selectedSchema: full });
+            component.loadedSchemaId = 'a';
+            component.snapshotSchema(full);
+            // a baseline taken once the fields were loaded (e.g. on drill-in)
+            component.savedSignatures.set('c', 'loaded-baseline');
+
+            loadList(component, ['a', 'b', 'c']);
+
+            // "no fields" would be a fabricated saved state: deleting every field would match it
+            expect(component.savedSignatures.has('b')).toBeFalse();
+            expect(component.savedSignatures.get('c')).toBe('loaded-baseline');
+        });
+    });
+
+    describe('preview layout', () => {
+        it('keeps the section rail for the schema itself', () => {
+            const component = createComponent();
+            expect(component.previewLayout).toBe('sections');
+        });
+
+        it('drops the section rail for a drilled-in sub-schema', () => {
+            const component = createComponent();
+            component.drillStack = [{ fieldName: 'child', schemaIri: '#child', fields: [] }];
+            expect(component.previewLayout).toBe('single');
+        });
+    });
+
+    describe('field paths for the preview', () => {
+        it('gives new and renamed fields the path the formula links use', () => {
+            const added: any = makeField({ name: 'field_2' });
+            const nested: any = makeField({ name: 'inner' });
+            const group: any = makeField({ name: 'group', fields: [nested] });
+            const component = createComponent();
+
+            component.refreshFieldPaths([added, group], '', '#root/');
+
+            expect(added.path).toBe('field_2');
+            expect(added.fullPath).toBe('#root/field_2');
+            expect(nested.path).toBe('group.inner');
+            expect(nested.fullPath).toBe('#root/group.inner');
+
+            added.name = 'renamed';
+            component.refreshFieldPaths([added, group], '', '#root/');
+            expect(added.fullPath).toBe('#root/renamed');
+        });
+
+        it('sets them for the submitter view too, which builds no preset', () => {
+            const field: any = makeField({ name: 'field_1' });
+            const schema: any = makeSchema({ id: 'a', iri: '#root', fields: [field] });
+            const component = createComponent({ schemas: [schema], selectedSchema: schema });
+            component.rebuildPreview = SchemasConfigurationComponent.prototype['rebuildPreview'];
+            component.previewPill = 'submitter';
+
+            component.rebuildPreview();
+
+            expect(field.fullPath).toBe('#root/field_1');
+        });
+    });
+
+    describe('Private flag on entity change', () => {
+        function schemaWithPrivateFields(entity: string): any {
+            const child = makeField({ name: 'child' });
+            child.isPrivate = true;
+            const parent = makeField({ name: 'parent' });
+            parent.isPrivate = true;
+            parent.fields = [child];
+            const inCondition = makeField({ name: 'cond' });
+            inCondition.isPrivate = true;
+            const schema = makeSchema({ entity, fields: [parent] });
+            schema.conditions = [{ thenFields: [inCondition], elseFields: [] }];
+            return schema;
+        }
+
+        it('clears the flag of the top-level and condition fields when the schema leaves Encrypted VC', () => {
+            const component = createComponent();
+            component.markDirty = () => {};
+            const schema = schemaWithPrivateFields('EVC');
+            schema.entity = 'VC';
+            component.onSchemaEntityChange(schema);
+            expect(schema.fields[0].isPrivate).toBeUndefined();
+            expect(schema.conditions[0].thenFields[0].isPrivate).toBeUndefined();
+        });
+
+        it('leaves the fields shared with a referenced sub-schema untouched', () => {
+            const component = createComponent();
+            component.markDirty = () => {};
+            const schema = schemaWithPrivateFields('EVC');
+            schema.entity = 'VC';
+            component.onSchemaEntityChange(schema);
+            expect(schema.fields[0].fields[0].isPrivate).toBe(true);
+        });
+
+        it('offers Private for top-level fields of an Encrypted VC schema only', () => {
+            const schema = makeSchema({ entity: 'EVC' });
+            const component = createComponent({ selectedSchema: schema });
+            component.selectedField = makeField();
+            expect(component.selectedFieldCanBePrivate).toBe(true);
+
+            component.drillStack = [{ fieldName: 'sub', schemaIri: '#sub', fields: [] }];
+            expect(component.selectedFieldCanBePrivate).toBe(false);
+
+            component.drillStack = [];
+            schema.entity = 'VC';
+            expect(component.selectedFieldCanBePrivate).toBe(false);
+        });
+
+        it('keeps the flags while the schema stays Encrypted VC', () => {
+            const component = createComponent();
+            component.markDirty = () => {};
+            const schema = schemaWithPrivateFields('EVC');
+            component.onSchemaEntityChange(schema);
+            expect(schema.fields[0].isPrivate).toBe(true);
+        });
+    });
+
+    describe('Parameter label', () => {
+        function unused(typeKey: string, extra: any = {}): boolean {
+            const component = createComponent();
+            component.selectedField = makeField(extra);
+            component.getFieldCurrentType = () => typeKey;
+            Object.defineProperty(component, 'selectedFieldHasGeoAncestors', { value: false });
+            return component.selectedFieldParameterUnused;
+        }
+
+        it('is unused for plain types', () => {
+            expect(unused('number')).toBe(true);
+            expect(unused('boolean')).toBe(true);
+        });
+
+        it('is used by types whose value lives in a labelled control', () => {
+            for (const key of ['string', 'prefix', 'postfix', 'table', 'helptext', 'sub-schema']) {
+                expect(unused(key)).toBe(false);
+            }
+            expect(unused('number', { autocalculate: true })).toBe(false);
+            expect(unused('number', { dependency: { on: 'x', kind: 'geo' } })).toBe(false);
+            expect(unused('string', { customType: 'enum' })).toBe(false);
+        });
+    });
+
+    describe('Auto Calculate validation', () => {
+        it('reports an empty expression and clears once it is set', () => {
+            const component = createComponent();
+            component.getFieldCurrentType = () => 'number';
+            const field = makeField({ autocalculate: true });
+            field.expression = '  ';
+            expect(component.getFieldErrors(field, [field])).toContain('Auto Calculate requires an expression');
+            field.expression = 'a + b';
+            expect(component.getFieldErrors(field, [field])).not.toContain('Auto Calculate requires an expression');
+        });
+    });
+
+    describe('Auto Calculate on geographic types', () => {
+        function component(typeKey: string): any {
+            const c = createComponent();
+            c.selectedField = makeField();
+            c.getFieldCurrentType = () => typeKey;
+            c.markDirty = () => {};
+            c.requiredModeOptions = [
+                { label: 'None', value: 'none' },
+                { label: 'Hidden', value: 'hidden' },
+                { label: 'Required', value: 'required' },
+                { label: 'Auto Calculate', value: 'autocalculate' },
+            ];
+            return c;
+        }
+
+        it('hides the option for every type that uses Parameter, and for geographic types', () => {
+            for (const key of ['enum', 'table', 'helptext', 'prefix', 'postfix', 'sub-schema', 'continent', 'country', 'state', 'image', 'file', 'hederaAccount']) {
+                const values = component(key).selectedFieldRequiredModes.map((o: any) => o.value);
+                expect(values).not.toContain('autocalculate');
+            }
+        });
+
+        it('keeps the option for number', () => {
+            const values = component('number').selectedFieldRequiredModes.map((o: any) => o.value);
+            expect(values).toContain('autocalculate');
+        });
+
+        it('reports the type error, not the pattern error, for image, file and Hedera account', () => {
+            for (const key of ['image', 'file', 'hederaAccount']) {
+                const field = makeField({ autocalculate: true });
+                field.expression = 'a';
+                const errors = component(key).getFieldErrors(field, [field]);
+                expect(errors).toContain('Auto Calculate is not available for this type');
+                expect(errors).not.toContain('Auto Calculate cannot be used with a pattern');
+            }
+        });
+
+        it('reports an error for an already auto calculated geographic field', () => {
+            const c = component('country');
+            const field = makeField({ autocalculate: true });
+            field.expression = 'a';
+            expect(c.getFieldErrors(field, [field])).toContain('Auto Calculate is not available for this type');
+        });
+    });
+
+    describe('Auto Calculate and multiple answers', () => {
+        it('clears the array flag when Auto Calculate is selected', () => {
+            const component = createComponent();
+            component.markDirty = () => {};
+            component.selectedField = makeField({ isArray: true });
+            component.setFieldRequiredMode('autocalculate');
+            expect(component.selectedField.isArray).toBe(false);
+        });
+
+        it('reports an already saved auto calculated array field', () => {
+            const component = createComponent();
+            component.getFieldCurrentType = () => 'number';
+            const field = makeField({ autocalculate: true, isArray: true });
+            field.expression = 'a';
+            expect(component.getFieldErrors(field, [field])).toContain('Auto Calculate cannot allow multiple answers');
+        });
+    });
+
+    describe('Auto Calculate with a pattern and Help Text rules', () => {
+        function component(typeKey: string): any {
+            const c = createComponent();
+            c.getFieldCurrentType = () => typeKey;
+            c.markDirty = () => {};
+            c.requiredModeOptions = [
+                { label: 'None', value: 'none' },
+                { label: 'Hidden', value: 'hidden' },
+                { label: 'Required', value: 'required' },
+                { label: 'Auto Calculate', value: 'autocalculate' },
+            ];
+            return c;
+        }
+
+        it('reports Auto Calculate on a string with a pattern', () => {
+            const c = component('string');
+            const field = makeField({ autocalculate: true });
+            field.expression = 'a';
+            field.pattern = '^[0-9]+$';
+            expect(c.getFieldErrors(field, [field])).toContain('Auto Calculate cannot be used with a pattern');
+        });
+
+        it('hides Required / Visibility for Help Text', () => {
+            const c = component('helptext');
+            c.selectedField = makeField();
+            expect(c.selectedFieldShowsRequiredModes).toBe(false);
+        });
+
+        it('keeps Required / Visibility visible for a Help Text saved as required, without Required as a choice', () => {
+            const c = component('helptext');
+            c.selectedField = makeField({ required: true });
+            expect(c.selectedFieldShowsRequiredModes).toBe(true);
+            expect(c.selectedFieldRequiredModes.map((o: any) => o.value)).toEqual(['none', 'hidden']);
+            expect(c.getFieldErrors(c.selectedField, [c.selectedField])).toContain('Help Text cannot be required');
+        });
+
+        it('resets required, hidden and auto calculate when a field becomes Help Text', () => {
+            const c = component('string');
+            const field = makeField({ required: true, hidden: true, autocalculate: true });
+            field.expression = 'a';
+            c.selectedField = field;
+            const ft = FIELD_TYPES_UI.find((t: any) => t.key === 'helptext') as any;
+            if (ft) {
+                c.fieldTypes = FIELD_TYPES_UI;
+                c._rebuildRefPreset = () => {};
+                c.changeFieldType(ft);
+                expect(field.required).toBe(false);
+                expect(field.hidden).toBe(false);
+                expect(field.autocalculate).toBe(false);
+            }
+        });
+    });
+
+    describe('drop position while dragging fields', () => {
+        let host: HTMLElement | null = null;
+
+        function cardHtml(name: string, system = false): string {
+            const cls = system ? 'sc-field-card sc-field-card--system' : 'sc-field-card';
+            return `<div class="${cls}" style="height:40px;margin:0;padding:0">${name}</div>`;
+        }
+
+        function mount(html: string): HTMLElement {
+            host = document.createElement('div');
+            host.style.cssText = 'position:fixed;top:0;left:0;width:400px;margin:0;padding:0';
+            host.innerHTML = html;
+            document.body.appendChild(host);
+            return host;
+        }
+
+        afterEach(() => {
+            host?.remove();
+            host = null;
+        });
+
+        function drilledComponent(fields: any[]): any {
+            const c = createComponent();
+            c.drillStack = [{ schemaIri: '#sub', fields }];
+            const cards = fields.map((f: any) => cardHtml(f.name)).join('');
+            c._elRef = { nativeElement: mount(
+                `<div class="sc-editor" style="display:none"><div class="sc-editor-body">${cards}</div></div>` +
+                `<div class="sc-drill-content">${cards}</div>`
+            ) };
+            return c;
+        }
+
+        function topLevelComponent(fields: any[]): any {
+            const c = createComponent({ selectedSchema: makeSchema({ id: 's1', fields }) });
+            const cards = cardHtml('system', true) + fields.map((f: any) => cardHtml(f.name)).join('');
+            c._elRef = { nativeElement: mount(`<div class="sc-editor-body">${cards}</div>`) };
+            return c;
+        }
+
+        function names(fields: any[]): string[] {
+            return fields.map((f: any) => f.name);
+        }
+
+        it('shows the palette drop line between sub-schema fields', () => {
+            const c = drilledComponent([makeField({ name: 'a' }), makeField({ name: 'b' }), makeField({ name: 'c' })]);
+            c.updateSidebarDropIndicator(45);
+            expect(c.sidebarDropIndex).toBe(1);
+            expect(c.sidebarDropPos).toBe('top');
+        });
+
+        it('moves a sub-schema field to the slot it is dropped on, not to the end', () => {
+            const fields = [makeField({ name: 'a' }), makeField({ name: 'b' }), makeField({ name: 'c' }), makeField({ name: 'd' })];
+            const c = drilledComponent(fields);
+            c.isTemplateFieldLocked = () => false;
+            c.markDirty = () => {};
+            c.reorderField = fields[0];
+            c._dragFields = c.drillCurrentFields;
+            c.isDragActive = true;
+            c.updateDropIndicator(10, 100);
+            expect(c.reorderOverIndex).toBe(2);
+            expect(c.reorderAtEnd).toBe(false);
+            c.onDocMouseUp({});
+            expect(names(fields)).toEqual(['b', 'c', 'a', 'd']);
+        });
+
+        it('keeps the top-level palette drop line and skips system fields', () => {
+            const c = topLevelComponent([makeField({ name: 'a' }), makeField({ name: 'b' }), makeField({ name: 'c' })]);
+            c.updateSidebarDropIndicator(90);
+            expect(c.sidebarDropIndex).toBe(1);
+            expect(c.sidebarDropPos).toBe('top');
+        });
+
+        it('keeps top-level card reordering', () => {
+            const fields = [makeField({ name: 'a' }), makeField({ name: 'b' }), makeField({ name: 'c' }), makeField({ name: 'd' })];
+            const c = topLevelComponent(fields);
+            c.isTemplateFieldLocked = () => false;
+            c.markDirty = () => {};
+            c.reorderField = fields[0];
+            c._dragFields = c.selectedSchema.fields;
+            c.isDragActive = true;
+            c.updateDropIndicator(10, 130);
+            expect(c.reorderOverIndex).toBe(2);
+            c.onDocMouseUp({});
+            expect(names(fields)).toEqual(['b', 'c', 'a', 'd']);
+        });
+
+        it('does not start text selection or a move when pressing a locked field', () => {
+            const fields = [makeField({ name: 'a' }), makeField({ name: 'b' })];
+            const c = drilledComponent(fields);
+            c.isTemplateFieldLocked = () => true;
+            const card = c._elRef.nativeElement.querySelector('.sc-drill-content .sc-field-card');
+            const event = new MouseEvent('mousedown', { cancelable: true });
+            Object.defineProperty(event, 'target', { value: card });
+            Object.defineProperty(event, 'currentTarget', { value: card });
+            c.onCardMouseDown(event, fields[0], c.drillCurrentFields);
+            expect(event.defaultPrevented).toBe(true);
+            expect(c.reorderField).toBeFalsy();
+            expect(c._mouseMoveListener).toBeFalsy();
+            expect(document.body.style.userSelect).toBe('');
         });
     });
 });

@@ -36,12 +36,13 @@ describe('Table construction', () => {
         assert.isFalse(header.required);
     });
 
-    it('schema headers include name/description/type/tool/tool-id/iwa-version', () => {
+    it('schema headers include name/description/type/version/tool/tool-id/iwa-version', () => {
         const t = new Table({ c: 1, r: 1 });
         const titles = Array.from(t.schemaHeaders).map(h => h.title);
         assert.include(titles, Dictionary.SCHEMA_NAME);
         assert.include(titles, Dictionary.SCHEMA_DESCRIPTION);
         assert.include(titles, Dictionary.SCHEMA_TYPE);
+        assert.include(titles, Dictionary.SCHEMA_VERSION);
         assert.include(titles, Dictionary.SCHEMA_TOOL);
         assert.include(titles, Dictionary.SCHEMA_TOOL_ID);
         assert.include(titles, Dictionary.IWA_VERSION);
@@ -90,19 +91,29 @@ describe('Table.setDefault with tool=true', () => {
         assert.equal(t.getRow(Dictionary.SCHEMA_NAME), 5);
         assert.equal(t.getRow(Dictionary.SCHEMA_DESCRIPTION), 6);
         assert.equal(t.getRow(Dictionary.SCHEMA_TYPE), 7);
-        assert.equal(t.getRow(Dictionary.IWA_VERSION), 8);
-        assert.equal(t.getRow(Dictionary.SCHEMA_TOOL), 9);
-        assert.equal(t.getRow(Dictionary.SCHEMA_TOOL_ID), 10);
+        assert.equal(t.getRow(Dictionary.SCHEMA_VERSION), 8);
+        assert.equal(t.getRow(Dictionary.IWA_VERSION), 9);
+        assert.equal(t.getRow(Dictionary.SCHEMA_TOOL), 10);
+        assert.equal(t.getRow(Dictionary.SCHEMA_TOOL_ID), 11);
     });
 
-    it('places field headers on sequential columns from start', () => {
-        assert.equal(t.getCol(Dictionary.REQUIRED_FIELD), 2);
-        assert.equal(t.getCol(Dictionary.FIELD_TYPE), 3);
-        assert.equal(t.getCol(Dictionary.PARAMETER), 4);
+    it('places field headers on sequential columns in the schema editor order', () => {
+        const order = [
+            Dictionary.KEY, Dictionary.QUESTION, Dictionary.FIELD_TYPE, Dictionary.REQUIRED_FIELD,
+            Dictionary.VISIBILITY, Dictionary.PARAMETER, Dictionary.ALLOW_MULTIPLE_ANSWERS,
+            Dictionary.UPDATABLE, Dictionary.PRIVATE, Dictionary.DEFAULT, Dictionary.SUGGEST,
+            Dictionary.ANSWER, Dictionary.IWA_PROPERTY
+        ];
+        order.forEach((name, i) => assert.equal(t.getCol(name), 2 + i, name));
     });
 
-    it('places IWA Property after Key, the last field column', () => {
-        assert.equal(t.getCol(Dictionary.IWA_PROPERTY), t.getCol(Dictionary.KEY) + 1);
+    it('writes the header cells in the same order as the columns', () => {
+        const columns = Array.from(t.fieldHeaders).map(h => h.column);
+        assert.deepEqual(columns, [...columns].sort((x, y) => x - y));
+    });
+
+    it('still resolves the legacy "Field Type" header to the Type column', () => {
+        assert.isTrue(t.isFieldHeader('Field Type'));
     });
 
     it('hasCol returns true for placed field headers', () => {

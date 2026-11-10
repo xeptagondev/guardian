@@ -1,8 +1,15 @@
 import { Singleton } from '../helpers/decorators/singleton.js';
 import { ApplicationStates, AuthEvents, GenerateUUIDv4, IOwner, MessageAPI, UserRole } from '@guardian/interfaces';
-import { AuthenticatedRequest, IAuthUser, NatsService, ProviderAuthUser } from '@guardian/common';
+import { AuthenticatedRequest, IAuthUser, ProviderAuthUser } from '@guardian/common/interfaces/auth.interface';
+import { NatsService } from '@guardian/common/mq/nats-service';
 import { Injectable } from '@nestjs/common';
 import { AccountsSessionResponseDTO, RoleDTO } from '#middlewares';
+
+/**
+ * Upper bound for the auth service to answer a token lookup. Without it a lost reply leaves the
+ * request behind the auth guard open forever; with it the guard answers 401 and the client can retry.
+ */
+export const USER_BY_TOKEN_TIMEOUT_MS = 30 * 1000;
 
 /**
  * Items and count
@@ -158,7 +165,7 @@ export class Users extends NatsService {
      * @param token
      */
     public async getUserByToken(token: string) {
-        return await this.sendMessage(AuthEvents.GET_USER_BY_TOKEN, { token });
+        return await this.sendMessageWithTimeout(AuthEvents.GET_USER_BY_TOKEN, USER_BY_TOKEN_TIMEOUT_MS, { token });
     }
 
     /**

@@ -1,5 +1,6 @@
+import { RequestDocumentFormComponent } from '../../policy-engine/policy-viewer/blocks/request-document-block/form/request-document-form.component';
 import { UntypedFormGroup } from '@angular/forms';
-import { Schema } from '@guardian/interfaces';
+import { ISchemaDocument, Schema, SchemaDataTypes } from '@guardian/interfaces';
 import { FieldForm, IFieldControl, IFieldIndexControl } from './field-form';
 
 const link = {
@@ -496,5 +497,387 @@ describe('FieldForm — conditions that cannot be reached', () => {
         expect(visibleNames(form)).toEqual(['A', 'Y']);
         answer(form, 'A', '7');
         expect(visibleNames(form)).toEqual(['A', 'X']);
+    });
+});
+
+describe('FieldForm — required fields from a list', () => {
+    const numberField = (name: string): ISchemaDocument => ({ type: SchemaDataTypes.number, title: name, description: name });
+
+    const calcDocument: ISchemaDocument = {
+        $id: '#calc&1.0.0',
+        $comment: JSON.stringify({ '@id': 'ctx:#calc&1.0.0', term: 'calc&1.0.0' }),
+        title: 'Calc',
+        description: 'Calc',
+        type: SchemaDataTypes.object,
+        properties: {
+            amount: numberField('amount'),
+            rate: numberField('rate'),
+            note: { type: SchemaDataTypes.string, title: 'note', description: 'note' },
+            location: { $ref: '#loc' },
+        },
+        required: ['amount', 'rate', 'note', 'location'],
+        $defs: {
+            '#loc': {
+                $id: '#loc',
+                title: 'loc',
+                description: 'loc',
+                type: SchemaDataTypes.object,
+                properties: { lat: numberField('lat'), lon: numberField('lon') },
+                required: ['lat', 'lon'],
+            },
+        },
+    };
+
+    const buildCalcForm = (requiredFields?: string[] | null): FieldForm => {
+        const schema = new Schema({ iri: '#calc&1.0.0', document: calcDocument });
+        const form = new FieldForm(new UntypedFormGroup({}));
+        form.setData(requiredFields === undefined ? { schema } : { schema, requiredFields });
+        form.build();
+        return form;
+    };
+
+    const isRequiredEmpty = (item: IFieldControl<any>): boolean => !!item.control?.errors?.['required'];
+
+    it('keeps the schema rule without a list', () => {
+        const form = buildCalcForm();
+        expect(controlOf(form, 'amount').required).toBeTrue();
+        expect(controlOf(form, 'rate').required).toBeTrue();
+        expect(controlOf(form, 'note').required).toBeTrue();
+        expect(isRequiredEmpty(controlOf(form, 'note'))).toBeTrue();
+    });
+
+    it('keeps the schema rule when the list is null', () => {
+        const form = buildCalcForm(null);
+        expect(controlOf(form, 'rate').required).toBeTrue();
+    });
+
+    it('requires only the listed fields', () => {
+        const form = buildCalcForm(['amount']);
+        expect(controlOf(form, 'amount').required).toBeTrue();
+        expect(isRequiredEmpty(controlOf(form, 'amount'))).toBeTrue();
+        expect(controlOf(form, 'rate').required).toBeFalse();
+        expect(isRequiredEmpty(controlOf(form, 'rate'))).toBeFalse();
+        expect(controlOf(form, 'note').required).toBeFalse();
+        expect(isRequiredEmpty(controlOf(form, 'note'))).toBeFalse();
+    });
+
+    it('opens a sub-schema that holds a listed field and requires only that field inside it', () => {
+        const form = buildCalcForm(['location.lat']);
+        const location = controlOf(form, 'location');
+        expect(location.required).toBeTrue();
+        expect(location.displayRequired).toBeTrue();
+        const inner: FieldForm = location.model;
+        expect(controlOf(inner, 'lat').required).toBeTrue();
+        expect(isRequiredEmpty(controlOf(inner, 'lat'))).toBeTrue();
+        expect(controlOf(inner, 'lon').required).toBeFalse();
+    });
+
+    it('keeps a sub-schema that holds no listed field optional but creates it as an ordinary form does', () => {
+        const form = buildCalcForm(['amount']);
+        const location = controlOf(form, 'location');
+        expect(location.required).toBeFalse();
+        expect(location.displayRequired).toBeFalse();
+        expect(location.model).not.toBeNull();
+    });
+
+    for (const isArray of [false, true]) {
+        it(`keeps a parent optional when its only listed input is hidden, array=${isArray}`, () => {
+            const document = structuredClone(calcDocument);
+            if (isArray && document.properties) {
+                document.properties['location'] = { type: SchemaDataTypes.array, items: { $ref: '#loc' } };
+            }
+            const schema = new Schema({ iri: '#calc&1.0.0', document });
+            const location = schema.fields.find(field => field.name === 'location');
+            const lat = location?.fields?.find(field => field.name === 'lat');
+            if (!lat) throw new Error('Missing fixture field');
+            lat.hidden = true;
+            const form = new FieldForm(new UntypedFormGroup({}));
+            form.setData({ schema, requiredFields: ['location.lat'] });
+            form.build();
+            expect(controlOf(form, 'location').required).toBeFalse();
+            expect(controlOf(form, 'location').displayRequired).toBeFalsy();
+            expect(form.form.valid).toBeTrue();
+            form.destroy();
+        });
+    }
+
+    it('makes the form valid once the listed fields are filled', () => {
+        const form = buildCalcForm(['amount']);
+        form.form.updateValueAndValidity();
+        expect(form.form.valid).toBeFalse();
+        controlOf(form, 'amount').control.setValue(3);
+        form.form.updateValueAndValidity();
+        expect(form.form.valid).toBeTrue();
+    });
+});
+
+describe('indexed Preview requirements', () => {
+    const make = (requiredFields: string[] | null) => {
+        const document: any = { $id: '#rows', type: 'object', properties: {
+            rows: { type: 'array', items: { $ref: '#row' } }
+        }, $defs: { '#row': { $id: '#row', type: 'object', properties: {
+            amount: { type: 'number' }, note: { type: 'string' }
+        }, required: ['amount'] } } };
+        const form = new FieldForm(new UntypedFormGroup({}));
+        form.setData({ schema: new Schema({ iri: '#rows', document }), requiredFields,
+            preset: { rows: [{ note: 'first' }, { note: 'second' }, { note: 'third' }] } });
+        form.build();
+        return form;
+    };
+    it('requires only the indexed row and accepts its zero value', () => {
+        const form = make(['rows.1.amount']);
+        const amounts = [0, 1, 2].map(index => form.form.get(`rows.${index}.amount`));
+        expect(amounts.map(control => !!control?.errors?.['required'])).toEqual([false, true, false]);
+        amounts[1]?.setValue(0);
+        expect(form.form.valid).toBeTrue();
+        form.destroy();
+    });
+    it('updates row requirements after removing an earlier row without losing values', () => {
+        const form = make(['rows.1.amount']);
+        const rows = form.controls?.find(item => item.name === 'rows');
+        if (!rows?.list?.length) throw new Error('Missing rows');
+        form.form.get('rows.1.amount')?.setValue(0);
+        form.removeItem(rows, rows.list[0]);
+        expect(form.form.get('rows.0.amount')?.value).toBe(0);
+        expect(!!form.form.get('rows.0.amount')?.errors?.['required']).toBeFalse();
+        expect(!!form.form.get('rows.1.amount')?.errors?.['required']).toBeFalse();
+        expect(form.form.valid).toBeTrue();
+        const gate = { dataForm: form.form, loading: false, isRemoteWarning: false,
+            ifRelayerAccountDisabled: () => false };
+        expect(Reflect.apply(RequestDocumentFormComponent.prototype.ifDisabledBtn, gate, [{ id: 'submit' }])).toBeFalse();
+        form.form.get('rows.0.amount')?.setValue(null);
+        expect(!!form.form.get('rows.0.amount')?.errors?.['required']).toBeTrue();
+        expect(!!form.form.get('rows.1.amount')?.errors?.['required']).toBeFalse();
+        form.destroy();
+    });
+    it('drops a removed row requirement and shifts a still-missing cell with its row', () => {
+        const form = make(['rows.1.amount']);
+        const rows = form.controls?.find(item => item.name === 'rows');
+        if (!rows?.list?.length) throw new Error('Missing rows');
+        form.removeItem(rows, rows.list[0]);
+        expect(!!form.form.get('rows.0.amount')?.errors?.['required']).toBeTrue();
+        expect(!!form.form.get('rows.1.amount')?.errors?.['required']).toBeFalse();
+        form.removeItem(rows, rows.list[0]);
+        expect(form.form.valid).toBeTrue();
+        form.destroy();
+    });
+    it('retains explicit whole-column requirements and ordinary schema rules', () => {
+        for (const requirements of [['rows.amount'], null]) {
+            const form = make(requirements);
+            expect([0, 1, 2].map(index => !!form.form.get(`rows.${index}.amount`)?.errors?.['required']))
+                .toEqual([true, true, true]);
+            form.destroy();
+        }
+    });
+});
+
+describe('FieldForm links declared in a non-repeatable sub-schema', () => {
+    let form: FieldForm;
+    afterEach(() => form?.destroy());
+
+    const parentDocument = (): any => {
+        const child = documentOf([link]);
+        return {
+            $id: '#parent', type: 'object', properties: {
+                first: { $ref: child.$id }, second: { $ref: child.$id }
+            }, required: ['first', 'second'], $defs: { [child.$id]: child, ...child.$defs }
+        };
+    };
+
+    it('adds, copies, titles and removes within the selected occurrence only', () => {
+        form = buildForm(parentDocument());
+        const first = controlOf(form, 'first').model;
+        const second = controlOf(form, 'second').model;
+        if (!(first instanceof FieldForm) || !(second instanceof FieldForm)) {
+            throw new Error('Expected two independent sub-schema forms');
+        }
+        const source = controlOf(first, 'locations');
+        const target = controlOf(first, 'instances');
+        const before = target.list?.length || 0;
+        first.addItem(source);
+        expect(target.list?.length).toBe(before + 1);
+        expect(form.isManagedArray(controlOf(second, 'instances'))).toBe(true);
+        expect(form.isManagedArray(target)).toBe(true);
+        const index = (source.list?.length || 1) - 1;
+        setEntryValue(source, index, 'instanceName', 'North');
+        expect(entryValue(target, index, 'copiedName')).toBe('North');
+        expect(first.getEntryTitle(target, target.list![index])).toBe('North');
+        const otherLength = controlOf(second, 'instances').list?.length || 0;
+        first.removeItem(source, source.list![index]);
+        expect(target.list?.length).toBe(before);
+        expect(controlOf(second, 'instances').list?.length || 0).toBe(otherLength);
+    });
+
+    it('follows an explicit parent to section to instance chain', () => {
+        const child = documentOf([link]);
+        const document: any = {
+            $id: '#parent', $comment: comment([{ on: ['regions'], field: ['section', 'locations'], kind: 'array' }]),
+            type: 'object', properties: { regions: arrayOf('#reg'), section: { $ref: child.$id } }, required: ['section'],
+            $defs: { [child.$id]: child, ...child.$defs, '#reg': subSchema('#reg', 'regionName') }
+        };
+        form = buildForm(document);
+        const section = controlOf(form, 'section').model;
+        if (!(section instanceof FieldForm)) { throw new Error('Expected a sub-schema form'); }
+        const regions = controlOf(form, 'regions');
+        form.addItem(regions);
+        expect(controlOf(section, 'locations').list?.length).toBe(1);
+        expect(controlOf(section, 'instances').list?.length).toBe(1);
+        expect(form.isManagedArray(controlOf(section, 'locations'))).toBe(true);
+        expect(form.isManagedArray(controlOf(section, 'instances'))).toBe(true);
+        expect(document.$comment).toBe(comment([{ on: ['regions'], field: ['section', 'locations'], kind: 'array' }]));
+    });
+
+    it('copies through a section chain continued by a parent link on every edit', () => {
+        const child = documentOf([link]);
+        const parentLink = { on: ['section', 'instances'], field: ['reports'], kind: 'array',
+            valueMappings: [{ source: ['copiedName'], target: ['reportName'] }] };
+        const document: any = {
+            $id: '#parent', $comment: comment([parentLink]), type: 'object',
+            properties: { section: { $ref: child.$id }, reports: arrayOf('#rep') }, required: ['section'],
+            $defs: { [child.$id]: child, ...child.$defs, '#rep': subSchema('#rep', 'reportName') }
+        };
+        form = buildForm(document);
+        const section = controlOf(form, 'section').model;
+        if (!(section instanceof FieldForm)) { throw new Error('Expected a sub-schema form'); }
+        const source = controlOf(section, 'locations');
+        const middle = controlOf(section, 'instances');
+        const end = controlOf(form, 'reports');
+        section.addItem(source);
+        expect(middle.list?.length).toBe(1);
+        expect(end.list?.length).toBe(1);
+        for (const value of ['North', 'South']) {
+            setEntryValue(source, 0, 'instanceName', value);
+            expect(entryValue(middle, 0, 'copiedName')).toBe(value);
+            expect(entryValue(end, 0, 'reportName')).toBe(value);
+        }
+    });
+
+    it('copies a root chain the same way whichever order its links are declared in', () => {
+        const chain = [link, { on: ['instances'], field: ['reports'], kind: 'array',
+            valueMappings: [{ source: ['copiedName'], target: ['reportName'] }] }];
+        for (const [index, declared] of [chain, [...chain].reverse()].entries()) {
+            if (index > 0) { form.destroy(); }
+            form = buildForm(documentOf(declared, true));
+            const source = controlOf(form, 'locations');
+            form.addItem(source);
+            for (const value of ['North', 'South']) {
+                setEntryValue(source, 0, 'instanceName', value);
+                expect(entryValue(controlOf(form, 'instances'), 0, 'copiedName')).toBe(value);
+                expect(entryValue(controlOf(form, 'reports'), 0, 'reportName')).toBe(value);
+            }
+        }
+    });
+
+    it('copies later edits after an optional section opens and reopens', () => {
+        const document = parentDocument();
+        document.required = [];
+        form = buildForm(document);
+        const item = controlOf(form, 'first');
+        form.addGroup(item);
+        let section = item.model;
+        if (!(section instanceof FieldForm)) { throw new Error('Expected section'); }
+        const subscribe = spyOn<any>(form, 'syncArrayDependencyValues').and.callThrough();
+        form.addGroup(controlOf(form, 'second'));
+        let source = controlOf(section, 'locations');
+        let target = controlOf(section, 'instances');
+        section.addItem(source);
+        subscribe.calls.reset();
+        setEntryValue(source, 0, 'instanceName', 'Almaty');
+        expect(entryValue(target, 0, 'copiedName')).toBe('Almaty');
+        expect(subscribe.calls.count()).toBe(1);
+        setEntryValue(source, 0, 'instanceName', 'Updated');
+        expect(entryValue(target, 0, 'copiedName')).toBe('Updated');
+        form.removeGroup(item);
+        form.addGroup(item);
+        section = item.model;
+        if (!(section instanceof FieldForm)) { throw new Error('Expected reopened section'); }
+        source = controlOf(section, 'locations');
+        target = controlOf(section, 'instances');
+        section.addItem(source);
+        setEntryValue(source, 0, 'instanceName', 'Reopened');
+        expect(entryValue(target, 0, 'copiedName')).toBe('Reopened');
+    });
+
+    it('uses the existing source subscription when an optional target section opens', () => {
+        const document = documentOf([{ ...link, field: ['section', 'instances'] }]);
+        const child = documentOf([]);
+        child.$id = '#section';
+        document.properties.section = { $ref: child.$id };
+        document.$defs[child.$id] = child;
+        form = buildForm(document);
+        const source = controlOf(form, 'locations');
+        form.addItem(source);
+        setEntryValue(source, 0, 'instanceName', 'Before opening');
+        const sectionControl = controlOf(form, 'section');
+        form.addGroup(sectionControl);
+        const section = sectionControl.model;
+        if (!(section instanceof FieldForm)) { throw new Error('Expected section'); }
+        const target = controlOf(section, 'instances');
+        expect(entryValue(target, 0, 'copiedName')).toBe('Before opening');
+        setEntryValue(source, 0, 'instanceName', 'After opening');
+        expect(entryValue(target, 0, 'copiedName')).toBe('After opening');
+    });
+
+    it('aligns existing source records when the parent form is opened', () => {
+        form = buildForm(parentDocument(), { first: { locations: [{ instanceName: 'East' }] } });
+        const first = controlOf(form, 'first').model;
+        if (!(first instanceof FieldForm)) { throw new Error('Expected a sub-schema form'); }
+        const target = controlOf(first, 'instances');
+        expect(target.list?.length).toBe(1);
+        expect(entryValue(target, 0, 'copiedName')).toBe('East');
+    });
+});
+
+describe('FieldForm — revealed errors', () => {
+    const document: any = {
+        $id: '#pf&1.0.0',
+        $comment: JSON.stringify({ '@id': 'ctx:#pf&1.0.0', term: 'pf&1.0.0' }),
+        title: 'Prefilled',
+        description: 'Prefilled',
+        type: 'object',
+        properties: {
+            amount: { type: 'number', title: 'amount', description: 'amount' },
+            note: { type: 'string', title: 'note', description: 'note' },
+            rate: { type: 'number', title: 'rate', description: 'rate', default: 7 },
+        },
+        required: ['amount'],
+    };
+    const build = (preset?: any): FieldForm => {
+        const schema = new Schema({ iri: '#pf&1.0.0', document });
+        const form = new FieldForm(new UntypedFormGroup({}));
+        form.setData({ schema, preset });
+        form.build();
+        return form;
+    };
+    it('starts without revealed errors', () => {
+        const form = build();
+        expect(form.errorsRevealed).toBeFalse();
+        form.destroy();
+    });
+});
+
+describe('FieldForm — pattern with a format', () => {
+    it('applies the format validator on top of the pattern', () => {
+        const document: any = {
+            $id: '#pe&1.0.0',
+            $comment: JSON.stringify({ '@id': 'ctx:#pe&1.0.0', term: 'pe&1.0.0' }),
+            title: 'Pattern',
+            description: 'Pattern',
+            type: 'object',
+            properties: {
+                mail: { type: 'string', format: 'email', pattern: '^a', title: 'mail', description: 'mail' },
+            },
+        };
+        const form = new FieldForm(new UntypedFormGroup({}));
+        form.setData({ schema: new Schema({ iri: '#pe&1.0.0', document }) });
+        form.build();
+        const control = form.controls!.find((c) => c.name === 'mail')!.control!;
+        control.setValue('a-not-mail');
+        expect(control.errors?.['pattern']).toBeTruthy();
+        control.setValue('a@b.co');
+        expect(control.errors).toBeNull();
+        control.setValue('b@b.co');
+        expect(control.errors?.['pattern']).toBeTruthy();
+        form.destroy();
     });
 });

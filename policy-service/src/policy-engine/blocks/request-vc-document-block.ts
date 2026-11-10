@@ -6,7 +6,8 @@ import { AnyBlockType, IPolicyDocument, IPolicyEventState, IPolicyGetData, IPoli
 import { IPolicyEvent, PolicyInputEventType, PolicyOutputEventType } from '../interfaces/index.js';
 import { ChildrenType, ControlType } from '../interfaces/block-about.js';
 import { EventBlock } from '../helpers/decorators/event-block.js';
-import { VcDocument as VcDocumentCollection, VcHelper } from '@guardian/common';
+import { VcDocument as VcDocumentCollection } from '@guardian/common/entity/vc-document';
+import { VcHelper } from '@guardian/hedera/vc-helper';
 import { PolicyComponentsUtils } from '../policy-components-utils.js';
 import { PolicyUser } from '../policy-user.js';
 import { ExternalDocuments, ExternalEvent, ExternalEventType } from '../interfaces/external-event.js';
@@ -14,6 +15,16 @@ import deepEqual from 'deep-equal';
 import { PolicyActionsUtils } from '../policy-actions/utils.js';
 import { hydrateTablesInObject, loadFileTextById } from '../helpers/table-field.js';
 import { RecordActionStep } from '../record-action-step.js';
+import { GeospatialFileValidator } from '../helpers/geospatial-file-validator.js';
+import {
+    calculatePreviewAutoFields,
+    collectPreviewHiddenPaths,
+    collectPreviewNullPaths,
+    collectPreviewUnavailablePaths,
+    collectPreviewPaths,
+    fillPreviewPlaceholders,
+    removePreviewEmptyValues,
+} from '../helpers/preview.js';
 
 /**
  * Request VC document block
@@ -189,7 +200,7 @@ export class RequestVcDocumentBlock {
         output: [PolicyOutputEventType.RunEvent, PolicyOutputEventType.RefreshEvent]
     })
     async setData(user: PolicyUser, data: IPolicyDocument, _, actionStatus): Promise<any> {
-        if (this.state.hasOwnProperty(user.id)) {
+        if (!actionStatus?.preview && this.state.hasOwnProperty(user.id)) {
             delete this.state[user.id].restoreData;
         }
 
@@ -205,8 +216,9 @@ export class RequestVcDocumentBlock {
         const options = await ref.getOptions(user);
         try {
             const actionStatusId = actionStatus?.id ?? (ref.dryRun ? data?.recordActionId ?? null : null);
+            const preview = !!actionStatus?.preview;
             //Prepare data
-            const document = await this.prepareDocument(data);
+            const document = await this.prepareDocument(data, actionStatus);
             const draft = data.draft;
             const draftId = data.draftId;
             const editType = options.editType;
@@ -241,7 +253,7 @@ export class RequestVcDocumentBlock {
             }
 
             //Validate
-            if (!draft) {
+            if (!draft && !preview) {
                 const _vcHelper = new VcHelper();
                 const res = await _vcHelper.verifySubject(credentialSubject);
                 if (!res.ok) {
@@ -250,7 +262,15 @@ export class RequestVcDocumentBlock {
             }
 
             //Create Verifiable Credential
-            const item = await this.createVerifiableCredential(user, documentOwner, relayerAccount, credentialSubject, actionStatusId, data.evidence);
+            const item = await this.createVerifiableCredential(
+                user,
+                documentOwner,
+                relayerAccount,
+                credentialSubject,
+                actionStatusId,
+                data.evidence,
+                !draft && !preview
+            );
             PolicyUtils.setDocumentRef(item, documentRef);
 
             //Update metadata
@@ -271,7 +291,7 @@ export class RequestVcDocumentBlock {
             }
 
             //Validate
-            if (!draft) {
+            if (!draft && !preview) {
                 const validationError = await this.validateDocuments(user, state);
                 if (validationError) {
                     throw new BlockActionError(validationError.message, ref.blockType, ref.uuid, validationError.data);
@@ -384,7 +404,7 @@ export class RequestVcDocumentBlock {
         return { valid: true };
     }
 
-    private async prepareDocument(data: IPolicyDocument): Promise<any> {
+    private async prepareDocument(data: IPolicyDocument, actionStatus?: RecordActionStep): Promise<any> {
         const ref = PolicyComponentsUtils.GetBlockRef<IPolicyRequestBlock>(this);
 
         const document = data.document;
@@ -393,12 +413,48 @@ export class RequestVcDocumentBlock {
             throw new BlockActionError('Invalid document.', ref.blockType, ref.uuid);
         }
 
+        if (actionStatus?.preview) {
+            removePreviewEmptyValues(document);
+        }
+        const source = actionStatus?.preview ? structuredClone(document) : null;
+
         const disposeTables = await hydrateTablesInObject(
             document,
             async (fileId: string) => loadFileTextById(ref, fileId),
         );
 
-        PolicyUtils.setAutoCalculateFields(this._schema, document);
+        if (actionStatus?.preview) {
+            const unavailable = collectPreviewUnavailablePaths(this._schema.fields, this._schema.conditions, document);
+            const previewFields = Reflect.get(data, 'previewFields') === true;
+            if (previewFields) {
+                fillPreviewPlaceholders(this._schema.fields, document);
+            }
+            const dependencies: Record<string, string[]> = {};
+            const errors: string[] = [];
+            calculatePreviewAutoFields(this._schema.fields, document, dependencies, errors, '', previewFields);
+            actionStatus.setPreviewSource({
+                schema: this._schema.iri,
+                document: source,
+                paths: collectPreviewPaths(this._schema.fields),
+                dependencies,
+                hidden: collectPreviewHiddenPaths(this._schema.fields),
+                nulls: collectPreviewNullPaths(this._schema.fields),
+                unavailable,
+                discovery: previewFields
+            });
+            for (const path of Object.keys(dependencies)) {
+                actionStatus.addPreviewRead(this._schema.iri, path);
+            }
+            if (errors.length && !previewFields) {
+                disposeTables();
+                throw new Error(errors[0]);
+            }
+            for (const error of errors) {
+                actionStatus.addError(new Error(error), ref.blockType);
+            }
+        } else {
+            PolicyUtils.setAutoCalculateFields(this._schema, document);
+        }
 
         disposeTables();
 
@@ -447,8 +503,12 @@ export class RequestVcDocumentBlock {
         relayerAccount: string,
         credentialSubject: any,
         actionStatusId: string,
-        evidence?: { dataType: string; data: string }[]
+        evidence?: { dataType: string; data: string }[],
+        validateGeospatialFiles = true
     ): Promise<IPolicyDocument> {
+        if (validateGeospatialFiles) {
+            await GeospatialFileValidator.validateDocument(credentialSubject, issuer.userId);
+        }
         const ref = PolicyComponentsUtils.GetBlockRef<IPolicyRequestBlock>(this);
 
         const groupContext = await PolicyUtils.getGroupContext(ref, issuer);

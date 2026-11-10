@@ -1,6 +1,6 @@
 import { MathFormula } from './math-formula';
 import { FieldLink } from './field-link';
-import { getValueByPath, convertValue, createComputeEngine, getDocumentValueByPath, parseValue } from './utils';
+import { getValueByPath, convertValue, createComputeEngine, getDocumentValueByPath, parseValue, EVALUATE_OPTIONS, evaluateNumeric } from './utils';
 import { MathItemType } from './math-item.type';
 import { IContext } from './math.interface';
 import { DocumentMap } from './document-map';
@@ -42,15 +42,21 @@ export function getString(expr: any): string | null {
     if (!expr) { return null; }
     if (typeof expr.string === 'string') { return expr.string; }
     if (typeof expr.value === 'string') { return expr.value; }
-    if (typeof expr.value === 'number') { return String(expr.value); }
+    const num = getNumberLiteral(expr);
+    if (num !== null) { return String(num); }
     if (typeof expr.symbol === 'string') { return expr.symbol; }
     return null;
 }
 
-export function getNumber(expr: any): number {
-    if (!expr) { return 0; }
+function getNumberLiteral(expr: any): number | null {
+    if (!expr) { return null; }
     if (typeof expr.value === 'number') { return expr.value; }
-    return 0;
+    if (expr.isNumberLiteral && typeof expr.re === 'number') { return expr.re; }
+    return null;
+}
+
+export function getNumber(expr: any): number {
+    return getNumberLiteral(expr) ?? 0;
 }
 
 function lookupExtremum(
@@ -84,7 +90,7 @@ function lookupExtremum(
     // Returns 0 on no-match (not NaN):
     // NaN * 0 = NaN which would corrupt downstream calculations
     if (bestVal === null) { return ce.number(0); }
-    return typeof bestVal.value === 'number' ? ce.number(bestVal.value) : ce.number(0);
+    return ce.number(getNumber(bestVal));
 }
 
 function boxedScalar(value: unknown, ce: ComputeEngine): BoxedExpression {
@@ -92,17 +98,30 @@ function boxedScalar(value: unknown, ce: ComputeEngine): BoxedExpression {
     return typeof scalar === 'number' ? ce.number(scalar) : ce.string(scalar);
 }
 
+const TABLE_LOOKUP_FUNCTIONS = ['LookupTwo', 'LookupMin', 'LookupMax', 'EqualString'];
+
 function rewriteTableFormula(
     expression: any,
     tableColumns: Map<string, ITableFormulaColumn>,
-    getNumericAlias: (name: string) => string
+    getNumericAlias: (name: string) => string,
+    getLookupAlias: (name: string) => string,
+    inLookup: boolean = false
 ): { expression: any; changed: boolean } {
+    if (inLookup && typeof expression === 'string' && tableColumns.has(expression)) {
+        return { expression: getLookupAlias(expression), changed: true };
+    }
     if (!Array.isArray(expression)) {
         return { expression, changed: false };
     }
     const operator = expression[0];
-    const operands = expression.slice(1).map((operand) =>
-        rewriteTableFormula(operand, tableColumns, getNumericAlias)
+    const operands = expression.slice(1).map((operand, index) =>
+        rewriteTableFormula(
+            operand,
+            tableColumns,
+            getNumericAlias,
+            getLookupAlias,
+            inLookup || TABLE_LOOKUP_FUNCTIONS.includes(operator) || (operator === 'Lookup' && index === 2)
+        )
     );
     if (operator === 'Sum' && expression.length === 2 &&
         typeof expression[1] === 'string' && tableColumns.has(expression[1])) {
@@ -116,7 +135,7 @@ function rewriteTableFormula(
         return {
             expression: [
                 'At',
-                getNumericAlias(expression[1]),
+                inLookup ? getLookupAlias(expression[1]) : getNumericAlias(expression[1]),
                 ...operands.slice(1).map((operand) => operand.expression)
             ],
             changed: true
@@ -147,7 +166,7 @@ export function registerCEFunctions(
     tableColumns: Map<string, ITableFormulaColumn> = new Map()
 ): void {
     const directTableName = (expression: BoxedExpression): string | null => {
-        const name = expression?.symbol;
+        const name = (expression as any)?.symbol;
         return typeof name === 'string' && tableColumns.has(name) ? name : null;
     };
     const tableList = (name: string): BoxedExpression => {
@@ -171,7 +190,7 @@ export function registerCEFunctions(
                 const k = getString(kList[n]);
                 if (k === idVal) {
                     const v = vList[n];
-                    return ce.number(typeof v?.value === 'number' ? v.value : 0);
+                    return ce.number(getNumber(v));
                 }
             }
 
@@ -188,9 +207,9 @@ export function registerCEFunctions(
             evaluate: (ops: ReadonlyArray<BoxedExpression>) => {
                 const valueName = directTableName(ops[0]);
                 const keyName = directTableName(ops[1]);
-                const values = valueName ? tableList(valueName) : ops[0].evaluate();
-                const keys = keyName ? tableList(keyName) : ops[1].evaluate();
-                const id = ops[2].evaluate();
+                const values = valueName ? tableList(valueName) : ops[0].evaluate(EVALUATE_OPTIONS);
+                const keys = keyName ? tableList(keyName) : ops[1].evaluate(EVALUATE_OPTIONS);
+                const id = ops[2].evaluate(EVALUATE_OPTIONS);
                 const valueList = getList(values);
                 const keyList = getList(keys);
                 if (valueList.length !== keyList.length) { return ce.number(0); }
@@ -201,7 +220,7 @@ export function registerCEFunctions(
                             return boxedScalar(tableColumns.get(valueName)?.values[n], ce);
                         }
                         const value = valueList[n];
-                        return ce.number(typeof value?.value === 'number' ? value.value : 0);
+                        return ce.number(getNumber(value));
                     }
                 }
                 return ce.number(0);
@@ -233,7 +252,7 @@ export function registerCEFunctions(
                 if (getString(k1List[n]) !== id1Val) { continue; }
                 if (getString(k2List[n]) !== id2Val) { continue; }
                 const v = vList[n];
-                return ce.number(typeof v?.value === 'number' ? v.value : 0);
+                return ce.number(getNumber(v));
             }
 
             // Returns 0 on no-match (not NaN):
@@ -275,6 +294,7 @@ export class MathContext {
     private readonly tableColumns: Map<string, ITableFormulaColumn> = new Map();
     private readonly tableColumnSources: Map<string, string> = new Map();
     private readonly numericTableAliases: Map<string, string> = new Map();
+    private readonly lookupTableAliases: Map<string, string> = new Map();
     private readonly tableWarnings: Map<string, string> = new Map();
 
     constructor(list: (MathFormula | FieldLink)[]) {
@@ -404,6 +424,7 @@ export class MathContext {
         this.scope = {};
         this.getField = this.__get.bind(doc);
         this.numericTableAliases.clear();
+        this.lookupTableAliases.clear();
         this.tableWarnings.clear();
         try {
             const ce = createComputeEngine();
@@ -426,14 +447,24 @@ export class MathContext {
                 }
                 return alias;
             };
+            const getLookupAlias = (name: string): string => {
+                const cached = this.lookupTableAliases.get(name);
+                if (cached) { return cached; }
+                const alias = `__table_formula_lookup_${this.lookupTableAliases.size}`;
+                const values = this.tableColumns.get(name)?.values || [];
+                this.lookupTableAliases.set(name, alias);
+                ce.assign(alias, ce.box(['List', ...values.map((value) => boxedScalar(value, ce))]));
+                return alias;
+            };
             const parseFormula = (latex: string): BoxedExpression => {
-                const parsed = ce.parse(latex);
+                //Table references are rewritten on the raw form and canonicalized afterwards
                 const rewritten = rewriteTableFormula(
-                    parsed.json,
+                    ce.parse(latex, { form: 'raw' }).json,
                     this.tableColumns,
-                    getNumericAlias
+                    getNumericAlias,
+                    getLookupAlias
                 );
-                return rewritten.changed ? ce.box(rewritten.expression as any) : parsed;
+                return rewritten.changed ? ce.box(rewritten.expression as any) : ce.parse(latex);
             };
 
             const systemFunctions = MathFormula.createSystemFunctions();
@@ -482,7 +513,7 @@ export class MathContext {
                 if (item.type === MathItemType.VARIABLE) {
                     const latex = item.getLatex();
                     if (latex) {
-                        const result = parseFormula(latex).evaluate();
+                        const result = evaluateNumeric(parseFormula(latex));
                         item.value = parseValue(result);
                         this.variables[item.functionName] = item.value;
                         this.scope[item.functionName] = item.value;
@@ -545,35 +576,14 @@ export class MathContext {
                     return value;
                 }
             }
-            const __parseValue = (value: any): any => {
-                if (value && value.type) {
-                    if (value.type.kind === 'list') {
-                        const iter = value.each();
-                        const values = [];
-                        if (iter) {
-                            let next = iter.next();
-                            while (next && !next.done) {
-                                const itemValue = __parseValue(next.value);
-                                values.push(itemValue);
-                                next = iter.next();
-                            }
-                            return values;
-                        } else {
-                            return [];
-                        }
-                    }
-                    return value.value;
-                }
-                return value;
-            }
             for (let i = 0; i < arg.length; i++) {
                 const pName = `evaluateFunctionParameter${i}`;
                 context.ce.assign(pName, __getValue(arg[i]));
                 list[i] = `\\operatorname{${pName}}`;
             }
             const latex = `\\operatorname{${context.name}}(${list.join(',')})`;
-            const result = context.ce.parse(latex).evaluate();
-            return __parseValue(result);
+            const result = evaluateNumeric(context.ce.parse(latex));
+            return parseValue(result);
         } catch (error) {
             console.log(error);
             return NaN;

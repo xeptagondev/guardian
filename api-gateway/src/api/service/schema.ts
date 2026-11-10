@@ -1,5 +1,8 @@
 import { DocumentGenerator, ISchema, Permissions, Schema, SchemaCategory, SchemaEntity, SchemaHelper, SchemaStatus, StatusType, TaskAction } from '@guardian/interfaces';
-import { IAuthUser, PinoLogger, RunFunctionAsync, SchemaImportExport } from '@guardian/common';
+import { PinoLogger } from '@guardian/common/helpers/pino-logger';
+import { RunFunctionAsync } from '@guardian/common/helpers/run-function-async';
+import { SchemaImportExport } from '@guardian/common/import-export/schema';
+import { IAuthUser } from '@guardian/common/interfaces/auth.interface';
 import { ApiAcceptedResponse, ApiBody, ApiConsumes, ApiCreatedResponse, ApiExcludeEndpoint, ApiExtraModels, ApiForbiddenResponse, ApiHeader, ApiInternalServerErrorResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiQuery, ApiTags, ApiUnprocessableEntityResponse } from '@nestjs/swagger';
 import { Body, Controller, Delete, Get, HttpCode, HttpException, HttpStatus, Param, Post, Put, Query, Req, Response, Version } from '@nestjs/common';
 import { Auth, AuthUser } from '#auth';
@@ -2073,7 +2076,7 @@ export class SchemaApi {
             const guardians = new Guardians();
             const owner = new EntityOwner(user);
 
-            return await guardians.getSchemasDublicates(body.schemaNames, owner, body.policyId);
+            return await guardians.getSchemasDublicates(body.schemaNames, owner, body.policyId, body.schemas);
         } catch (error) {
             await InternalException(error, this.logger, user.id);
         }

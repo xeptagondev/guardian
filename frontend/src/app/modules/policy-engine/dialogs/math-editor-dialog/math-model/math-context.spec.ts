@@ -114,7 +114,7 @@ describe('Lookup (CE integration)', () => {
             numList(ce, [10, 20, 30]),
             strList(ce, ['a', 'b', 'c']),
             ce.string('b'));
-        expect(result.value).toBe(20);
+        expect(result.re).toBe(20);
     });
 
     it('returns 0 when key is not found', () => {
@@ -122,7 +122,7 @@ describe('Lookup (CE integration)', () => {
             numList(ce, [10, 20]),
             strList(ce, ['a', 'b']),
             ce.string('z'));
-        expect(result.value).toBe(0);
+        expect(result.re).toBe(0);
     });
 
     it('returns 0 when matched value is not numeric', () => {
@@ -130,7 +130,7 @@ describe('Lookup (CE integration)', () => {
             ce.box(['List', ce.string('not-a-number')]),
             strList(ce, ['k']),
             ce.string('k'));
-        expect(result.value).toBe(0);
+        expect(result.re).toBe(0);
     });
 
     it('matches via numeric coercion: key 5 matches id "5"', () => {
@@ -138,7 +138,7 @@ describe('Lookup (CE integration)', () => {
             numList(ce, [99]),
             ce.box(['List', ce.number(5)]),
             ce.string('5'));
-        expect(result.value).toBe(99);
+        expect(result.re).toBe(99);
     });
 });
 
@@ -152,7 +152,7 @@ describe('LookupTwo (CE integration)', () => {
             numList(ce, [10, 20, 30]),
             strList(ce, ['a', 'a', 'b']), ce.string('a'),
             strList(ce, ['x', 'y', 'y']), ce.string('y'));
-        expect(result.value).toBe(20);
+        expect(result.re).toBe(20);
     });
 
     it('returns 0 when first key matches but second does not', () => {
@@ -160,7 +160,7 @@ describe('LookupTwo (CE integration)', () => {
             numList(ce, [10, 20]),
             strList(ce, ['a', 'a']), ce.string('a'),
             strList(ce, ['x', 'x']), ce.string('y'));
-        expect(result.value).toBe(0);
+        expect(result.re).toBe(0);
     });
 
     it('returns 0 when value and key array lengths differ', () => {
@@ -168,7 +168,7 @@ describe('LookupTwo (CE integration)', () => {
             numList(ce, [10, 20]),
             strList(ce, ['a']),       ce.string('a'),
             strList(ce, ['x', 'y']), ce.string('x'));
-        expect(result.value).toBe(0);
+        expect(result.re).toBe(0);
     });
 });
 
@@ -184,7 +184,7 @@ describe('LookupMin (CE integration)', () => {
             strList(ce, ['a', 'a', 'a']),
             ce.string('a'),
             numList(ce, [3, 1, 2]));
-        expect(result.value).toBe(20);
+        expect(result.re).toBe(20);
     });
 
     it('returns 0 when no key matches', () => {
@@ -193,7 +193,7 @@ describe('LookupMin (CE integration)', () => {
             strList(ce, ['a']),
             ce.string('z'),
             numList(ce, [1]));
-        expect(result.value).toBe(0);
+        expect(result.re).toBe(0);
     });
 });
 
@@ -209,7 +209,7 @@ describe('LookupMax (CE integration)', () => {
             strList(ce, ['a', 'a', 'a']),
             ce.string('a'),
             numList(ce, [3, 1, 2]));
-        expect(result.value).toBe(10);
+        expect(result.re).toBe(10);
     });
 
     it('returns 0 when no key matches', () => {
@@ -218,7 +218,7 @@ describe('LookupMax (CE integration)', () => {
             strList(ce, ['a']),
             ce.string('z'),
             numList(ce, [1]));
-        expect(result.value).toBe(0);
+        expect(result.re).toBe(0);
     });
 });
 
@@ -228,20 +228,20 @@ describe('EqualString (CE integration)', () => {
     beforeEach(() => { ce = makeTestCe(); });
 
     it('returns 1 for equal strings', () => {
-        expect(call(ce, 'EqualString', ce.string('hello'), ce.string('hello')).value).toBe(1);
+        expect(call(ce, 'EqualString', ce.string('hello'), ce.string('hello')).re).toBe(1);
     });
 
     it('returns 0 for unequal strings', () => {
-        expect(call(ce, 'EqualString', ce.string('foo'), ce.string('bar')).value).toBe(0);
+        expect(call(ce, 'EqualString', ce.string('foo'), ce.string('bar')).re).toBe(0);
     });
 
     it('coerces numeric 5 to "5" and matches string "5"', () => {
-        expect(call(ce, 'EqualString', ce.number(5), ce.string('5')).value).toBe(1);
+        expect(call(ce, 'EqualString', ce.number(5), ce.string('5')).re).toBe(1);
     });
 
     it('returns 0 when one side has no string representation', () => {
         // An empty List has no string/value/symbol → getString returns null
-        expect(call(ce, 'EqualString', ce.box(['List']), ce.string('a')).value).toBe(0);
+        expect(call(ce, 'EqualString', ce.box(['List']), ce.string('a')).re).toBe(0);
     });
 });
 
@@ -263,6 +263,23 @@ describe('MathContext Table columns', () => {
         const result = new DocumentMap();
         result.addDocument({ schema: 'schema', document });
         return result;
+    }
+
+    function cohortTable(): any {
+        return {
+            type: 'table',
+            columnKeys: ['instanceId', 'year', 'delta'],
+            columnNames: ['Cohort', 'Year', 'Delta'],
+            rows: [
+                { instanceId: 'C1', year: '2020', delta: '100' },
+                { instanceId: 'C1', year: '2021', delta: '150' },
+                { instanceId: 'C2', year: '2021', delta: '80' }
+            ]
+        };
+    }
+
+    function cohortLinks(): FieldLink[] {
+        return [link('inst', 'area.instanceId'), link('year', 'area.year'), link('delta', 'area.delta')];
     }
 
     function table(): any {
@@ -423,5 +440,81 @@ describe('MathContext Table columns', () => {
         expect(() => context.setDocument(documents({ siteTable: value }))).toThrowError(
             /Table column "Area" has 10001 rows; General formulas are limited to 10000/
         );
+    });
+
+    it('finds the previous-year value with LookupTwo over Table columns', () => {
+        const context = new MathContext([
+            ...cohortLinks(),
+            formula(
+                'prevYear',
+                '\\mathrm{Map}\\left(1..\\mathrm{Length}\\left(\\mathrm{year}\\right),\\ \\mathrm{i} \\mapsto '
+                + '\\mathrm{At}\\left(\\mathrm{year},\\ \\mathrm{i}\\right) - 1\\right)'
+            ),
+            formula(
+                'deltaPrev',
+                '\\mathrm{Map}\\left(1..\\mathrm{Length}\\left(\\mathrm{year}\\right),\\ \\mathrm{i} \\mapsto '
+                + '\\mathrm{LookupTwo}\\left(\\mathrm{delta},\\ \\mathrm{inst},\\ \\mathrm{At}\\left(\\mathrm{inst},\\ \\mathrm{i}\\right),'
+                + '\\ \\mathrm{year},\\ \\mathrm{At}\\left(\\mathrm{prevYear},\\ \\mathrm{i}\\right)\\right)\\right)'
+            )
+        ]);
+
+        const result = context.setDocument(documents({ area: cohortTable() }));
+
+        expect(result.scope.prevYear).toEqual([2019, 2020, 2020]);
+        expect(result.scope.deltaPrev).toEqual([0, 100, 0]);
+        expect(context.getWarnings()).toEqual([]);
+    });
+
+    it('keeps a text key read with At inside Lookup', () => {
+        const context = new MathContext([
+            ...cohortLinks(),
+            formula(
+                'firstDelta',
+                '\\mathrm{Lookup}\\left(\\mathrm{delta},\\ \\mathrm{inst},\\ \\mathrm{At}\\left(\\mathrm{inst},\\ 3\\right)\\right)'
+            )
+        ]);
+
+        const result = context.setDocument(documents({ area: cohortTable() }));
+
+        expect(result.scope.firstDelta).toBe(80);
+        expect(context.getWarnings()).toEqual([]);
+    });
+
+    it('reads Table columns as numbers and text in LookupMin, LookupMax and EqualString', () => {
+        const context = new MathContext([
+            ...cohortLinks(),
+            formula(
+                'firstC1',
+                '\\mathrm{LookupMin}\\left(\\mathrm{delta},\\ \\mathrm{inst},\\ \\mathrm{At}\\left(\\mathrm{inst},\\ 1\\right),\\ \\mathrm{year}\\right)'
+            ),
+            formula(
+                'lastC1',
+                '\\mathrm{LookupMax}\\left(\\mathrm{delta},\\ \\mathrm{inst},\\ \\mathrm{At}\\left(\\mathrm{inst},\\ 1\\right),\\ \\mathrm{year}\\right)'
+            ),
+            formula(
+                'isC2',
+                '\\mathrm{EqualString}\\left(\\mathrm{At}\\left(\\mathrm{inst},\\ 3\\right),\\ \\text{C2}\\right)'
+            )
+        ]);
+
+        const result = context.setDocument(documents({ area: cohortTable() }));
+
+        expect(result.scope.firstC1).toBe(100);
+        expect(result.scope.lastC1).toBe(150);
+        expect(result.scope.isC2).toBe(1);
+    });
+
+    it('still turns text into 0 with a warning when At is used in arithmetic', () => {
+        const context = new MathContext([
+            ...cohortLinks(),
+            formula('wrong', '\\mathrm{At}\\left(\\mathrm{inst},\\ 1\\right) + 1')
+        ]);
+
+        const result = context.setDocument(documents({ area: cohortTable() }));
+
+        expect(result.scope.wrong).toBe(1);
+        expect(context.getWarnings()).toEqual([
+            'Table column "Cohort" replaced 3 nonnumeric cells with 0.'
+        ]);
     });
 });

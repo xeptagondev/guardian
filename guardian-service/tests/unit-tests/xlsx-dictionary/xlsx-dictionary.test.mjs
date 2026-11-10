@@ -4,10 +4,14 @@ import { Dictionary, FieldTypes } from '../../../dist/xlsx/models/dictionary.js'
 describe('Dictionary enum', () => {
     it('exposes the documented header labels', () => {
         assert.equal(Dictionary.REQUIRED_FIELD, 'Required Field');
-        assert.equal(Dictionary.FIELD_TYPE, 'Field Type');
+        assert.equal(Dictionary.FIELD_TYPE, 'Type');
+        assert.equal(Dictionary.UPDATABLE, 'Updatable Field');
+        assert.equal(Dictionary.PRIVATE, 'Private Field');
         assert.equal(Dictionary.QUESTION, 'Description');
         assert.equal(Dictionary.ANSWER, 'Test Value');
         assert.equal(Dictionary.SCHEMA_NAME, 'Schema');
+        assert.equal(Dictionary.SCHEMA_VERSION, 'Schema Version');
+        assert.equal(Dictionary.IWA_VERSION, 'IWA Version');
         assert.equal(Dictionary.SCHEMA_TOOL, 'Tool');
         assert.equal(Dictionary.AUTO_CALCULATE, 'Auto-Calculate');
         assert.equal(Dictionary.SUB_SCHEMA, 'Sub-Schema');
